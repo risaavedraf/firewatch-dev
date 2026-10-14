@@ -1,0 +1,117 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>FireWatch · Centro de Priorización Preventiva</title>
+  <style>
+    :root { --ink:#15251f; --muted:#607067; --line:#dbe4de; --paper:#f7faf7; --card:#fff; --green:#176b50; --mint:#dff3e8; --amber:#f3a531; --red:#c94d3d; --blue:#2f7592; --shadow:0 12px 35px rgba(22,54,40,.09); }
+    * { box-sizing:border-box; } body { margin:0; background:var(--paper); color:var(--ink); font:15px/1.5 Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+    button, select { font:inherit; } button { cursor:pointer; } .shell { max-width:1280px; margin:auto; padding:24px; }
+    header { display:flex; align-items:center; justify-content:space-between; gap:18px; padding-bottom:23px; } .brand { display:flex; align-items:center; gap:11px; font-weight:800; letter-spacing:-.03em; font-size:20px; } .mark { width:36px; height:36px; display:grid; place-items:center; border-radius:11px; background:var(--green); color:white; font-size:18px; } .tag { color:var(--green); background:var(--mint); border-radius:99px; padding:6px 11px; font-size:12px; font-weight:750; white-space:nowrap; }
+    .demo { display:flex; gap:12px; align-items:flex-start; padding:13px 16px; border:1px solid #e6bd6b; background:#fff6df; border-radius:12px; color:#735218; margin-bottom:20px; } .demo strong { color:#583c0b; } .demo-icon { font-size:20px; }
+    .hero { border-radius:22px; padding:clamp(26px,5vw,56px); background:linear-gradient(120deg,#103d31,#1f7658 60%,#338261); color:white; box-shadow:var(--shadow); position:relative; overflow:hidden; } .hero:after { content:""; position:absolute; width:400px; height:400px; border:60px solid rgba(255,255,255,.08); border-radius:50%; right:-180px; top:-220px; } .eyebrow { text-transform:uppercase; letter-spacing:.12em; font-weight:800; font-size:11px; opacity:.8; } h1 { max-width:750px; margin:11px 0 14px; font-size:clamp(31px,5vw,54px); line-height:1.05; letter-spacing:-.05em; } .hero p { max-width:690px; margin:0; color:#e1f3e9; font-size:17px; } .hero-note { position:relative; z-index:1; display:inline-flex; margin-top:24px; padding:9px 12px; background:rgba(0,0,0,.18); border:1px solid rgba(255,255,255,.2); border-radius:8px; font-size:13px; }
+    .section-head { display:flex; justify-content:space-between; align-items:end; gap:16px; margin:35px 0 14px; } h2 { font-size:22px; letter-spacing:-.035em; margin:0; } .section-head p { color:var(--muted); margin:3px 0 0; }
+    .kpis { display:grid; grid-template-columns:repeat(4,1fr); gap:14px; } .kpi,.panel { background:var(--card); border:1px solid var(--line); border-radius:15px; box-shadow:0 3px 12px rgba(20,45,34,.03); } .kpi { padding:18px; } .kpi span { color:var(--muted); font-size:13px; font-weight:650; } .kpi b { display:block; margin-top:7px; font-size:30px; letter-spacing:-.05em; } .kpi small { color:var(--muted); } .alert-num { color:var(--red); }
+    .grid-main { display:grid; grid-template-columns:1.08fr .92fr; gap:18px; margin-top:18px; } .panel { padding:21px; } .map-panel { min-height:430px; } .map-legend { display:flex; flex-wrap:wrap; gap:12px; margin:0 0 12px; color:var(--muted); font-size:12px; } .dot { display:inline-block; width:10px; height:10px; margin-right:5px; border-radius:50%; } .map { width:100%; height:330px; display:block; background:#edf5ee; border-radius:12px; } .sector { cursor:pointer; stroke:#fff; stroke-width:3; transition:filter .2s, transform .2s; transform-origin:center; } .sector:hover,.sector.selected { filter:brightness(.88) drop-shadow(0 5px 5px rgba(0,0,0,.18)); stroke:#133d31; stroke-width:4; } .map text { font-size:12px; font-weight:800; fill:#143d31; pointer-events:none; } .map .minor { font-size:10px; font-weight:600; fill:#537063; }
+    .detail-top { display:flex; justify-content:space-between; gap:15px; } .risk { padding:5px 10px; border-radius:99px; font-size:12px; font-weight:800; white-space:nowrap; } .high { background:#fde5e1; color:#9c2e24; } .medium { background:#fff1d8; color:#916010; } .low { background:#ddf3e6; color:#176b50; } .detail-name { font-size:26px; margin:3px 0 14px; letter-spacing:-.04em; } dl { display:grid; grid-template-columns:1fr 1fr; gap:13px; margin:0; } dt { font-size:11px; color:var(--muted); font-weight:800; text-transform:uppercase; letter-spacing:.06em; } dd { margin:2px 0 0; font-weight:650; } .factor-list { padding-left:19px; margin:9px 0; } .why { background:#edf7f0; border-left:4px solid var(--green); padding:12px; border-radius:0 9px 9px 0; margin-top:16px; font-size:13px; } .uncertainty { margin-top:14px; color:#755b20; background:#fff7e7; padding:10px; border-radius:8px; font-size:12px; }
+    .actions { margin-top:18px; overflow:hidden; } .toolbar { display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:12px; margin-bottom:15px; } .filters { display:flex; flex-wrap:wrap; gap:8px; } select { border:1px solid var(--line); background:white; color:var(--ink); padding:8px 10px; border-radius:8px; } .primary { border:0; background:var(--green); color:#fff; padding:9px 13px; border-radius:8px; font-weight:750; } .primary:hover { background:#10583f; } .table-wrap { overflow-x:auto; } table { border-collapse:collapse; width:100%; min-width:830px; } th { color:var(--muted); font-size:11px; text-transform:uppercase; letter-spacing:.06em; text-align:left; padding:0 10px 9px; } td { padding:12px 10px; border-top:1px solid var(--line); vertical-align:middle; } .action-name { font-weight:750; } .pill { display:inline-block; padding:4px 8px; font-size:11px; font-weight:800; border-radius:99px; } .pending { color:#9c6210; background:#fff0d2; } .progress { color:#246582; background:#e2f2f8; } .done { color:#176b50; background:#ddf3e6; } .evidence { color:var(--blue); font-weight:700; font-size:12px; }
+    .loop { display:grid; grid-template-columns:repeat(5,1fr); gap:0; margin-top:18px; } .loop-step { position:relative; background:white; border:1px solid var(--line); padding:16px; min-height:130px; } .loop-step:first-child { border-radius:12px 0 0 12px; } .loop-step:last-child { border-radius:0 12px 12px 0; } .loop-num { color:var(--green); font-weight:900; } .loop-step b { display:block; margin:8px 0 3px; } .loop-step span { color:var(--muted); font-size:12px; }
+    .residual { display:grid; grid-template-columns:1fr 1fr; gap:18px; margin-top:18px; } .bars { padding-top:14px; } .bar-row { display:grid; grid-template-columns:70px 1fr 46px; align-items:center; gap:10px; margin:13px 0; font-size:13px; } .track { height:12px; border-radius:20px; background:#e7ece8; overflow:hidden; } .fill { height:100%; border-radius:20px; transition:width .5s ease; } .before { background:var(--red); } .after { background:var(--green); } .governance ul { padding-left:20px; margin:11px 0 0; } .governance li { margin:7px 0; } .fine { color:var(--muted); font-size:12px; }
+    footer { color:var(--muted); font-size:12px; padding:25px 2px 5px; } #toast { position:fixed; bottom:24px; left:50%; transform:translate(-50%,130px); background:#143d31; color:white; padding:12px 16px; border-radius:9px; box-shadow:var(--shadow); transition:transform .25s; z-index:3; } #toast.show { transform:translate(-50%,0); }
+    @media (max-width:850px) { .kpis { grid-template-columns:repeat(2,1fr); } .grid-main,.residual { grid-template-columns:1fr; } .loop { grid-template-columns:1fr; } .loop-step,.loop-step:first-child,.loop-step:last-child { border-radius:0; } .loop-step:first-child { border-radius:12px 12px 0 0; } .loop-step:last-child { border-radius:0 0 12px 12px; } }
+    @media (max-width:520px) { .shell { padding:15px; } header { align-items:flex-start; } .tag { white-space:normal; text-align:right; } .kpi { padding:14px; } .map-panel,.panel { padding:16px; } dl { grid-template-columns:1fr; } }
+  </style>
+</head>
+<body>
+  <main class="shell">
+    <header>
+      <div class="brand"><span class="mark" aria-hidden="true">♧</span> FireWatch <span style="font-weight:500;color:var(--muted)">· Prevención</span></div>
+      <span class="tag">Prototipo conceptual · valores ilustrativos</span>
+    </header>
+
+    <aside class="demo" aria-label="Aviso de demostración"><span class="demo-icon" aria-hidden="true">ⓘ</span><div><strong>Demostración visual, no sistema operativo.</strong> Los sectores, riesgos, personas, plazos y evidencias son ilustrativos. FireWatch no es una alerta oficial de emergencia ni predice el lugar o momento exacto de un incendio.</div></aside>
+
+    <section class="hero" aria-labelledby="hero-title">
+      <div class="eyebrow">Centro de Priorización Preventiva para la Interfaz Urbano-Forestal</div>
+      <h1 id="hero-title">De mapas genéricos a decisiones preventivas que se pueden ejecutar y comprobar.</h1>
+      <p>FireWatch integra señales oficiales de riesgo, tiempo y territorio con exposición y preparación local para priorizar acciones, asignar responsables y actualizar el riesgo residual con evidencia de terreno.</p>
+      <div class="hero-note">Complementa, no reemplaza, a CONAF, SENAPRED, Bomberos ni a la autoridad municipal.</div>
+    </section>
+
+    <section aria-labelledby="overview-title">
+      <div class="section-head"><div><h2 id="overview-title">Panorama preventivo</h2><p>Lectura de trabajo para orientar recursos; no una clasificación oficial.</p></div></div>
+      <div class="kpis">
+        <article class="kpi"><span>Sectores de prioridad alta</span><b class="alert-num">3</b><small>de 12 sectores ilustrativos</small></article>
+        <article class="kpi"><span>Acciones pendientes</span><b>8</b><small>con responsable asignado</small></article>
+        <article class="kpi"><span>Acciones completadas</span><b>14</b><small>con evidencia registrada</small></article>
+        <article class="kpi"><span>Frescura de datos</span><b>6 h</b><small>referencia ilustrativa</small></article>
+      </div>
+    </section>
+
+    <section class="grid-main" aria-label="Mapa y detalle de sector">
+      <article class="panel map-panel">
+        <div class="section-head" style="margin-top:0"><div><h2>Territorio priorizado</h2><p>Seleccione un sector para explorar una lectura ilustrativa.</p></div></div>
+        <div class="map-legend"><span><i class="dot" style="background:var(--red)"></i>Prioridad alta</span><span><i class="dot" style="background:var(--amber)"></i>Media</span><span><i class="dot" style="background:#58a67d"></i>Baja</span><span>— ruta / interfaz urbana</span></div>
+        <svg class="map" viewBox="0 0 640 330" role="img" aria-label="Mapa ilustrativo de sectores de interfaz urbano-forestal con prioridades">
+          <path d="M0 55 C100 8 160 80 255 35 S410 68 510 25 S600 50 640 20 V0H0Z" fill="#c8dfc9"/>
+          <path d="M0 300 C110 270 145 325 270 280 S450 315 640 240 V330H0Z" fill="#c8dfc9"/>
+          <path d="M-10 220 C120 170 220 255 335 190 S520 175 655 105" fill="none" stroke="#9eb4aa" stroke-width="11" opacity=".8"/>
+          <path d="M-10 220 C120 170 220 255 335 190 S520 175 655 105" fill="none" stroke="#fff" stroke-width="5" stroke-dasharray="14 8"/>
+          <path d="M75 48 L225 35 L279 118 L196 171 L68 133Z" class="sector" data-sector="quebrada" fill="#cf5748" tabindex="0" role="button" aria-label="Seleccionar Quebrada Norte, prioridad alta"/>
+          <path d="M225 35 L389 51 L416 137 L279 118Z" class="sector" data-sector="ladera" fill="#f2ad3d" tabindex="0" role="button" aria-label="Seleccionar Ladera Centro, prioridad media"/>
+          <path d="M389 51 L555 48 L580 145 L416 137Z" class="sector" data-sector="alto" fill="#62aa80" tabindex="0" role="button" aria-label="Seleccionar Alto Verde, prioridad baja"/>
+          <path d="M68 133 L196 171 L229 273 L59 278 L23 203Z" class="sector" data-sector="poniente" fill="#f2ad3d" tabindex="0" role="button" aria-label="Seleccionar Poniente, prioridad media"/>
+          <path d="M196 171 L416 137 L472 254 L229 273Z" class="sector" data-sector="central" fill="#ce5949" tabindex="0" role="button" aria-label="Seleccionar Villa Central, prioridad alta"/>
+          <path d="M416 137 L580 145 L617 265 L472 254Z" class="sector" data-sector="oriente" fill="#f2ad3d" tabindex="0" role="button" aria-label="Seleccionar Oriente, prioridad media"/>
+          <text x="109" y="107">Quebrada Norte</text><text x="292" y="91">Ladera Centro</text><text x="466" y="98">Alto Verde</text><text x="100" y="217">Poniente</text><text x="285" y="213">Villa Central</text><text x="492" y="207">Oriente</text>
+          <text class="minor" x="34" y="315">Mapa esquemático · no georreferenciado</text>
+        </svg>
+      </article>
+
+      <aside class="panel" aria-live="polite">
+        <div class="detail-top"><div><div class="eyebrow" style="color:var(--green)">Sector seleccionado</div><h2 class="detail-name" id="sectorName">Quebrada Norte</h2></div><span id="riskPill" class="risk high">Prioridad alta</span></div>
+        <dl><div><dt>Riesgo orientativo</dt><dd id="riskValue">Alto</dd></div><div><dt>Exposición</dt><dd id="exposure">Viviendas cercanas y ruta local</dd></div><div><dt>Estado de preparación</dt><dd id="readiness">Brechas de despeje</dd></div><div><dt>Datos / incertidumbre</dt><dd id="dataStatus">Cobertura parcial de terreno</dd></div></dl>
+        <h3 style="font-size:14px;margin:18px 0 4px">Factores principales</h3><ul class="factor-list" id="factors"><li>Vegetación seca continua</li><li>Acumulación de residuos</li><li>Viento proyectado como señal contextual</li></ul>
+        <div class="why"><strong>¿Por qué se prioriza?</strong><br><span id="why">Combina amenaza orientativa elevada con exposición residencial y una acción factible antes del próximo ciclo de revisión.</span></div>
+        <div class="uncertainty">⚠ La calidad y cobertura de insumos condicionan esta lectura. Requiere validación por equipos competentes en terreno.</div>
+      </aside>
+    </section>
+
+    <section class="panel actions" aria-labelledby="actions-title">
+      <div class="toolbar"><div><h2 id="actions-title">Backlog de prevención</h2><p class="fine">Asignación y evidencia ilustrativas; no son órdenes operativas.</p></div><div class="filters"><label class="fine" for="statusFilter">Estado</label><select id="statusFilter"><option value="all">Todos</option><option value="Pendiente">Pendiente</option><option value="En curso">En curso</option><option value="Completada">Completada</option></select><button class="primary" id="simulate">Simular completitud</button></div></div>
+      <div class="table-wrap"><table><thead><tr><th>Acción priorizada</th><th>Sector</th><th>Responsable</th><th>Plazo</th><th>Prioridad</th><th>Estado</th><th>Evidencia</th></tr></thead><tbody id="actionRows">
+        <tr data-status="Pendiente"><td class="action-name">Retiro de vegetación y residuos</td><td>Quebrada Norte</td><td>Cuadrilla municipal</td><td>18 jun.</td><td><span class="pill high">Alta</span></td><td><span class="pill pending">Pendiente</span></td><td><span class="evidence">Planificar registro</span></td></tr>
+        <tr data-status="En curso"><td class="action-name">Inspección de ruta de acceso</td><td>Villa Central</td><td>Operaciones territorio</td><td>16 jun.</td><td><span class="pill high">Alta</span></td><td><span class="pill progress">En curso</span></td><td><span class="evidence">2 fotos de terreno</span></td></tr>
+        <tr data-status="Pendiente"><td class="action-name">Verificación de punto de agua</td><td>Oriente</td><td>Servicios locales</td><td>20 jun.</td><td><span class="pill medium">Media</span></td><td><span class="pill pending">Pendiente</span></td><td><span class="evidence">Sin evidencia</span></td></tr>
+        <tr data-status="Completada"><td class="action-name">Coordinación comunitaria</td><td>Ladera Centro</td><td>Enlace comunitario</td><td>12 jun.</td><td><span class="pill medium">Media</span></td><td><span class="pill done">Completada</span></td><td><span class="evidence">Acta y asistencia</span></td></tr>
+      </tbody></table></div>
+    </section>
+
+    <section aria-labelledby="loop-title"><div class="section-head"><div><h2 id="loop-title">Ciclo preventivo verificable</h2><p>La prioridad se revisa cuando cambian los insumos o se confirma una intervención.</p></div></div><div class="loop"><div class="loop-step"><span class="loop-num">01</span><b>Datos</b><span>Riesgo, tiempo, territorio y reportes locales.</span></div><div class="loop-step"><span class="loop-num">02</span><b>Modelo</b><span>Lectura orientativa con incertidumbre explícita.</span></div><div class="loop-step"><span class="loop-num">03</span><b>Prioridad</b><span>Acción, responsable, plazo y estado.</span></div><div class="loop-step"><span class="loop-num">04</span><b>Evidencia de campo</b><span>Fotos, actas, inspecciones o verificación.</span></div><div class="loop-step"><span class="loop-num">05</span><b>Riesgo residual</b><span>Actualización trazable, no garantía de seguridad.</span></div></div></section>
+
+    <section class="residual">
+      <article class="panel"><h2>Intervención → riesgo residual</h2><p class="fine">Ejemplo ilustrativo para Quebrada Norte después de despejar combustible y verificar acceso.</p><div class="bars"><div class="bar-row"><span>Antes</span><div class="track"><div class="fill before" id="beforeBar" style="width:82%"></div></div><b id="beforeLabel">82</b></div><div class="bar-row"><span>Residual</span><div class="track"><div class="fill after" id="afterBar" style="width:53%"></div></div><b id="afterLabel">53</b></div></div><p class="fine">La reducción representa una hipótesis de trabajo; factores meteorológicos y condiciones no observadas pueden mantener o elevar la prioridad.</p></article>
+      <article class="panel governance"><h2>Fuentes y gobernanza</h2><ul><li><strong>CONAF:</strong> antecedentes de prevención y contexto de incendios.</li><li><strong>DMC:</strong> variables meteorológicas como contexto, no predicción exacta.</li><li><strong>IDE Minagri:</strong> capas territoriales y de cobertura del suelo.</li><li><strong>Municipio y evidencia de campo:</strong> acciones, inspecciones y condiciones locales.</li></ul><p class="fine">Todo acceso, actualización, cobertura, licencia y condición de uso debe validarse con la fuente competente antes de cualquier operación.</p></article>
+    </section>
+    <footer>FireWatch · Propuesta visual autónoma · Información y métricas exclusivamente ilustrativas.</footer>
+  </main>
+  <div id="toast" role="status" aria-live="polite">La simulación actualizó el riesgo residual ilustrativo.</div>
+  <script>
+    const sectors = {
+      quebrada: { name:'Quebrada Norte', priority:'alta', risk:'Alto', exposure:'Viviendas cercanas y ruta local', readiness:'Brechas de despeje', data:'Cobertura parcial de terreno', factors:['Vegetación seca continua','Acumulación de residuos','Viento proyectado como señal contextual'], why:'Combina amenaza orientativa elevada con exposición residencial y una acción factible antes del próximo ciclo de revisión.' },
+      ladera: { name:'Ladera Centro', priority:'media', risk:'Medio', exposure:'Senderos y viviendas dispersas', readiness:'Coordinación iniciada', data:'Revisión pendiente de campo', factors:['Pendiente y continuidad vegetal','Acceso mixto','Actividad comunitaria registrada'], why:'La exposición es moderada, pero la continuidad de combustible justifica preparar acciones tempranas.' },
+      alto: { name:'Alto Verde', priority:'baja', risk:'Bajo', exposure:'Baja densidad de población', readiness:'Acceso verificado', data:'Insumos ilustrativos disponibles', factors:['Menor continuidad de combustible','Distancia a viviendas','Ruta de acceso funcional'], why:'Se mantiene en observación: la prioridad puede cambiar al actualizar condiciones locales o meteorológicas.' },
+      poniente: { name:'Poniente', priority:'media', risk:'Medio', exposure:'Borde residencial', readiness:'Inspección programada', data:'Evidencia de terreno limitada', factors:['Material vegetal estacional','Borde urbano-forestal','Punto de agua por verificar'], why:'Requiere cerrar brechas de información y confirmar la disponibilidad de recursos preventivos.' },
+      central: { name:'Villa Central', priority:'alta', risk:'Alto', exposure:'Alta cercanía residencial', readiness:'Ruta en inspección', data:'Datos de campo en actualización', factors:['Interfaz urbana continua','Ruta crítica en revisión','Acumulación puntual de residuos'], why:'La exposición elevada y las brechas de acceso hacen que una intervención verificable sea prioritaria.' },
+      oriente: { name:'Oriente', priority:'media', risk:'Medio', exposure:'Equipamiento y viviendas cercanas', readiness:'Punto de agua pendiente', data:'Validación municipal requerida', factors:['Acceso disponible','Punto de agua sin confirmar','Vegetación heterogénea'], why:'La acción de verificación puede reducir incertidumbre y orientar la siguiente asignación de recursos.' }
+    };
+    const fields = { sectorName:document.getElementById('sectorName'), riskValue:document.getElementById('riskValue'), exposure:document.getElementById('exposure'), readiness:document.getElementById('readiness'), dataStatus:document.getElementById('dataStatus'), factors:document.getElementById('factors'), why:document.getElementById('why'), riskPill:document.getElementById('riskPill') };
+    function selectSector(node) { const item=sectors[node.dataset.sector]; document.querySelectorAll('.sector').forEach(s=>s.classList.remove('selected')); node.classList.add('selected'); fields.sectorName.textContent=item.name; fields.riskValue.textContent=item.risk; fields.exposure.textContent=item.exposure; fields.readiness.textContent=item.readiness; fields.dataStatus.textContent=item.data; fields.factors.replaceChildren(...item.factors.map(f => { const li=document.createElement('li'); li.textContent=f; return li; })); fields.why.textContent=item.why; fields.riskPill.textContent='Prioridad '+item.priority; fields.riskPill.className='risk '+item.priority; }
+    document.querySelectorAll('.sector').forEach(node => { node.addEventListener('click', () => selectSector(node)); node.addEventListener('keydown', event => { if (event.key==='Enter' || event.key===' ') { event.preventDefault(); selectSector(node); } }); });
+    document.querySelector('[data-sector="quebrada"]').classList.add('selected');
+    document.getElementById('statusFilter').addEventListener('change', e => document.querySelectorAll('#actionRows tr').forEach(row => row.hidden=e.target.value!=='all' && row.dataset.status!==e.target.value));
+    document.getElementById('simulate').addEventListener('click', () => { document.getElementById('afterBar').style.width='41%'; document.getElementById('afterLabel').textContent='41'; const toast=document.getElementById('toast'); toast.classList.add('show'); setTimeout(()=>toast.classList.remove('show'),3000); });
+  </script>
+</body>
+</html>
