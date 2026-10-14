@@ -2,7 +2,7 @@
 
 **Recommendation: React + TypeScript + Vite, using the available Node/npm toolchain; ship static assets without a Node or Bun production server.**
 
-**Status: planning documentation only. The migration and PWA proposals are not implemented or approved.** No dependency was installed, no source file was edited, no API was called, no commit was created, and no deployment surface was touched to produce this document. Every "proposed" item requires a separate decision before it becomes work.
+**Status: planning documentation, execution started on branch `frontend/react-vite`.** The tooling decision in §2 and the architecture in §3 are now being implemented; the feature plan, tasks and evidence live in [`odd/urgent/rediseno-pagina/app-react-vite.md`](../../odd/urgent/rediseno-pagina/app-react-vite.md). The §2.5 serving questions this document left open were resolved as: hash routing kept, so the server still has **no SPA fallback**; `Cache-Control: no-store` kept unchanged; the CSP re-issued verbatim by the new server; the PWA proposal in §4 remains **not approved and not built**. Whatever this document calls "proposed" and is not listed as implemented in the feature plan is still unimplemented, and the capability matrix in §6 remains the parity checklist.
 
 Companion tracking document: [`odd/tasks/frontend/react-frontend-plan.md`](../../odd/tasks/frontend/react-frontend-plan.md) (specs, tasks, evidence log, in Spanish).
 

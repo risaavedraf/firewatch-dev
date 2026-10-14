@@ -2,6 +2,8 @@ import assert from 'node:assert/strict';
 import http from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
+import process from 'node:process';
+import console from 'node:console';
 import { createServer } from './serve.mjs';
 
 // Loopback check of the server that serves the *built* application. It asserts

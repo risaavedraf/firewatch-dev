@@ -1,7 +1,9 @@
 import http from 'node:http';
 import { readFile, realpath, stat } from 'node:fs/promises';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, URL } from 'node:url';
 import path from 'node:path';
+import process from 'node:process';
+import console from 'node:console';
 
 const distRoot = fileURLToPath(new URL('../dist/', import.meta.url));
 const mime = { '.html': 'text/html; charset=utf-8', '.css': 'text/css; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.json': 'application/json; charset=utf-8', '.svg': 'image/svg+xml', '.woff2': 'font/woff2' };

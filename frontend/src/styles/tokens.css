@@ -1,0 +1,49 @@
+/* FireWatch design tokens.
+
+   Verbatim port of the palette the page already shipped (approved with the
+   visual system commit 1ec9c8c): the same forest palette, canvas/paper,
+   terracotta and gold accents, radius, shadow and type stack. The level
+   palette is part of the tokens because the map fills, the legend swatches and
+   the chips all read from it, and a legend that drifts from the map would
+   misdescribe the map. */
+
+/* FireWatch page — design system ported from the retired mockup
+   (tmp/gateway-frontend-separation-1791858059/frontend/styles/{tokens,app}.css,
+   preserved at odd/urgent/rediseno-pagina/referencia-mockup/).
+   Only presentation changed: every identifier, class hook and behaviour that
+   proposal.js depends on is kept. */
+
+:root {
+  color-scheme: light;
+  --forest-950: #102c2d;
+  --forest-900: #173c3b;
+  --forest-700: #285e56;
+  --forest-500: #638579;
+  --canvas: #f5f5ef;
+  --paper: #fffefa;
+  --ink: #233b39;
+  --muted: #65756e;
+  --line: #dde3da;
+  --soft: #eef1e9;
+  --terracotta: #a74d34;
+  --terracotta-soft: #f7e9e2;
+  --gold: #85691e;
+  --gold-soft: #f7f0d9;
+  --radius: 12px;
+  --shadow: 0 3px 14px rgb(24 52 40 / 3%);
+  --font: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+/* Level palette. The legend swatches below mirror these exact colours. */
+:root {
+  --level-low-fill: #84ab8e;
+  --level-low-line: #5c8467;
+  --level-medium-fill: #d0b756;
+  --level-medium-line: #a99850;
+  --level-high-fill: #c77454;
+  --level-high-line: #b36647;
+  --level-unknown-fill: #c3cbcd;
+  --level-unknown-line: #6b7a80;
+  --level-neutral-fill: #e6ecea;
+  --level-neutral-line: #9fb3ab;
+}

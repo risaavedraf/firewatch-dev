@@ -1,5 +1,7 @@
 # Reestructuración del frontend: del archivo único a la estructura del mockup
 
+> **SUPERSEDIDO — no ejecutar.** El usuario cambió la dirección antes de que R2–R10 empezaran: la ejecución vive en [`./app-react-vite.md`](./app-react-vite.md) (React + Vite + TypeScript sobre el contrato del backend vigente). Ver L5 al pie. Este documento se conserva como historia de la ruta descartada y de por qué se descartó; sus tareas R2–R10 no se ejecutan.
+
 **Estado: planificación únicamente.** Este documento es el entregable: no cambia código (S9).
 **Ejecuta:** una sesión aparte, en una rama aparte, sin tocar `main` (S9). Base: `f4d99b7`.
 **Lee además:** `./README.md` — Specs S1–S6, Tablas A y B, Tareas T1–T12, Log L1–L7 de la ruta de rediseño. **Este documento reemplaza la decisión de forma de su L3** («el rediseño se aplica sobre la misma página»).
