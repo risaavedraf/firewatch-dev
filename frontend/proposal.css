@@ -171,7 +171,7 @@ main { width: min(1500px, 100%); margin: 0 auto; padding: 27px 34px 35px; }
 .panel-heading p { margin: 3px 0 0; color: var(--muted); font-size: 10px; }
 .panel-note { margin: 7px 0 12px; color: var(--muted); font-size: 9px; line-height: 1.6; }
 .panel-footnote { margin: 15px 0 0; color: var(--muted); font-size: 10px; line-height: 1.65; }
-.map-panel, .risk-panel, .history-panel, .auth-panel, .jobs-panel, .sources-panel, .pipeline-panel, .audit-panel, .access-panel { padding: 18px; }
+.map-panel, .risk-panel, .history-panel, .auth-panel, .jobs-panel, .sources-panel, .pipeline-panel, .audit-panel, .access-panel, .pending-panel { padding: 18px; }
 .padded { padding: 22px; }
 .status-copy { min-height: 32px; margin: 13px 0 7px; color: var(--muted); font-size: 10px; line-height: 1.6; }
 .dashboard-grid { display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(340px, .8fr); gap: 16px; }

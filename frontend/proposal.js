@@ -1615,6 +1615,37 @@
     },
   ];
 
+  // --- Declared, never simulated -------------------------------------------
+  //
+  // Everything the retired mockup offered that the backend cannot back. This
+  // inventory is the only place they appear: no control anywhere on this page
+  // enables any of them, and each entry names why it is missing and where it
+  // would live, so an absence is never mistaken for a working capability.
+  const NOT_IMPLEMENTED = [
+    ["Cobertura y entorno por sector", "La API no publica cobertura ni entorno por comuna: solo el catálogo, el lote publicado y sus factores.", "Tabla de sectores"],
+    ["Contexto y prioridad por sector", "El backend clasifica la zona con el lote publicado y no calcula prioridad regional ni contexto por comuna.", "Ficha de detalle de la zona"],
+    ["Estados candidate, in_progress, reviewed y closed", "El backend informa el estado del trabajo (en cola, publicado) y el estado del dato; esos cuatro estados no existen en ningún contrato.", "Chips de estado"],
+    ["Historial de todas las zonas", "GET /v1/risk/history exige zone_id y no hay endpoint agregado, así que el historial es siempre el de la zona consultada.", "Historial de lotes"],
+    ["Revisar e incorporar registros, y hallazgos de calidad", "GET /v1/risk/sources publica la procedencia y la integridad reales; no existe un catálogo de acciones ni de hallazgos.", "Fuentes y procedencia"],
+    ["Publicar lote, avance manual y reevaluación", "No existe endpoint: el servidor decide y publica por su cuenta; la página solo solicita el trabajo y lee el resultado.", "Procesamiento asíncrono"],
+    ["Nombre del actor, detalle libre e id de evento", "GET /v1/audit entrega actor_id, action, job_id, trace_id y occurred_at: identificadores opacos, sin nombre ni detalle.", "Registro de actividad"],
+  ];
+
+  function renderPendingInventory() {
+    const rows = document.getElementById("pending-rows");
+    rows.replaceChildren();
+    for (const [capability, reason, location] of NOT_IMPLEMENTED) {
+      const row = document.createElement("tr");
+      for (const value of [capability, reason, location]) {
+        const cell = document.createElement("td");
+        cell.textContent = value;
+        row.append(cell);
+      }
+      rows.append(row);
+    }
+    setText("pending-badge", "NO IMPLEMENTADO");
+  }
+
   function renderPermissionMatrix() {
     const rows = document.getElementById("permissions-rows");
     rows.replaceChildren();
@@ -1907,6 +1938,7 @@
 
   renderPermissionMatrix();
   renderSessionRole();
+  renderPendingInventory();
   checkReadiness();
   handleLoginCallback();
 })();

@@ -1123,3 +1123,28 @@ test('no role selector, switcher or picker is ported and the decoded roles have 
   assert.doesNotMatch(source, /(realm_access|sessionRoles)\s*[^;]*\.(includes|some|filter)\([^)]*\)\s*\)\s*\{?\s*(if|return|document)/);
 });
 
+
+// Everything the retired mockup offered that the backend cannot back must be
+// DECLARED on the page: visible, named, and offered by no control at all. A
+// silent omission would read as a capability that works.
+test('every capability without a backend is declared as not implemented and offers no action', async () => {
+  const h = harness();
+  await h.ready();
+  const rows = h.node('pending-rows').children;
+  assert.ok(rows.length >= 6, 'the inventory lists every unavailable capability');
+  const rendered = rows.map(row => row.children.map(cell => cell.textContent).join(' | ')).join('\n').toLowerCase();
+  for (const capability of [
+    'cobertura y entorno por sector',
+    'contexto y prioridad por sector',
+    'candidate, in_progress, reviewed y closed',
+    'historial de todas las zonas',
+    'incorporar registros',
+    'publicar lote',
+    'nombre del actor',
+  ]) {
+    assert.ok(rendered.includes(capability), `the inventory must name ${capability}`);
+  }
+  assert.ok(rows.every(row => row.children.length === 3), 'each entry names the capability, the reason and where it would live');
+  assert.ok(rows.every(row => row.children.every(cell => cell.children.length === 0)), 'each entry is plain text: no action is offered or simulated');
+  assert.match(h.node('pending-badge').textContent, /NO IMPLEMENTADO/i, 'the panel states its own status');
+});
