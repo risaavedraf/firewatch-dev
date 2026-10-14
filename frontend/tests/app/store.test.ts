@@ -3,10 +3,14 @@ import { completeLogin, getSessionSnapshot, resetSession } from '../../src/core/
 import {
   bindZoneStateToSession,
   clearZoneState,
+  getHistoryFilters,
   getSelectedZone,
   getZoneLevels,
   rememberZoneLevel,
+  resetHistoryFilters,
   selectZone,
+  setHistoryQuery,
+  setHistoryStatus,
   subscribeZoneState,
 } from '../../src/app/store';
 
@@ -30,6 +34,7 @@ function setup(): void {
   vi.stubGlobal('window', createWindowStub().window);
   resetSession();
   clearZoneState();
+  resetHistoryFilters();
 }
 
 async function signIn(): Promise<void> {
@@ -89,21 +94,25 @@ test('readers are not notified when there is nothing to clear', () => {
   unsubscribe();
 });
 
-test('ending a real session clears the selection and every remembered colour', async () => {
+test('ending a real session clears the selection, the colours and the filters', async () => {
   const unbind = bindZoneStateToSession();
 
   selectZone('05109');
   rememberZoneLevel('05109', 'alto');
+  setHistoryQuery('05501');
+  setHistoryStatus('publicado');
 
   await signIn();
   expect(getSessionSnapshot().status).toBe('signed-in');
   expect(getSelectedZone()).toBe('05109');
 
   // A logout, a 401 or a refused callback all end the session the same way: the
-  // private view must stop describing the previous session's zone.
+  // private view must stop describing the previous session's zone, and a search
+  // term must not survive into the next one.
   resetSession();
 
   expect(getSelectedZone()).toBe('');
   expect(getZoneLevels().size).toBe(0);
+  expect(getHistoryFilters()).toEqual({ query: '', status: '' });
   unbind();
 });
