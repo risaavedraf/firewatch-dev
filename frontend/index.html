@@ -28,6 +28,7 @@
         <a class="nav-link" id="nav-session" href="#session"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5" y="10" width="14" height="11" rx="2"/><path d="M8 10V6a4 4 0 0 1 8 0v4m-4 5v2"/></svg><span>Sesión y permisos</span></a>
         <p class="nav-group">Coordinación</p>
         <a class="nav-link" id="nav-audit" href="#audit"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="4" width="16" height="17" rx="2"/><path d="M8 9h8M8 13h8M8 17h5"/></svg><span>Registro de actividad</span></a>
+        <a class="nav-link" id="nav-permissions" href="#permissions"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l7 3v6c0 4.4-3 7.6-7 9-4-1.4-7-4.6-7-9V6l7-3Z"/><path d="M9 12l2 2 4-4"/></svg><span>Perfiles y permisos</span></a>
       </nav>
       <div class="sidebar-bottom">
         <section class="health-card" aria-labelledby="health-title"><div class="health-head"><strong id="health-title">Gateway</strong><span class="health-dot" aria-hidden="true"></span></div><p id="readiness-status" role="status" aria-live="polite">Consultando disponibilidad del gateway…</p><button id="readiness-refresh" class="side-action" type="button">Actualizar estado</button></section>
@@ -123,6 +124,23 @@
             </table>
           </div>
           <div class="audit-foot"><span class="count-badge" id="audit-count">—</span><button id="audit-refresh" class="secondary-button" type="button" disabled>Actualizar registro</button></div>
+        </section>
+        <section class="panel access-panel permissions-panel" id="permissions" aria-labelledby="permissions-title">
+          <div class="panel-heading"><div><p class="eyebrow">COORDINACIÓN</p><h3 id="permissions-title">Perfiles y permisos</h3></div><span class="neutral-tag" id="session-roles-badge">SIN SESIÓN</span></div>
+          <p id="session-roles-status" class="status-copy" role="status" aria-live="polite">Sin token en memoria: el rol declarado por la sesión no está disponible; conecta una sesión para leerlo.</p>
+          <dl class="data-list compact">
+            <div><dt>Roles declarados por el token</dt><dd id="session-roles">No disponible</dd></div>
+          </dl>
+          <p id="session-role-note" class="panel-note">El rol se lee del claim <code>realm_access.roles</code> del token de acceso, que es la única fuente real: el gateway solo publica riesgo, trabajos y auditoría, así que no existe un endpoint de identidad al que preguntar. La página decodifica el payload y <strong>no verifica su firma</strong>; por eso el valor es un dato informativo sobre el token y no una autorización. Quien decide es el servidor, que sí verifica la firma: concede el riesgo con <code>viewer</code> o <code>admin</code> y las acciones de trabajo solo con <code>admin</code>.</p>
+          <h4>Matriz de perfiles y permisos</h4>
+          <p id="permissions-matrix-note" class="panel-note">Documentación verificada contra las guardas reales del servidor, no contra lo que la interfaz promete. Cada fila cita la guarda por <code>ruta:línea</code>: <code>backend/services/risk/internal/handler/security.go:43</code> acepta <code>viewer</code> o <code>admin</code> y <code>backend/services/jobs/internal/handler/security.go:44</code> acepta solo <code>admin</code>, con <code>api.go:89</code> y <code>api.go:160</code> envolviendo sus mux completos. Un token verificado sin ninguno de esos roles recibe 403; un token que no se puede verificar recibe 401.</p>
+          <div class="table-wrap">
+            <table><caption class="sr-only">Matriz documentada de perfiles y permisos, con la guarda real del servidor que la sustenta</caption>
+              <thead><tr><th>Capacidad</th><th>viewer</th><th>admin</th><th>Guarda verificada (ruta:línea)</th></tr></thead>
+              <tbody id="permissions-rows"></tbody>
+            </table>
+          </div>
+          <p id="permissions-unimplemented" class="unimplemented-note">No portado a propósito: el mockup retirado permitía <em>elegir</em> un rol en la página. Ese selector no se implementa porque la página no puede conceder permisos y un selector sería un límite de autorización falso. Tampoco hay selector, conmutador ni preferencia de rol en ninguna parte de esta vista: el rol mostrado es el que el token declara y no altera ninguna petición, panel ni decisión.</p>
         </section>
         <footer><span>FireWatch · Demostración técnica · La API no realiza predicciones ni recomendaciones operativas.</span><button id="reset-filters" type="button"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 10a8 8 0 1 1 1 8M4 3v7h7"/></svg>Restablecer filtros</button></footer>
       </main>

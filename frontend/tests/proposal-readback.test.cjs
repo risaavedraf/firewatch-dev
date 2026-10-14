@@ -11,7 +11,10 @@ const source = fs.readFileSync(`${__dirname}/../proposal.js`, 'utf8');
 const GATEWAY_ORIGIN = 'http://localhost:8080';
 const ISSUER = 'http://localhost:8081/realms/firewatch';
 const tick = async () => { for (let i = 0; i < 20; i++) await Promise.resolve(); };
-function harness(catalogue, catalogueStatus = 200, deferZones = false) {
+// `sessionToken` is the exact `access_token` the identity-provider stub returns.
+// Its default keeps every pre-existing test on the hardcoded 'test' value, while
+// a synthetic JWT can be injected to exercise the page's own token decoder.
+function harness(catalogue, catalogueStatus = 200, deferZones = false, sessionToken = 'test') {
   const nodes = new Map(), calls = [], pending = [], timers = [];
   class Element {
     constructor(svg = false) { this.svg = svg; this.attributes = new Map(); this.children = []; this.listeners = {}; this.value = ''; this.textContent = ''; this.classes = new Set(); this.classList = { add: (...v) => v.forEach(x => this.classes.add(x)), remove: (...v) => v.forEach(x => this.classes.delete(x)), toggle: (x, on) => on ? this.classes.add(x) : this.classes.delete(x) }; }
@@ -30,7 +33,7 @@ function harness(catalogue, catalogueStatus = 200, deferZones = false) {
   const fetch = (path, options) => {
     calls.push({ path, options });
     if (path === `${GATEWAY_ORIGIN}/health/ready`) return Promise.resolve({ ok: true, status: 204 });
-    if (path === `${ISSUER}/protocol/openid-connect/token`) return Promise.resolve({ ok: true, status: 200, json: async () => ({ access_token: 'test' }) });
+    if (path === `${ISSUER}/protocol/openid-connect/token`) return Promise.resolve({ ok: true, status: 200, json: async () => ({ access_token: sessionToken }) });
     if (path === `${GATEWAY_ORIGIN}/v1/risk/zones` && !deferZones) return Promise.resolve({ ok: catalogueStatus < 400, status: catalogueStatus, json: async () => zones });
     return new Promise(resolve => pending.push({ path, resolve }));
   };
@@ -934,3 +937,189 @@ test('logout clears the audit panel, a fenced reply cannot repaint it, and the m
   assert.equal(h.node('audit-table').hasAttribute('hidden'), true);
   assert.equal(h.node('audit-status').textContent, 'Conecta un token autorizado para consultar el registro de actividad.');
 });
+
+// ── T7 · Perfiles y permisos: documentation plus the REAL session role ─────
+//
+// The page holds the access token in memory and never used to decode it. The
+// ONLY real source of the session role is that payload: the gateway proxies
+// exactly /v1/risk, /v1/jobs and /v1/audit, so there is no whoami/me/profile
+// endpoint to ask. The decoded value is a FACT ABOUT THE TOKEN and never an
+// authorization: it may not gate, hide, allow or alter a single request, panel
+// or decision, and the server remains the only authority because only the
+// server verifies the signature.
+//
+// The JWT fixtures are built here with Node's Buffer. The page's own decoder —
+// which cannot use atob, Buffer or TextDecoder — is what reads them back, and
+// the signature segment is a placeholder precisely because the page does NOT
+// verify it.
+const b64url = value => Buffer.from(JSON.stringify(value), 'utf8').toString('base64url');
+const jwt = payload => `${b64url({ alg: 'none', typ: 'JWT' })}.${b64url(payload)}.firma`;
+
+test('session role is decoded from the access token payload and presented as an unverified token fact', async () => {
+  const h = harness(undefined, 200, false, jwt({ realm_access: { roles: ['viewer', 'admin'] } }));
+  await h.ready();
+  assert.equal(h.node('session-roles').textContent, 'viewer, admin', 'the roles the token declares are shown verbatim');
+  assert.equal(h.node('session-roles-badge').textContent, 'TOKEN LEÍDO');
+  const status = h.node('session-roles-status').textContent;
+  assert.match(status, /decodific/i, 'the panel states that the payload is decoded');
+  assert.match(status, /sin verificar la firma/i, 'the panel states that the signature is NOT verified by the page');
+  assert.match(status, /servidor/i);
+  assert.match(status, /única autoridad/i, 'the server remains the only authority');
+  // A single-role token is shown just as literally.
+  const viewer = harness(undefined, 200, false, jwt({ realm_access: { roles: ['viewer'] } }));
+  await viewer.ready();
+  assert.equal(viewer.node('session-roles').textContent, 'viewer');
+});
+
+test('absent, unreadable or role-less tokens show an explicit unavailable state and never a guessed role', async () => {
+  const malformedBase64 = `${b64url({ alg: 'none' })}.@@@@.firma`;
+  const notJson = `${b64url({ alg: 'none' })}.${Buffer.from('no-json', 'utf8').toString('base64url')}.firma`;
+  // Token absent: the provider answers with an empty access_token, so the login
+  // exchange fails and no session is ever connected.
+  const absent = harness(undefined, 200, false, '');
+  await tick();
+  assert.equal(absent.node('session-roles').textContent, 'No disponible');
+  assert.match(absent.node('session-roles-status').textContent, /sin token/i);
+  assert.doesNotMatch(absent.node('session-roles-status').textContent, /\bviewer\b|\badmin\b/);
+  const cases = [
+    ['not a JWT at all', harness(undefined, 200, false, 'test'), 'No disponible', /no es un JWT/i],
+    ['two segments only', harness(undefined, 200, false, 'aaaa.bbbb'), 'No disponible', /no es un JWT/i],
+    ['payload is not decodable base64url', harness(undefined, 200, false, malformedBase64), 'No disponible', /no es un JWT/i],
+    ['payload is not JSON', harness(undefined, 200, false, notJson), 'No disponible', /no es un JWT/i],
+    ['payload is not an object', harness(undefined, 200, false, jwt(['viewer'])), 'No informado', /realm_access\.roles/i],
+    ['no realm_access claim', harness(undefined, 200, false, jwt({ sub: 'x' })), 'No informado', /realm_access\.roles/i],
+    ['roles is a bare string, not an array', harness(undefined, 200, false, jwt({ realm_access: { roles: 'admin' } })), 'No informado', /realm_access\.roles/i],
+    ['roles is an empty array', harness(undefined, 200, false, jwt({ realm_access: { roles: [] } })), 'No informado', /realm_access\.roles/i],
+    ['roles holds no usable string', harness(undefined, 200, false, jwt({ realm_access: { roles: ['', 42, '  '] } })), 'No informado', /realm_access\.roles/i],
+  ];
+  for (const [label, h, expected, message] of cases) {
+    await h.ready();
+    assert.equal(h.node('session-roles').textContent, expected, label);
+    assert.match(h.node('session-roles-status').textContent, message, label);
+    assert.doesNotMatch(
+      `${h.node('session-roles').textContent} ${h.node('session-roles-status').textContent}`,
+      /\bviewer\b|\badmin\b/,
+      `${label}: a role may never be defaulted, guessed or inferred from an HTTP status`
+    );
+  }
+});
+
+test('the decoded role is display-only: a viewer and an admin token drive identical requests and controls', async () => {
+  const viewer = harness(undefined, 200, false, jwt({ realm_access: { roles: ['viewer'] } }));
+  const admin = harness(undefined, 200, false, jwt({ realm_access: { roles: ['viewer', 'admin'] } }));
+  await viewer.ready(); await admin.ready();
+  assert.equal(viewer.node('session-roles').textContent, 'viewer');
+  assert.equal(admin.node('session-roles').textContent, 'viewer, admin');
+  const requests = h => h.calls.map(call => `${call.options && call.options.method ? call.options.method : 'GET'} ${call.path}`);
+  assert.deepEqual(requests(viewer), requests(admin), 'the decoded role may not add, remove, reorder or block a single request');
+  for (const id of ['create-job', 'refresh-job', 'audit-refresh', 'logout', 'zone-select', 'scenario-select', 'login']) {
+    assert.equal(viewer.node(id).disabled, admin.node(id).disabled, `${id} disabled`);
+    assert.equal(viewer.node(id).hidden, admin.node(id).hidden, `${id} hidden`);
+  }
+  for (const id of ['session-state', 'session-detail', 'audit-badge', 'audit-status', 'job-status', 'history-state']) {
+    assert.equal(viewer.node(id).textContent, admin.node(id).textContent, id);
+  }
+});
+
+test('logout returns the role panel to the explicit unavailable state', async () => {
+  const h = harness(undefined, 200, false, jwt({ realm_access: { roles: ['admin'] } }));
+  await h.ready();
+  assert.equal(h.node('session-roles').textContent, 'admin');
+  h.node('logout').listeners.click(); await tick();
+  assert.equal(h.node('session-roles').textContent, 'No disponible');
+  assert.equal(h.node('session-roles-badge').textContent, 'SIN SESIÓN');
+  assert.match(h.node('session-roles-status').textContent, /sin token/i);
+});
+
+// The decoder is exercised end to end: a role with a multi-byte character must
+// survive the page's own base64url + UTF-8 decoding, and the URL-safe alphabet
+// is what the fixture is encoded with.
+test('the self-contained base64url/UTF-8 decoder round-trips a multi-byte role name', async () => {
+  const h = harness(undefined, 200, false, jwt({ realm_access: { roles: ['visór-de-prueba', 'admin'] } }));
+  await h.ready();
+  assert.equal(h.node('session-roles').textContent, 'visór-de-prueba, admin');
+  assert.ok(!/[^\x20-\x7eáéíóúÁÉÍÓÚñÑ]/.test(h.node('session-roles').textContent), 'the decoded text carries no replacement bytes');
+});
+
+// Every matrix row must cite a REAL server-side guard by `path:line`. This test
+// holds its own expectation of what each cited line must contain, so a stale or
+// invented citation fails here instead of being asserted on screen.
+const GUARD_LINES = {
+  'backend/services/gateway/internal/handler/gateway.go:39': /mux\.Handle\("\/v1\/audit"/,
+  'backend/services/gateway/internal/handler/gateway.go:74': /health\/ready/,
+  'backend/services/gateway/internal/handler/gateway.go:96': /auth := strings\.Fields/,
+  'backend/services/gateway/internal/handler/gateway.go:102': /verifier\.Verify\(ctx, auth\[1\]\)/,
+  'backend/services/risk/internal/handler/security.go:43': /role == "viewer" \|\| role == "admin"/,
+  'backend/services/risk/internal/handler/security.go:48': /fail\(w, 403, "forbidden"\)/,
+  'backend/services/risk/internal/handler/api.go:41': /"GET \/v1\/risk\/status"/,
+  'backend/services/risk/internal/handler/api.go:80': /"GET \/v1\/risk\/latest"/,
+  'backend/services/risk/internal/handler/api.go:81': /"GET \/v1\/risk\/history"/,
+  'backend/services/risk/internal/handler/api.go:82': /"GET \/v1\/risk\/zones"/,
+  'backend/services/risk/internal/handler/api.go:83': /"GET \/v1\/risk\/synthetic-scenarios"/,
+  'backend/services/risk/internal/handler/api.go:88': /"GET \/v1\/risk\/sources"/,
+  'backend/services/risk/internal/handler/api.go:89': /return Authorize\(verifier, mux\)/,
+  'backend/services/jobs/internal/handler/security.go:44': /role == "admin"/,
+  'backend/services/jobs/internal/handler/security.go:49': /fail\(w, 403, "forbidden"\)/,
+  'backend/services/jobs/internal/handler/api.go:51': /"GET \/v1\/jobs\/status"/,
+  'backend/services/jobs/internal/handler/api.go:52': /"POST \/v1\/jobs"/,
+  'backend/services/jobs/internal/handler/api.go:135': /"GET \/v1\/jobs\/\{id\}"/,
+  'backend/services/jobs/internal/handler/api.go:152': /"GET \/v1\/audit"/,
+  'backend/services/jobs/internal/handler/api.go:160': /return Authorize\(verifier, mux\)/,
+};
+
+test('the permissions matrix documents the real server guards and marks what it cannot verify', async () => {
+  const h = harness();
+  await h.ready();
+  const rows = h.node('permissions-rows').children;
+  assert.ok(rows.length >= 8, `the matrix documents the real capabilities; got ${rows.length} rows`);
+  const cited = new Set();
+  let unverified = 0;
+  for (const row of rows) {
+    assert.equal(row.children.length, 4, 'every row states capability, both roles and its guard');
+    assert.ok(row.children[0].textContent.trim().length > 0, 'every row names a capability');
+    const cell = row.children[3].textContent;
+    if (cell.startsWith('No verificado')) { unverified += 1; continue; }
+    for (const ref of cell.split(' · ')) {
+      assert.ok(GUARD_LINES[ref], `uncited or unknown guard reference: ${ref}`);
+      cited.add(ref);
+      const [file, line] = ref.split(':');
+      const lines = fs.readFileSync(`${__dirname}/../../${file}`, 'utf8').split('\n');
+      assert.match(lines[Number(line) - 1] ?? '', GUARD_LINES[ref], `${ref} does not hold the guard it claims`);
+    }
+  }
+  assert.ok(unverified >= 1, 'at least one row must be marked as not verified instead of asserted');
+  assert.deepEqual([...cited].sort(), Object.keys(GUARD_LINES).sort(), 'the matrix must cite exactly the guards this test verifies');
+
+  const rowsWith = text => rows.filter(row => row.children[0].textContent.includes(text));
+  const auditRow = rowsWith('/v1/audit');
+  assert.equal(auditRow.length, 1, 'the activity register is documented');
+  assert.match(auditRow[0].children[1].textContent, /^No\b/, 'a viewer may not read the register');
+  assert.match(auditRow[0].children[1].textContent, /403/);
+  assert.match(auditRow[0].children[2].textContent, /^Sí(\s|$)/, 'an admin may read the register');
+  const latestRows = rowsWith('/v1/risk/latest');
+  assert.equal(latestRows.length, 1);
+  assert.match(latestRows[0].children[1].textContent, /^Sí(\s|$)/, 'a viewer may read the risk endpoints');
+  assert.match(latestRows[0].children[2].textContent, /^Sí(\s|$)/);
+  const jobsRow = rowsWith('POST /v1/jobs');
+  assert.equal(jobsRow.length, 1);
+  assert.match(jobsRow[0].children[1].textContent, /^No\b/);
+  assert.match(jobsRow[0].children[2].textContent, /^Sí(\s|$)/);
+});
+
+// S3: the mockup's role selector is deliberately NOT ported, because a page
+// that lets the operator choose a role would be a fake authorization boundary.
+test('no role selector, switcher or picker is ported and the decoded roles have exactly one reader', async () => {
+  const h = harness();
+  await h.ready();
+  assert.doesNotMatch(source, /role-select|role-switch|role-picker|perfil-select/i);
+  const selectIds = [...html.matchAll(/<select[^>]*id="([^"]+)"/g)].map(match => match[1]);
+  assert.ok(selectIds.length > 0);
+  assert.ok(selectIds.every(id => !/rol|perfil/i.test(id)), selectIds.join(','));
+  assert.doesNotMatch(html, /<option[^>]*value="(admin|viewer)"/i, 'no role value is offered as an option');
+  assert.doesNotMatch(html, /id="role|id="rol-/i);
+  // One definition plus one call: the decoded roles feed the display writer and
+  // nothing else, so they cannot reach a request, a panel or a decision.
+  assert.equal([...source.matchAll(/sessionRolesFromPayload/g)].length, 2);
+  assert.doesNotMatch(source, /(realm_access|sessionRoles)\s*[^;]*\.(includes|some|filter)\([^)]*\)\s*\)\s*\{?\s*(if|return|document)/);
+});
+
