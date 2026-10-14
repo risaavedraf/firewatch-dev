@@ -2,8 +2,14 @@ import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 
 import { App } from './App';
+import { bindZoneStateToSession } from './app/store';
 import './styles/tokens.css';
 import './styles/app.css';
+
+// Installed before the first render: whenever the session ends — logout, a 401 or
+// a refused callback — the private view is emptied, so no view can keep showing
+// the previous session's zone or colours.
+bindZoneStateToSession();
 
 const container = document.getElementById('root');
 
