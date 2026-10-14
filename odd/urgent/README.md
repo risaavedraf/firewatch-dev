@@ -9,6 +9,7 @@ La evidencia revisada describe un prototipo/demo local con clasificación acadé
 | Afirmación | Estado que se puede comunicar | Evidencia / límite |
 |---|---|---|
 | Demo geoespacial y flujo backend | Implementación documentada; validar la demo en el entorno de presentación | `../tasks/backend/firewatch-app-funcional.md`; `../tasks/backend/firewatch-geospatial-map.md`; código de riesgo en `backend/services/risk/internal/handler/api.go` |
+| Escenarios sintéticos: catálogo de seis perfiles y selección opcional por API | Implementado y probado dentro de su alcance sintético; la ruta autenticada completa se ejecutó una vez en un stack desechable aislado | `../tasks/backend/urgent-synthetic-mvp.md`; `backend/docs/synthetic-scenarios.md`; `backend/contracts/openapi/firewatch-v1.yaml` |
 | Naturaleza de la clasificación | Regla académica; datos sintéticos, no riesgo observado | `../tasks/backend/firewatch-data-contract.md` |
 | Pruebas frontend | Hay una ronda registrada; no acredita login/logout real en Keycloak ni revisión móvil | `../tasks/reviews/judgment-day-frontend-round2.md`; pendientes indicados en `../tasks/frontend/client-proposal-page.md` |
 | Hardening | Pendiente/no demostrado por la documentación revisada | `../tasks/security/backend-hardening.md`; unidades `../tasks/security/backend-hardening/` |
@@ -22,6 +23,15 @@ La evidencia revisada describe un prototipo/demo local con clasificación acadé
 4. Pedir al jefe de proyecto que confirme el alcance mínimo para clientes, los datos permitidos, los criterios de aceptación y quién aprueba riesgos/modelo.
 
 **No afirmar sin nueva evidencia:** exactitud del modelo, riesgo real por comuna, rendimiento/SLA, disponibilidad, seguridad aprobada, monitoreo productivo, cumplimiento regulatorio o aptitud para decisiones de emergencia.
+
+### PASS en una prueba no es una casilla marcada
+
+Son dos objetos distintos y uno no se convierte en el otro:
+
+- **Prueba en PASS** observa un comportamiento acotado y ejecutable hoy (`go test`, `go vet`). No cierra un requisito.
+- **Casilla del checklist marcada** exige el criterio de cierre del ID: evidencia reproducible, umbrales acordados con el equipo, responsable y, cuando aplica, datos reales. Una prueba sintética no puede aportar eso.
+
+Por eso puede ocurrir —y ocurre— que una prueba esté en PASS y su ID siga sin marcar. Estado remedido el **2026-10-14**: 132 IDs asignados, **0 marcados**, 55 casillas de verificación abiertas y, en el módulo `risk`, la suite completa reporta **293 PASS / 9 omitidos / 0 fallos** con `go vet` sin diagnósticos. Los 9 omitidos dependen de una base de datos y se ejecutan aparte en bases desechables aisladas; «suite en 0» no significa que esos 9 se hayan ejecutado. Las corridas históricas de bases desechables y del arnés E2E autenticado quedan como evidencia documental registrada, no reproducida en esta remedición.
 
 ## Unidades ODD
 
