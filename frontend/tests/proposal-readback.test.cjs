@@ -809,3 +809,34 @@ test('metric cards report the real catalogue, history and read-zone counts', asy
   assert.equal(h.node('metric-high').textContent, '0', 'a closed session counts no level');
   assert.equal(h.node('metric-batches').textContent, '\u2014', 'a closed session shows no history length');
 });
+
+// The history panel reads one zone at a time. Search and the status filter work
+// ONLY on the rows the API already returned for that zone: they never issue a
+// read, never reach another zone, and the badge keeps reporting what the API
+// returned while the result count reports what is actually visible.
+test('history search and status filter narrow only the rows already returned for the zone', async () => {
+  const h = harness(); await h.ready(); await h.select('05102');
+  const rows = [
+    { ...h.batch('05102', 'lote-uno', 'j1'), requested_at: '2026-01-01T00:00:00Z', data_status: 'sufficient' },
+    { ...h.batch('05102', 'lote-dos', 'j2'), requested_at: '2026-02-02T00:00:00Z', data_status: 'insufficient' },
+  ];
+  h.answer('/v1/risk/latest?zone_id=05102', rows[0]);
+  h.answer('/v1/risk/history?zone_id=05102', rows);
+  await tick();
+  assert.equal(h.node('history-rows').children.length, 2, 'both returned rows are shown');
+  assert.equal(h.node('history-count').textContent, '2', 'the badge counts what the API returned');
+  assert.equal(h.node('history-visible-count').textContent, '2 de 2');
+  const historyReads = h.calls.filter(x => x.path.includes('/v1/risk/history')).length;
+  h.node('history-status-filter').listeners.change({ target: { value: 'insufficient' } });
+  assert.equal(h.node('history-rows').children.length, 1, 'the status filter narrows the visible rows');
+  assert.equal(h.node('history-visible-count').textContent, '1 de 2');
+  assert.equal(h.node('history-count').textContent, '2', 'filtering never rewrites what the API returned');
+  assert.equal(h.calls.filter(x => x.path.includes('/v1/risk/history')).length, historyReads, 'filtering issues no new read');
+  h.node('history-query').listeners.input({ target: { value: 'lote-uno' } });
+  assert.equal(h.node('history-rows').children.length, 0, 'searching inside the narrowed rows finds nothing');
+  assert.equal(h.calls.filter(x => x.path.includes('/v1/risk/history')).length, historyReads, 'searching issues no new read');
+  h.node('reset-filters').listeners.click();
+  assert.equal(h.node('history-rows').children.length, 2, 'resetting filters restores every returned row');
+  assert.equal(h.node('history-visible-count').textContent, '2 de 2');
+  assert.equal(h.node('history-query').value, '', 'the reset control clears the query it owns');
+});
