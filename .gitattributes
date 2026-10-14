@@ -3,3 +3,4 @@
 *.yml text eol=lf
 *.json text eol=lf
 *.geojson text eol=lf
+*.sum text eol=lf
