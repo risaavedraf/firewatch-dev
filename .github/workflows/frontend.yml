@@ -1,0 +1,40 @@
+name: Frontend
+on:
+  pull_request:
+    paths:
+      - 'frontend/**'
+      - '.github/workflows/**'
+  push:
+    paths:
+      - 'frontend/**'
+      - '.github/workflows/**'
+permissions:
+  contents: read
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '24'
+      # The legacy page has no dependencies; the React migration has a lockfile.
+      - name: Install dependencies when declared
+        run: if [ -f package-lock.json ]; then npm ci; fi
+      - name: Lint, typecheck and build when declared
+        run: |
+          if [ -f package-lock.json ]; then
+            npm run lint
+            npm run typecheck
+            npm run build
+          fi
+      - name: Run tests
+        run: npm test
+      - name: Loopback smoke
+        run: npm run smoke
