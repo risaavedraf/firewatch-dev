@@ -1,6 +1,6 @@
 # Rediseño de la página: diseño del mockup con la funcionalidad real — FireWatch
 
-Owner: sesión `01a13a74`. **Esta carpeta vive en `odd/urgent/` por pedido explícito del usuario.**
+Owner original: sesión `01a13a74`; **continuación de la ruta: sesión `01a13abc`** (ver L4). **Esta carpeta vive en `odd/urgent/` por pedido explícito del usuario.**
 Objetivo: llevar el diseño y el estilo del **mockup retirado** (copia verificada byte a byte en `tmp/gateway-frontend-separation-1791858059/frontend/`) a la página real, **conservando la funcionalidad que ya funciona contra el backend**.
 Restricciones: no perder ninguna capacidad actual; lo que no tenga backend se marca **"aún no implementado"** y nunca se simula como funcionando; sin cambios de contrato, backend ni compose; los 44 tests y el smoke deben seguir en verde; sin aprobación científica ni de producción.
 
@@ -32,24 +32,24 @@ Restricciones: no perder ninguna capacidad actual; lo que no tenga backend se ma
 
 ## Tabla A — Qué se puede hacer real y qué debe quedar "aún no implementado"
 
-| Elemento del mockup | Respuesta real disponible hoy | Decisión |
-| --- | --- | --- |
-| Paleta, tipografía, radios, sombras | No aplica (presentación) | **Portar completo** |
-| Sidebar agrupada, topbar, breadcrumb, footer, toast | No aplica (presentación) | **Portar**, mapeando a las secciones reales |
-| Tarjetas de métricas | Parcial: hay zonas del catálogo, lotes del historial y estado de sesión | Portar con datos reales; lo que no tenga fuente se marca |
-| Mapa territorial sectorial | **Real**: `/v1/risk/zones` con 39 comunas y geometría SUBDERE/IGM/INE | Portar el **estilo** sobre la geometría real (proyección propia ya existente) |
-| Chips de estado | **Real** para nivel (bajo/medio/alto/desconocido) y vigencia | Portar mapeando a valores reales; `candidate`, `in_progress`, `reviewed`, `closed` **no implementados** |
-| Tabla de sectores (prioridad, cobertura, entorno) | Parcial: comuna, nivel, vigencia y lote son reales | "Cobertura %" y "Entorno" **no implementados** (no existen en el backend) |
-| Ficha de detalle (Registro, Vigencia, Estado, Referencia, Fuente) | **Real** | Portar; "Cobertura" **no implementada** |
-| Factores con barra de proporción | Parcial: el lote real trae `name`, `value`, `known`, `contribution` | Usar `contribution` real; sin dato, sin barra |
-| Bloque de incertidumbre | **Real** (equivale a los límites de demostración) | Portar con el texto honesto actual |
-| Historial con búsqueda y filtro de vigencia | Parcial: `/v1/risk/history?zone_id=` es **por zona** | Portar búsqueda/filtro sobre los datos reales de la zona; historial de **todas** las zonas **no implementado** |
-| Fuentes y calidad con "Revisar"/"Incorporar registros" y hallazgos | Parcial: `/v1/risk/sources` entrega procedencia real **embebida**, sin catálogo de acciones | Portar la procedencia real; acciones y hallazgos **no implementados** |
-| "Solicitar actualización" | **Real**: `POST /v1/jobs` (con `scenario_id` opcional) | Portar |
-| "Publicar lote", avance manual y reevaluación | **No existe endpoint** | **No implementado** (el servidor decide la publicación) |
-| Registro de actividad | **Real**: `/v1/audit` (admin, últimos 100) | Portar con los campos reales |
-| Matriz de perfiles y permisos | Parcial: los roles reales vienen de Keycloak (viewer/admin) | Portar la matriz como documentación y mostrar el rol **real** de la sesión; el **selector de rol no se porta** |
-| "Restablecer filtros" | Parcial: los filtros reales son de cliente | Portar si no inventa datos |
+| Elemento del mockup | Respuesta real disponible hoy | Decisión | Estado |
+| --- | --- | --- | --- |
+| Paleta, tipografía, radios, sombras | No aplica (presentación) | **Portar completo** | **hecho — T2** (`1ec9c8c`) |
+| Sidebar agrupada, topbar, breadcrumb, footer, toast | No aplica (presentación) | **Portar**, mapeando a las secciones reales | **hecho — T3** (`13a0981`); el marcador sigue a la sección que se abrió y no inventa ninguna |
+| Tarjetas de métricas | Real en parte: zonas del catálogo, lotes del historial y estado de sesión | Portar con datos reales; lo que no tenga fuente se marca | **hecho — T4** (`96010b2`): catálogo, historial leído y comunas con nivel alto **entre las ya leídas**; el límite se declara en la propia tarjeta |
+| Mapa territorial sectorial | **Real**: `/v1/risk/zones` con 39 comunas y geometría SUBDERE/IGM/INE | Portar el **estilo** sobre la geometría real (proyección propia ya existente) | **hecho — T2** (`1ec9c8c`): paleta de niveles del mockup sobre la proyección real; la leyenda describe el comportamiento real |
+| Chips de estado | **Real** para nivel (bajo/medio/alto/desconocido) y vigencia | Portar mapeando a valores reales | **hecho — T2**; `candidate`, `in_progress`, `reviewed`, `closed` **declarados — T8** (`ded45a4`) |
+| Tabla de sectores (prioridad, cobertura, entorno) | Parcial: comuna, nivel, vigencia y lote son reales y viven en el mapa y la ficha | "Cobertura %" y "Entorno" **no implementados** (no existen en el backend) | **declarado — T8** (`ded45a4`): inventario y nota en la ficha; la página no ofrece esa tabla |
+| Ficha de detalle (Registro, Vigencia, Estado, Referencia, Fuente) | **Real** | Portar; "Cobertura" **no implementada** | **hecho — T2/T3**; "Cobertura" **declarada — T8** |
+| Factores con barra de proporción | Parcial: el lote real trae `name`, `value`, `known`, `contribution` | Usar `contribution` real; sin dato, sin barra | **hecho — T12** (`5978c69`): proporción relativa al mayor del **mismo** lote; sin dato, sin barra |
+| Bloque de incertidumbre | **Real** (equivale a los límites de demostración) | Portar con el texto honesto actual | **hecho — T2**: la franja de demostración y el aviso de límites se conservan literales |
+| Historial con búsqueda y filtro de vigencia | Parcial: `/v1/risk/history?zone_id=` es **por zona** | Portar búsqueda/filtro sobre los datos reales de la zona; historial de **todas** las zonas **no implementado** | **hecho — T5** (`cbef26e`): búsqueda y filtro por estado del dato sobre las filas ya devueltas, sin lecturas nuevas; el historial de todas las zonas queda **declarado — T8** |
+| Fuentes y calidad con "Revisar"/"Incorporar registros" y hallazgos | Parcial: `/v1/risk/sources` entrega procedencia real **embebida**, sin catálogo de acciones | Portar la procedencia real; acciones y hallazgos **no implementados** | **hecho** (la procedencia ya existía y se conserva); acciones y hallazgos **declarados — T8** |
+| "Solicitar actualización" | **Real**: `POST /v1/jobs` (con `scenario_id` opcional) | Portar | **hecho** (selector de la ruta anterior, conservado íntegro) |
+| "Publicar lote", avance manual y reevaluación | **No existe endpoint** | **No implementado** (el servidor decide la publicación) | **declarado — T8**: el servidor decide y publica; la página solo solicita y lee |
+| Registro de actividad | **Real**: `/v1/audit` (admin, últimos 100, sin parámetros) | Portar con los campos reales | **hecho — T6** (`c0b5b92`): cinco campos reales, 403 explícito, fallo cerrado; nombre/detalle/id **declarados — T8** |
+| Matriz de perfiles y permisos | Parcial: los roles reales vienen de Keycloak (viewer/admin) | Portar la matriz como documentación y mostrar el rol **real** de la sesión; el **selector de rol no se porta** | **hecho — T7** (`560a7d1`): matriz citada por guarda real + rol del claim `realm_access.roles`, decodificado **sin verificar firma** y solo para mostrar; el selector no se porta |
+| "Restablecer filtros" | Parcial: los filtros reales son de cliente | Portar si no inventa datos | **hecho — T5** (`cbef26e`): restablece los dos filtros que la página sí tiene |
 
 ## Tabla B — Capacidades de la página actual que el backup NO tiene (se conservan)
 
@@ -68,7 +68,7 @@ Restricciones: no perder ninguna capacidad actual; lo que no tenga backend se ma
 | 11 | Colores persistentes por comuna con límite declarado | Pedido explícito del usuario (T6 de la ruta anterior) |
 | 12 | Franja y avisos honestos de demostración sintética | Requisito de honestidad de todo el proyecto |
 | 13 | CSP con allowlist explícita de orígenes + servidor estático con allowlist de archivos y confinamiento de rutas | Superficie de seguridad ya verificada |
-| 14 | 44 pruebas frontend en arnés de VM + smoke estático | Es la red que impide que el rediseño rompa comportamiento |
+| 14 | 60 pruebas frontend (las 44 originales más 16 nuevas) en arnés de VM + smoke estático | Es la red que impide que el rediseño rompa comportamiento |
 | 15 | Sondeo de trabajo con cota y `MAX_POLL_ATTEMPTS`; correlación zona/trabajo/lote | Evita mostrar datos de otra zona |
 | 16 | Descarte de respuestas obsoletas por secuencia (fences anti-carrera) | Evita mezclar respuestas de zonas distintas |
 
@@ -77,16 +77,17 @@ Restricciones: no perder ninguna capacidad actual; lo que no tenga backend se ma
 Orden de ejecución. Cada unidad cierra con un commit de unidad de trabajo en `frontend/rediseno-pagina`.
 
 - **T1 — S1/S2 — exploración de solo lectura** — **hecho**: inventario del mockup (23 archivos, 608 líneas) y Tablas A y B de este documento. `commit: ninguno`.
-- **T2 — S1a — inline** — fundación visual: tokens (paleta forest, canvas/paper, terracota/oro, radio 12, sombra suave, Inter) y primitivas (panel, chip, tabla, métrica, botón, toast, footer) aplicadas a la página real **sin cambiar comportamiento**; 44 tests + smoke verdes. `commit: unitario`.
-- **T3 — S1a — inline** — shell: sidebar agrupada con ficha de ámbito e iconos, topbar con breadcrumb, `update-bar` y pie; el perfil mostrado es **el de la sesión real**, nunca un selector de rol. Todo id existente se conserva. `commit: unitario`.
-- **T4 — S1b — inline, test-first** — tarjetas de métricas con dato real (zonas del catálogo, lotes del historial, estado de sesión); sin fuente, se marca. `commit: unitario`.
-- **T5 — S1b — inline, test-first** — búsqueda y filtro de vigencia sobre el historial **por zona** ya consultado; el historial de todas las zonas queda «aún no implementado». `commit: unitario`.
-- **T6 — S1b — inline, test-first** — panel de auditoría contra `/v1/audit` real (solo admin, campos reales, 403 con mensaje explícito). `commit: unitario`.
-- **T7 — S1b/S1c — inline, test-first** — matriz de perfiles y permisos como documentación + **rol real de la sesión** cuando una fuente real lo exponga; si no la expone, se marca «aún no implementado». `commit: unitario`.
-- **T8 — S1c — inline** — estados «aún no implementado» para cada elemento de la Tabla A sin backend (cobertura %, contexto por sector, prioridad regional, acciones de revisión/incorporación de fuentes y hallazgos, «Publicar lote»/avance manual/reevaluación, historial de todas las zonas, estados `candidate`/`in_progress`/`reviewed`/`closed`), visibles y no simulados. `commit: unitario`.
-- **T9 — S1d — inline** — mantener este documento (Tablas A y B) y `odd/tasks/README.md` al día con cada cambio real. `commit: junto con T2–T8`.
-- **T10 — S1b — verificación** — 44 + nuevas pruebas frontend, `npm run smoke`, y guion de recorrido entregado al usuario. `commit: ninguno`.
-- **T11 — S4 — entrega** — rama `frontend/rediseno-pagina` publicada en GitHub; `main` intacto; sin PR ni despliegue. `commit: push`.
+- **T2 — S1a — inline** — **hecho** (`1ec9c8c`) — fundación visual: tokens (paleta forest, canvas/paper, terracota/oro, radio 12, sombra suave, Inter) y primitivas (panel, chip, tabla, métrica, botón, toast, footer) aplicadas a la página real **sin cambiar comportamiento**; 44 tests + smoke verdes. `commit: unitario`.
+- **T3 — S1a — inline** — **hecho** (`13a0981`, RED→GREEN) — shell: sidebar agrupada con ficha de ámbito e iconos, topbar con breadcrumb, `update-bar` y pie; el perfil mostrado es **el de la sesión real**, nunca un selector de rol. Todo id existente se conserva. `commit: unitario`.
+- **T4 — S1b — inline, test-first** — **hecho** (`96010b2`, RED→GREEN) — tarjetas de métricas con dato real (zonas del catálogo, lotes del historial, estado de sesión); sin fuente, se marca. `commit: unitario`.
+- **T5 — S1b — inline, test-first** — **hecho** (`cbef26e`, RED→GREEN) — búsqueda y filtro de vigencia sobre el historial **por zona** ya consultado; el historial de todas las zonas queda «aún no implementado». `commit: unitario`.
+- **T6 — S1b — inline, test-first** — **hecho** (`c0b5b92`, delegado y luego verificado por el orquestador) — panel de auditoría contra `/v1/audit` real (solo admin, campos reales, 403 con mensaje explícito). `commit: unitario`.
+- **T7 — S1b/S1c — inline, test-first** — **hecho** (`560a7d1`, delegado y luego verificado por el orquestador) — matriz de perfiles y permisos como documentación + **rol real de la sesión** cuando una fuente real lo exponga; si no la expone, se marca «aún no implementado». `commit: unitario`.
+- **T8 — S1c — inline, test-first** — **hecho** (`ded45a4`, RED→GREEN) — estados «aún no implementado» para cada elemento de la Tabla A sin backend (cobertura %, contexto por sector, prioridad regional, acciones de revisión/incorporación de fuentes y hallazgos, «Publicar lote»/avance manual/reevaluación, historial de todas las zonas, estados `candidate`/`in_progress`/`reviewed`/`closed`), visibles y no simulados. `commit: unitario`.
+- **T9 — S1d — inline** — **hecho** (`8800ac3` más el commit de esta actualización) — mantener este documento (Tablas A y B) y `odd/tasks/README.md` al día con cada cambio real. `commit: junto con T2–T8`.
+- **T10 — S1b — verificación** — **hecho** (sin commit): 60/60 pruebas y smoke por el orquestador y por el verificador independiente `mv882r8l-4-jm4w` (V1–V9 PASS); `assess` nativo con riesgo **medio** y `reviewDue: false` — recorrido de navegador con sesión real
+- **T11 — S4 — entrega** — **hecho** (`push`, sin PR ni despliegue): rama `frontend/rediseno-pagina` publicada en GitHub; `main` intacto en `0ed07e2`.
+- **T12 — S1b — inline, test-first** — **hecho** (`5978c69`, RED→GREEN) — barras de factores con `contribution` real, relativas al mayor del mismo lote; sin dato, sin barra.
 
 ## Log
 
@@ -98,3 +99,6 @@ Orden de ejecución. Cada unidad cierra con un commit de unidad de trabajo en `f
   - **Alcance (reescribe el alcance de T2–T4):** portar **todo lo que ya tenga dato real**, no solo lo visual. Añade panel de auditoría real, métricas reales, búsqueda y filtro del historial y matriz de perfiles. El resto se marca «aún no implementado».
   - **Recorrido:** lo ejecuta el usuario al terminar; esta sesión entrega el guion exacto y qué capturar.
   - **Preservación:** el mockup se copió a `odd/urgent/rediseno-pagina/referencia-mockup/` (30 archivos, incluida la instantánea completa con `gateway-web/` y los dos prototipos HTML); `md5sum -b` de `frontend/` **idéntico 23/23** contra `tmp/`. Deja de existir una única copia ignorada por Git.
+- **L5** — Rediseño implementado sobre la **misma** página, unidad por unidad y con un commit por unidad en `frontend/rediseno-pagina`. Cada unidad con comportamiento nuevo se hizo **test-first**, con RED observado antes de tocar fuente. Commits: `1ec9c8c` (sistema de diseño), `13a0981` (shell y marcador de sección), `96010b2` (métricas), `cbef26e` (búsqueda y filtro del historial), `c0b5b92` (auditoría real), `560a7d1` (matriz de perfiles y rol real), `ded45a4` (inventario «aún no implementado»), `5978c69` (barras de factores), `8800ac3` (índice de tareas). T6 y T7 se delegaron a escritores acotados y **el orquestador verificó el código antes de commitear**, no la afirmación del escritor: 0 identificadores perdidos, `#logout` único, sin orígenes nuevos, y las guardas que cita la matriz comprobadas a mano (`risk/security.go:43` acepta `viewer` o `admin`; `jobs/security.go:44` exige `admin`; `gateway.go:39` enruta `/v1/audit` a `jobs`). Ningún archivo fuera de `frontend/` y `odd/` cambió: `package.json`, `serve.mjs` y la CSP quedaron idénticos.
+- **L6** — Verificación del candidato congelado en `5978c69`. Propia: **60 pruebas, 60 pass, 0 fail, 0 skipped** y `npm run smoke` PASS. Independiente (`gentle-ai-verify` `mv882r8l-4-jm4w`, solo lectura, árbol limpio antes y después): **V1–V9 PASS, ningún FAIL y ningún NOT VERIFIED dentro de su alcance**; contó 69 identificadores antes y 109 después con **0 perdidos**; confirmó que `/v1/audit` se llama **sin cadena de consulta**, que el rol decodificado tiene un único consumidor (`renderSessionRole`) y que ninguna petición, retorno temprano ni estado de control depende de él, que la Tabla B sigue completa (16/16 PRESENT) y que el diff no sale de `frontend/` y `odd/`. `assess` nativo del rango `2d982cc..HEAD`: riesgo **medio**, `reviewDue: false` (`under_budget`), plan con `independentVerifier: false`; por la regla de entrada **no se inició revisión nativa** y no hubo prompt de consentimiento. Límites que la verificación **no** cubre y que quedan declarados: render real en navegador (ninguna prueba lo cubre; solo lo confirma el recorrido del usuario), operación viva con Keycloak y API reales, y desviación de reloj mayor que el margen del cliente.
+- **L7** — Guion de recorrido entregado al usuario, que es quien lo ejecuta (único paso que faltaba para cerrar también el punto abierto de la ruta anterior): abrir `http://localhost:4173` y **nunca** `127.0.0.1:4173` → sin sesión, métricas en `—`/`0` y auditoría `SIN CONSULTAR` → iniciar sesión con Keycloak como `demo-admin` → comprobar «Sesión conectada», el rol declarado por el token y la nota de firma **no** verificada → ver el registro de actividad real → elegir comuna y confirmar color y lote → elegir escenario y solicitar lote, repitiendo con otro escenario para confirmar que el lote cambia → buscar y filtrar en el historial y restablecer filtros → cerrar sesión y comprobar que todo se limpia. Opcional y recomendado: entrar como `demo-viewer` y confirmar que la auditoría muestra `SIN PERMISO` con el código y el `request_id`. **Acoplamiento declarado:** la prueba de la matriz de perfiles relee cada `ruta:línea` del backend, así que fallará si se mueven líneas no relacionadas — es detección de deriva deliberada de una afirmación documental, no un defecto. El diff que evaluó `assess` incluye la instantánea de 30 archivos del mockup preservado, que va en su propio commit (`dba7c12`, solo documentación) y no necesita revisarse como código.
