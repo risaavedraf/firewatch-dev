@@ -1,0 +1,43 @@
+.env
+**/.env
+**/bin/
+**/coverage.out
+*.test
+.codegraph/
+
+# Generated, local-only and platform artefacts. None of these is source.
+__pycache__/
+*.pyc
+.atl/
+node_modules/
+Thumbs.db
+.DS_Store
+
+# Excluded in full by decision of the project owner. It also holds a few small
+# text files, so this exclusion is deliberate rather than content-based.
+portable/
+
+# The RAW Esri download under data/raw/geo/ is volatile and regenerable: it is
+# identified by the sha256 recorded in backend/contracts/gen/geo/valparaiso-comunas.provenance.json,
+# so it stays out of version control. The DERIVED GeoJSON is a versioned product
+# asset in the shared contracts module (backend/contracts/gen/geo/) so that the
+# shared geo package's go:embed reaches it; that file is deliberately NOT
+# ignored here.
+data/raw/geo/valparaiso-comunas-*.esri.json
+
+# Local scratch. It holds transient review evidence (frozen manifests and
+# ledgers), a byte-identical copy of the retired frontend mockup and one-off
+# scripts. This repository already documents tmp/ as OUT of version control:
+# frontend/README.md describes the retired-mockup copy kept there "outside
+# version control", and odd/tasks/README.md states that the historical tmp/
+# manifests were never rewritten. Ignoring it here makes that documented
+# statement enforced instead of merely asserted, and keeps the retired mockup
+# from being duplicated back into the repository. Nothing reads tmp/ at
+# runtime, so this exclusion removes no capability.
+tmp/
+
+# Local tool caches. Each one already carries its own `*` ignore file, so it
+# never contributes content; listing them here keeps the intent explicit and
+# survives someone deleting that inner file.
+.pytest_cache/
+.ruff_cache/

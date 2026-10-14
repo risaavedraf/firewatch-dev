@@ -1,0 +1,195 @@
+name: firewatch
+
+x-oidc: &oidc
+  APP_ENV: development
+  OIDC_ISSUER: http://localhost:8081/realms/firewatch
+  OIDC_JWKS_URL: http://identity:8080/realms/firewatch/protocol/openid-connect/certs
+  OIDC_AUDIENCE: firewatch-api
+
+x-hardened: &hardened
+  read_only: true
+  cap_drop: [ALL]
+  security_opt: [no-new-privileges:true]
+  user: '65532:65532'
+  init: true
+  pids_limit: 100
+  mem_limit: 256m
+  cpus: 1.0
+  networks: [backend]
+  restart: unless-stopped
+
+services:
+  postgres:
+    image: postgis/postgis:17-3.5
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Run python scripts/init_env.py}
+      JOBS_DB_PASSWORD: ${JOBS_DB_PASSWORD:?required}
+      RISK_DB_PASSWORD: ${RISK_DB_PASSWORD:?required}
+      KEYCLOAK_DB_PASSWORD: ${KEYCLOAK_DB_PASSWORD:?required}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./deploy/local/postgres-init.sh:/docker-entrypoint-initdb.d/10-firewatch.sh:ro
+    networks: [backend]
+    healthcheck:
+      test: [CMD-SHELL, 'pg_isready -U postgres -d postgres']
+      interval: 5s
+      timeout: 3s
+      retries: 30
+    restart: unless-stopped
+
+  rabbitmq:
+    image: rabbitmq:4.1.8-management
+    hostname: rabbitmq
+    environment:
+      RABBITMQ_DEFAULT_USER: firewatch
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:?required}
+      RABBITMQ_DEFAULT_VHOST: firewatch
+    volumes:
+      - rabbitmq-data:/var/lib/rabbitmq
+      - ./deploy/local/rabbitmq-plugins:/etc/rabbitmq/enabled_plugins:ro
+    ports: ['127.0.0.1:15672:15672']
+    networks: [backend, edge]
+    healthcheck:
+      test: [CMD, rabbitmq-diagnostics, -q, ping]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+    restart: unless-stopped
+
+  identity:
+    image: quay.io/keycloak/keycloak:26.5.2
+    command: [start-dev, --import-realm]
+    environment:
+      KC_DB: postgres
+      KC_DB_URL: jdbc:postgresql://postgres:5432/identity
+      KC_DB_USERNAME: identity_app
+      KC_DB_PASSWORD: ${KEYCLOAK_DB_PASSWORD:?required}
+      KC_BOOTSTRAP_ADMIN_USERNAME: local-admin
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:?required}
+      KC_HOSTNAME: http://localhost:8081
+      KC_HEALTH_ENABLED: 'true'
+      DEMO_ADMIN_PASSWORD: ${DEMO_ADMIN_PASSWORD:?required}
+      DEMO_VIEWER_PASSWORD: ${DEMO_VIEWER_PASSWORD:?required}
+    volumes:
+      - ./deploy/local/firewatch-realm.json:/opt/keycloak/data/import/firewatch-realm.json:ro
+    ports: ['127.0.0.1:8081:8080']
+    networks: [backend, edge]
+    depends_on:
+      postgres: {condition: service_healthy}
+    restart: unless-stopped
+
+  jobs-migrate:
+    <<: *hardened
+    build: {context: ., dockerfile: services/jobs/Dockerfile}
+    command: [migrate]
+    restart: 'no'
+    environment:
+      DATABASE_URL: postgres://postgres:${POSTGRES_PASSWORD:?required}@postgres:5432/jobs?sslmode=disable
+    depends_on:
+      postgres: {condition: service_healthy}
+
+  risk-migrate:
+    <<: *hardened
+    build: {context: ., dockerfile: services/risk/Dockerfile}
+    command: [migrate]
+    restart: 'no'
+    environment:
+      DATABASE_URL: postgres://postgres:${POSTGRES_PASSWORD:?required}@postgres:5432/risk?sslmode=disable
+    depends_on:
+      postgres: {condition: service_healthy}
+
+  jobs:
+    <<: *hardened
+    build: {context: ., dockerfile: services/jobs/Dockerfile}
+    environment:
+      <<: *oidc
+      DATABASE_URL: postgres://jobs_app:${JOBS_DB_PASSWORD:?required}@postgres:5432/jobs?sslmode=disable
+      AMQP_URL: amqp://firewatch:${RABBITMQ_PASSWORD:?required}@rabbitmq:5672/firewatch
+    depends_on:
+      jobs-migrate: {condition: service_completed_successfully}
+      rabbitmq: {condition: service_healthy}
+
+  risk:
+    <<: *hardened
+    build: {context: ., dockerfile: services/risk/Dockerfile}
+    environment:
+      <<: *oidc
+      DATABASE_URL: postgres://risk_app:${RISK_DB_PASSWORD:?required}@postgres:5432/risk?sslmode=disable
+      AMQP_URL: amqp://firewatch:${RABBITMQ_PASSWORD:?required}@rabbitmq:5672/firewatch
+    depends_on:
+      risk-migrate: {condition: service_completed_successfully}
+      rabbitmq: {condition: service_healthy}
+
+  gateway:
+    <<: *hardened
+    build: {context: ., dockerfile: services/gateway/Dockerfile}
+    environment:
+      <<: *oidc
+      JOBS_URL: http://jobs:8080
+      RISK_URL: http://risk:8080
+      WEB_ORIGIN: http://localhost:4173
+    ports: ['127.0.0.1:8080:8080']
+    networks: [backend, edge]
+    depends_on: [jobs, risk, identity]
+
+  prometheus:
+    image: prom/prometheus:v3.2.1
+    profiles: [observability]
+    volumes:
+      - ./deploy/local/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    ports: ['127.0.0.1:9090:9090']
+    networks: [backend, edge]
+
+  jobs-test:
+    profiles: [test]
+    build: {context: ., dockerfile: services/jobs/Dockerfile, target: test}
+    environment:
+      TEST_DATABASE_URL: postgres://jobs_app:${JOBS_DB_PASSWORD:?required}@postgres:5432/jobs_test?sslmode=disable
+      TEST_ZONES_REFERENCE_DATABASE_URL: postgres://risk_app:${RISK_DB_PASSWORD:?required}@postgres:5432/risk_test?sslmode=disable
+    depends_on:
+      jobs-test-migrate: {condition: service_completed_successfully}
+      risk-test-migrate: {condition: service_completed_successfully}
+    networks: [backend]
+
+  risk-test:
+    profiles: [test]
+    build: {context: ., dockerfile: services/risk/Dockerfile, target: test}
+    environment:
+      TEST_DATABASE_URL: postgres://risk_app:${RISK_DB_PASSWORD:?required}@postgres:5432/risk_test?sslmode=disable
+    depends_on:
+      risk-test-migrate: {condition: service_completed_successfully}
+    networks: [backend]
+
+  jobs-test-migrate:
+    <<: *hardened
+    profiles: [test]
+    build: {context: ., dockerfile: services/jobs/Dockerfile}
+    command: [migrate]
+    restart: 'no'
+    environment:
+      DATABASE_URL: postgres://postgres:${POSTGRES_PASSWORD:?required}@postgres:5432/jobs_test?sslmode=disable
+    depends_on:
+      postgres: {condition: service_healthy}
+
+  risk-test-migrate:
+    <<: *hardened
+    profiles: [test]
+    build: {context: ., dockerfile: services/risk/Dockerfile}
+    command: [migrate]
+    restart: 'no'
+    environment:
+      DATABASE_URL: postgres://postgres:${POSTGRES_PASSWORD:?required}@postgres:5432/risk_test?sslmode=disable
+    depends_on:
+      postgres: {condition: service_healthy}
+
+networks:
+  edge:
+  backend:
+    internal: true
+
+volumes:
+  postgres-data:
+  rabbitmq-data:
+  prometheus-data:

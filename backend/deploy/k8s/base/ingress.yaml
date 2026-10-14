@@ -1,0 +1,22 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: firewatch
+  annotations:
+    nginx.ingress.kubernetes.io/ssl-redirect: 'true'
+    nginx.ingress.kubernetes.io/proxy-body-size: 8k
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts: [firewatch.example.invalid]
+      secretName: firewatch-tls
+  rules:
+    - host: firewatch.example.invalid
+      http:
+        paths:
+          - path: /v1/
+            pathType: Prefix
+            backend:
+              service:
+                name: gateway
+                port: {number: 8080}

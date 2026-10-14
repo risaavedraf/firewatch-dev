@@ -1,0 +1,174 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gateway
+spec:
+  replicas: 2
+  selector:
+    matchLabels: {app: gateway}
+  template:
+    metadata:
+      labels: {app: gateway}
+    spec:
+      serviceAccountName: firewatch-app
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        seccompProfile: {type: RuntimeDefault}
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels: {app: gateway}
+      containers:
+        - name: gateway
+          image: firewatch/gateway:replace-before-deploy
+          ports: [{name: http, containerPort: 8080}]
+          envFrom: [{configMapRef: {name: firewatch-config}}]
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: [ALL]}
+          resources:
+            requests: {cpu: 100m, memory: 64Mi}
+            limits: {cpu: '1', memory: 256Mi}
+          readinessProbe:
+            httpGet: {path: /health/ready, port: http}
+          livenessProbe:
+            httpGet: {path: /health/live, port: http}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: jobs
+spec:
+  replicas: 2
+  selector:
+    matchLabels: {app: jobs}
+  template:
+    metadata:
+      labels: {app: jobs}
+    spec:
+      serviceAccountName: firewatch-app
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        seccompProfile: {type: RuntimeDefault}
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels: {app: jobs}
+      containers:
+        - name: jobs
+          image: firewatch/jobs:replace-before-deploy
+          ports: [{name: http, containerPort: 8080}]
+          envFrom:
+            - configMapRef: {name: firewatch-config}
+            - secretRef: {name: jobs-runtime}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: [ALL]}
+          resources:
+            requests: {cpu: 100m, memory: 64Mi}
+            limits: {cpu: '1', memory: 256Mi}
+          readinessProbe:
+            httpGet: {path: /health/ready, port: http}
+          livenessProbe:
+            httpGet: {path: /health/live, port: http}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: risk
+spec:
+  replicas: 2
+  selector:
+    matchLabels: {app: risk}
+  template:
+    metadata:
+      labels: {app: risk}
+    spec:
+      serviceAccountName: firewatch-app
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        seccompProfile: {type: RuntimeDefault}
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels: {app: risk}
+      containers:
+        - name: risk
+          image: firewatch/risk:replace-before-deploy
+          ports: [{name: http, containerPort: 8080}]
+          envFrom:
+            - configMapRef: {name: firewatch-config}
+            - secretRef: {name: risk-runtime}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: [ALL]}
+          resources:
+            requests: {cpu: 100m, memory: 64Mi}
+            limits: {cpu: '1', memory: 256Mi}
+          readinessProbe:
+            httpGet: {path: /health/ready, port: http}
+          livenessProbe:
+            httpGet: {path: /health/live, port: http}
+---
+apiVersion: v1
+kind: Service
+metadata: {name: gateway}
+spec:
+  selector: {app: gateway}
+  ports: [{name: http, port: 8080, targetPort: http}]
+---
+apiVersion: v1
+kind: Service
+metadata: {name: jobs}
+spec:
+  selector: {app: jobs}
+  ports: [{name: http, port: 8080, targetPort: http}]
+---
+apiVersion: v1
+kind: Service
+metadata: {name: risk}
+spec:
+  selector: {app: risk}
+  ports: [{name: http, port: 8080, targetPort: http}]
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata: {name: gateway}
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels: {app: gateway}
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata: {name: jobs}
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels: {app: jobs}
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata: {name: risk}
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels: {app: risk}

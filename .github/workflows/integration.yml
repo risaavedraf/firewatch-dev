@@ -1,0 +1,32 @@
+name: Backend integration
+on:
+  pull_request:
+    paths: ['backend/**', '.github/workflows/**']
+  push:
+    paths: ['backend/**', '.github/workflows/**']
+permissions:
+  contents: read
+jobs:
+  compose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - run: python3 scripts/init_env.py
+      - run: docker compose config --quiet
+      - run: docker compose --profile test run --build --rm jobs-test
+      - run: docker compose --profile test run --build --rm risk-test
+      - run: docker compose up -d --build
+      - run: python3 scripts/smoke.py --resilience
+      - name: Validate deployment and HTTP contracts
+        run: |
+          kubectl kustomize deploy/k8s/base | go run github.com/yannh/kubeconform/cmd/kubeconform@v0.6.7 -strict -summary
+          go run github.com/getkin/kin-openapi/cmd/validate@v0.133.0 contracts/openapi/firewatch-v1.yaml
+      - name: Teardown ephemeral CI data
+        if: always()
+        run: docker compose --profile test down -v

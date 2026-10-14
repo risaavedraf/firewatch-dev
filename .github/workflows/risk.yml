@@ -1,0 +1,12 @@
+name: Risk
+on:
+  pull_request:
+    paths: ['backend/services/risk/**', 'backend/contracts/**', 'backend/.dockerignore', '.github/workflows/**']
+  push:
+    paths: ['backend/services/risk/**', 'backend/contracts/**', 'backend/.dockerignore', '.github/workflows/**']
+permissions:
+  contents: read
+jobs:
+  checks:
+    uses: ./.github/workflows/_go-service.yml
+    with: {service: risk}

@@ -1,0 +1,12 @@
+name: Gateway
+on:
+  pull_request:
+    paths: ['backend/services/gateway/**', 'backend/contracts/**', 'backend/.dockerignore', '.github/workflows/**']
+  push:
+    paths: ['backend/services/gateway/**', 'backend/contracts/**', 'backend/.dockerignore', '.github/workflows/**']
+permissions:
+  contents: read
+jobs:
+  checks:
+    uses: ./.github/workflows/_go-service.yml
+    with: {service: gateway}

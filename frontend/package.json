@@ -1,0 +1,10 @@
+{
+  "name": "firewatch-frontend",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "serve": "node scripts/serve.mjs",
+    "test": "node --test tests/proposal-readback.test.cjs",
+    "smoke": "node scripts/smoke.mjs"
+  }
+}

@@ -1,0 +1,46 @@
+name: Go service checks
+on:
+  workflow_call:
+    inputs:
+      service:
+        required: true
+        type: string
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      GOWORK: 'off'
+    defaults:
+      run:
+        working-directory: backend/services/${{ inputs.service }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version: '1.26.6'
+          cache-dependency-path: backend/services/${{ inputs.service }}/go.sum
+      - name: Format, integrity, tests and static checks
+        run: |
+          test -z "$(gofmt -l .)"
+          go mod verify
+          go test -race -count=1 ./...
+          go vet ./...
+          go run golang.org/x/vuln/cmd/govulncheck@v1.1.4 ./...
+      - name: Build container with provenance and SBOM
+        working-directory: backend
+        env:
+          SERVICE: ${{ inputs.service }}
+        run: docker build --sbom=true --provenance=true -f "services/$SERVICE/Dockerfile" -t "firewatch-$SERVICE:ci" .
+      - name: Scan runtime image
+        working-directory: backend
+        env:
+          SERVICE: ${{ inputs.service }}
+        run: |
+          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock:ro \
+            aquasec/trivy:0.69.3@sha256:bcc376de8d77cfe086a917230e818dc9f8528e3c852f7b1aff648949b6258d1c \
+            image --scanners vuln --severity HIGH,CRITICAL --exit-code 1 "firewatch-$SERVICE:ci"

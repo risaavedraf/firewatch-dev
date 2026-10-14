@@ -1,0 +1,642 @@
+openapi: 3.0.3
+info:
+  title: FireWatch demonstration backend
+  version: 0.1.0
+  description: Own non-official rule over synthetic input; no real inference.
+servers:
+  - url: http://localhost:8080
+security:
+  - bearerAuth: []
+paths:
+  /v1/risk/status:
+    get:
+      operationId: getRiskStatus
+      description: >-
+        Viewer/admin. Bounded database ping then cached broker snapshot. Not an
+        end-to-end delivery test or evidence of real risk. Freshness is bounded,
+        not instantaneous. A 403 means not authorized to check, not unavailable.
+        This authenticated route's 200/503 follows the full dependency decision
+        and keeps doing so; the unauthenticated /health/ready probe is decided
+        by the database alone, so broker and dead-letter degradation is reported
+        here and in /metrics instead of by that probe's status code.
+      responses:
+        '200': {$ref: '#/components/responses/OperationalReady'}
+        '503': {$ref: '#/components/responses/OperationalUnavailable'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+  /v1/jobs/status:
+    get:
+      operationId: getJobsStatus
+      description: >-
+        Admin only; viewer receives 403, meaning not authorized to check rather
+        than unavailable. Bounded database ping then cached broker snapshot;
+        not an instantaneous or end-to-end delivery guarantee. This
+        authenticated route's 200/503 follows the full dependency decision and
+        keeps doing so; the unauthenticated /health/ready probe is decided by
+        the database alone, so broker and dead-letter degradation is reported
+        here and in /metrics instead of by that probe's status code.
+      responses:
+        '200': {$ref: '#/components/responses/OperationalReady'}
+        '503': {$ref: '#/components/responses/OperationalUnavailable'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+  /v1/jobs:
+    post:
+      operationId: createDemoJob
+      description: >-
+        Admin only. Same subject and idempotency key return the existing job.
+        Any zone code present in the zone catalogue is accepted; the fixed
+        demo zone is one entry of that catalogue. Optional scenario_id selects
+        a reproducible synthetic profile. Without it, the legacy fixture is
+        used. A scenario job's evaluated_at is assigned by the server once,
+        never accepted from the client. Idempotent retries return the original
+        job, scenario and instant even if the new body requests another
+        scenario.
+      parameters:
+        - in: header
+          name: Idempotency-Key
+          required: true
+          schema: {type: string, format: uuid}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [zone_id]
+              properties:
+                zone_id:
+                  type: string
+                  example: valparaiso-demo
+                  description: >-
+                    Valid values are the zone catalogue (zones); the accepted
+                    set is served by the zones endpoint.
+                scenario_id:
+                  $ref: '#/components/schemas/SyntheticScenarioID'
+      responses:
+        '202':
+          description: Durable job accepted or previously accepted job returned
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Job'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '415': {description: JSON content type required}
+        '429': {description: Gateway rate limit exceeded}
+        '503': {description: Storage unavailable; no acceptance promised}
+  /v1/jobs/{id}:
+    get:
+      operationId: getJob
+      description: >-
+        Admin only. State is queued or published; dead-lettered jobs require
+        operator inspection in this slice.
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: {type: string, format: uuid}
+      responses:
+        '200':
+          description: Job status
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Job'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {description: Unknown job}
+  /v1/risk/latest:
+    get:
+      operationId: getLatestBatch
+      description: >-
+        Viewer/admin. Reads the newest requested batch, not the most recently
+        finished worker.
+      parameters: [{$ref: '#/components/parameters/Zone'}]
+      responses:
+        '200':
+          description: Latest batch, with current/stale status
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Batch'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {description: No published batch; data_status is insufficient}
+  /v1/risk/history:
+    get:
+      operationId: listBatches
+      description: >-
+        Viewer/admin. Up to 100 batches in descending request-time order.
+      parameters: [{$ref: '#/components/parameters/Zone'}]
+      responses:
+        '200':
+          description: Bounded history
+          content:
+            application/json:
+              schema:
+                type: array
+                items: {$ref: '#/components/schemas/Batch'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+  /v1/risk/synthetic-scenarios:
+    get:
+      operationId: listSyntheticScenarios
+      description: >-
+        Viewer/admin. Lists the built-in demonstration profiles without
+        fetching observations or accessing the database/broker. These are
+        synthetic software scenarios, not calibrated risk probabilities or
+        official observations. The partial-retrieval profile intentionally
+        refuses publication; existing job state handling still applies.
+      responses:
+        '200':
+          description: Ordered synthetic scenario catalogue
+          content:
+            application/json:
+              schema:
+                type: array
+                items: {$ref: '#/components/schemas/SyntheticScenario'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+  /v1/risk/sources:
+    get:
+      operationId: getRiskSources
+      description: >-
+        Viewer/admin. Embedded geographic provenance and the active publisher
+        provider descriptor, separately. No database, broker or source fetch.
+        Geography does not establish real risk observations, a licence grant or
+        DIFROL validation. Stored cutoff_at is a retrieval-time substitution,
+        not an actual source cutoff; source_cutoff_at is explicitly null.
+      responses:
+        '200':
+          description: Geography integrity and active risk input
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [geography, risk_input]
+                properties:
+                  geography:
+                    type: object
+                    required:
+                      - provenance
+                      - source_cutoff_at
+                      - cutoff_semantics
+                      - integrity
+                    properties:
+                      provenance:
+                        $ref: '#/components/schemas/GeographyProvenance'
+                      source_cutoff_at:
+                        type: string
+                        nullable: true
+                        description: Null; actual source cutoff is unknown.
+                      cutoff_semantics:
+                        type: string
+                        description: >-
+                          Stored cutoff_at equals retrieved_at,
+                          not source cutoff.
+                      integrity:
+                        type: object
+                        required:
+                          - algorithm
+                          - recorded_sha256
+                          - computed_sha256
+                          - matches
+                        properties:
+                          algorithm: {type: string, enum: [sha256]}
+                          recorded_sha256:
+                            type: string
+                            pattern: '^[0-9a-f]{64}$'
+                          computed_sha256:
+                            type: string
+                            pattern: '^[0-9a-f]{64}$'
+                          matches: {type: boolean, enum: [true]}
+                  risk_input:
+                    type: object
+                    required:
+                      - id
+                      - display_name
+                      - kind
+                      - origin
+                      - endpoint
+                      - license
+                      - attribution
+                      - variables
+                      - geo_coverage
+                      - temporal_coverage
+                      - cadence
+                      - purpose
+                      - priority
+                      - synthetic
+                    properties:
+                      id: {type: string}
+                      display_name: {type: string}
+                      kind: {type: string}
+                      origin: {type: string}
+                      endpoint: {type: string}
+                      license: {type: string}
+                      attribution: {type: string}
+                      variables: {type: array, items: {type: string}}
+                      geo_coverage: {type: string}
+                      temporal_coverage: {type: string}
+                      cadence: {type: string}
+                      purpose: {type: string}
+                      priority: {type: integer}
+                      synthetic: {type: boolean}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '503':
+          description: Invalid geography integrity or missing active descriptor
+  /v1/risk/zones:
+    get:
+      operationId: listZones
+      description: >-
+        Viewer/admin. The zone catalogue as a GeoJSON FeatureCollection
+        following RFC 7946. Zones without geometry are omitted rather than
+        given an invented one, so an empty collection is a valid answer and
+        never an error.
+      parameters:
+        - in: query
+          name: bbox
+          required: false
+          schema: {type: string}
+          description: >-
+            Optional bounding box as exactly four comma-separated WGS84
+            numbers: minLon,minLat,maxLon,maxLat. Only zones whose geometry
+            intersects it are returned. A malformed or repeated value is
+            rejected with 400.
+      responses:
+        '200':
+          description: >-
+            Zone catalogue as a FeatureCollection. It is empty when no zone
+            matches the bbox, or when no catalogue zone carries a geometry.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ZoneFeatureCollection'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '503': {description: Storage unavailable}
+  /v1/audit:
+    get:
+      operationId: listAudit
+      description: >-
+        Admin only. Last 100 audit records; application role cannot update or
+        delete audit rows.
+      responses:
+        '200':
+          description: Audit entries
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  required: [actor_id, action, job_id, trace_id, occurred_at]
+                  properties:
+                    actor_id: {type: string}
+                    action:
+                      type: string
+                      enum: [job.requested, batch.published]
+                    job_id: {type: string, format: uuid}
+                    trace_id: {type: string, format: uuid}
+                    occurred_at: {type: string, format: date-time}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+components:
+  securitySchemes:
+    bearerAuth: {type: http, scheme: bearer, bearerFormat: JWT}
+  parameters:
+    Zone:
+      in: query
+      name: zone_id
+      required: true
+      schema:
+        type: string
+        example: valparaiso-demo
+        description: >-
+          Catalogue zone code. The valid set is the zone catalogue, served by
+          the zones endpoint. It is deliberately not an enum: an enum here
+          would drift from the table.
+  responses:
+    OperationalReady:
+      description: Dependencies ready, not pipeline delivery assurance
+      headers:
+        Cache-Control:
+          schema: {type: string, enum: [no-store]}
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/OperationalStatus'}
+    OperationalUnavailable:
+      description: Dependencies degraded or unknown
+      headers:
+        Cache-Control:
+          schema: {type: string, enum: [no-store]}
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/OperationalStatus'}
+    BadRequest: {description: Invalid input}
+    Unauthorized: {description: Missing or invalid access token}
+    Forbidden: {description: Role not permitted}
+  schemas:
+    OperationalStatus:
+      type: object
+      required: [checked_at, ready, reason, dependencies]
+      properties:
+        checked_at:
+          type: string
+          format: date-time
+          description: UTC evaluation completion
+        ready: {type: boolean}
+        reason:
+          type: string
+          enum:
+            - ''
+            - database_unavailable
+            - broker_unavailable
+            - dead_letter_depth_unknown
+            - dead_letter_backlog
+            - status_unavailable
+          description: >-
+            Database failure precedes broker failure, unknown depth, then
+            backlog; empty on success.
+        dependencies:
+          $ref: '#/components/schemas/OperationalDependencies'
+    OperationalDependencies:
+      type: object
+      required: [database, broker, dead_letter]
+      properties:
+        database: {$ref: '#/components/schemas/OperationalDependency'}
+        broker: {$ref: '#/components/schemas/OperationalDependency'}
+        dead_letter: {$ref: '#/components/schemas/DeadLetterStatus'}
+    OperationalDependency:
+      type: object
+      required: [state]
+      properties:
+        state: {type: string, enum: [ready, degraded, unknown]}
+    DeadLetterStatus:
+      type: object
+      required:
+        [state, depth, sampled_at, age_seconds, max_age_seconds, max_depth]
+      properties:
+        state: {type: string, enum: [ready, degraded, unknown]}
+        depth: {type: integer, format: int64, nullable: true, minimum: 0}
+        sampled_at: {type: string, format: date-time, nullable: true}
+        age_seconds: {type: number, nullable: true, minimum: 0}
+        max_age_seconds: {type: number, nullable: true, minimum: 0}
+        max_depth: {type: integer, format: int64, nullable: true, minimum: 0}
+      description: >-
+        Broker connectivity is independent from sample freshness. Missing or
+        stale depth is null/unknown; meaningful timestamp and age remain.
+        Future or absent timestamps yield null sample and age. Age greater than
+        max_age_seconds is stale; equality is fresh. Depth exceeding max_depth
+        is degraded; equality is ready. Configured thresholds are nonnull;
+        absent evaluator gives null thresholds and unknown dependencies.
+    GeographyProvenance:
+      type: object
+      description: >-
+        Original embedded artifact fields; verbatim attribution and restriction.
+        This metadata does not establish a licence grant or DIFROL validation.
+        Unknown future fields remain compatible.
+      additionalProperties: true
+      required:
+        - source_id
+        - provider
+        - endpoint
+        - query_sha256
+        - requested_srid
+        - source_wkid
+        - source_format
+        - derived_format
+        - retrieved_at
+        - cutoff_at
+        - record_count
+        - expected_record_count
+        - record_count_matches_expected
+        - complete
+        - exceeded_transfer_limit
+        - raw_path
+        - raw_sha256
+        - derived_path
+        - derived_sha256
+        - attribution
+        - restriction
+        - restriction_source
+        - notes
+      properties:
+        source_id: {type: string}
+        provider: {type: string}
+        endpoint: {type: string, format: uri}
+        query_sha256: {type: string, pattern: '^[0-9a-f]{64}$'}
+        requested_srid: {type: integer, minimum: 0}
+        source_wkid: {type: integer, minimum: 0}
+        source_format: {type: string}
+        derived_format: {type: string}
+        retrieved_at: {type: string, format: date-time}
+        cutoff_at:
+          type: string
+          format: date-time
+          description: >-
+            Stored retrieval-time substitution equal to retrieved_at, not an
+            actual source cutoff. Geography source_cutoff_at remains null.
+        record_count: {type: integer, minimum: 0}
+        expected_record_count: {type: integer, minimum: 0}
+        record_count_matches_expected: {type: boolean}
+        complete: {type: boolean}
+        exceeded_transfer_limit: {type: boolean}
+        raw_path: {type: string}
+        raw_sha256: {type: string, pattern: '^[0-9a-f]{64}$'}
+        derived_path: {type: string}
+        derived_sha256: {type: string, pattern: '^[0-9a-f]{64}$'}
+        attribution: {type: string}
+        restriction: {type: string}
+        restriction_source:
+          type: string
+          description: >-
+            Verbatim service metadata citation containing a URL, not a bare URI.
+        notes: {type: string}
+    SyntheticScenarioID:
+      type: string
+      enum: [mild, mixed, dry-windy, missing-humidity, stale, partial-retrieval]
+      description: >-
+        Exact built-in synthetic profile ID. Optional in job requests;
+        omit it to preserve the legacy fixture. These IDs describe test
+        inputs, not observed conditions or scientific ground truth.
+    SyntheticScenario:
+      type: object
+      required: [id, description]
+      properties:
+        id: {$ref: '#/components/schemas/SyntheticScenarioID'}
+        description: {type: string}
+    Job:
+      type: object
+      required: [id, zone_id, state, requested_at]
+      properties:
+        id: {type: string, format: uuid}
+        zone_id:
+          type: string
+          example: valparaiso-demo
+          description: >-
+            Valid values are the zone catalogue (zones); the accepted set is
+            served by the zones endpoint.
+        state: {type: string, enum: [queued, published]}
+        batch_id: {type: string, format: uuid, nullable: true}
+        requested_at: {type: string, format: date-time}
+        scenario_id:
+          type: string
+          nullable: true
+          description: >-
+            Original selected synthetic profile; null or absent for legacy
+            jobs. Never changed by idempotent retries.
+        evaluated_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: >-
+            Server-assigned synthetic evaluation instant, fixed once per
+            scenario job; null or absent for legacy jobs. Not an observation
+            cutoff, actual source freshness, or forecast horizon.
+    Batch:
+      type: object
+      required:
+        - id
+        - job_id
+        - zone_id
+        - requested_at
+        - published_at
+        - valid_until
+        - model_version
+        - demo
+        - geometry
+        - data_status
+        - risk_level
+        - notice
+        - factors
+        - rationale
+        - policy
+      properties:
+        id: {type: string, format: uuid}
+        job_id: {type: string, format: uuid}
+        zone_id:
+          type: string
+          example: valparaiso-demo
+          description: >-
+            Valid values are the zone catalogue (zones); the accepted set is
+            served by the zones endpoint.
+        requested_at: {type: string, format: date-time}
+        published_at: {type: string, format: date-time}
+        valid_until: {type: string, format: date-time}
+        scenario_id:
+          type: string
+          nullable: true
+          description: >-
+            Synthetic profile selected for the originating job. Historical
+            and legacy batches retain null or absent metadata without backfill.
+        evaluated_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: >-
+            Synthetic evaluation instant preserved from the job. Not an
+            observation cutoff or real-data freshness measurement.
+        model_version:
+          type: string
+          example: academic-rule-v1
+          description: >-
+            Classifier version actually used for this batch, registered in the
+            models table; rows written before the classifier existed carry
+            demo-fixture-v1.
+        demo:
+          type: boolean
+          description: >-
+            Derived from the provenance of the provider that contributed the
+            data; true means synthetic or demonstrative input.
+        geometry:
+          allOf:
+            - $ref: '#/components/schemas/Geometry'
+          description: >-
+            Current catalogue territory for the commune, not an observed
+            location or a frozen historical boundary. The legacy
+            valparaiso-demo point is illustrative only. Missing commune
+            geometry is an error, never a fallback to the demo point.
+        data_status: {type: string, enum: [current, stale]}
+        risk_level: {type: string, enum: [bajo, medio, alto, desconocido]}
+        notice: {type: string}
+        factors:
+          type: array
+          description: >-
+            One entry per canonical variable, including the variables that are
+            absent from the input.
+          items:
+            type: object
+            required: [name, known]
+            properties:
+              name: {type: string}
+              known: {type: boolean}
+              value: {type: number}
+              contribution: {type: number}
+              note: {type: string}
+        rationale:
+          type: string
+          description: >-
+            Human-readable justification of the assessment, which declares the
+            rule as our own non-official rule.
+        policy:
+          type: object
+          nullable: true
+          description: >-
+            Effective policy reference recorded so a stored level can be
+            reproduced; null for rows written before policy persistence existed.
+          required: [policy_id, parameters, params_hash]
+          properties:
+            policy_id: {type: string}
+            parameters:
+              type: object
+              additionalProperties: {type: string}
+            params_hash: {type: string}
+    Geometry:
+      type: object
+      description: >-
+        A GeoJSON geometry following RFC 7946. The type member is the
+        discriminator, and coordinates are the ones RFC 7946 defines for that
+        type, so this schema deliberately does not restate them: duplicating
+        the standard here would drift from it.
+      required: [type, coordinates]
+      properties:
+        type:
+          type: string
+          enum: [Point, Polygon, MultiPolygon]
+        coordinates:
+          description: >-
+            RFC 7946 coordinates for the declared type: a single position for
+            Point, an array of linear rings for Polygon, and an array of
+            polygons for MultiPolygon. Each position is [longitude, latitude]
+            in WGS84 degrees.
+    ZoneProperties:
+      type: object
+      required: [code, name, province, kind]
+      properties:
+        code: {type: string, example: '05101'}
+        name: {type: string, example: Valparaiso}
+        province: {type: string, example: Valparaiso}
+        kind: {type: string, enum: [comuna, demo]}
+    ZoneFeature:
+      type: object
+      required: [type, properties, geometry]
+      properties:
+        type: {type: string, enum: [Feature]}
+        properties: {$ref: '#/components/schemas/ZoneProperties'}
+        geometry: {$ref: '#/components/schemas/Geometry'}
+    ZoneFeatureCollection:
+      type: object
+      required: [type, features]
+      properties:
+        type: {type: string, enum: [FeatureCollection]}
+        features:
+          type: array
+          description: >-
+            One feature per catalogue zone that carries a geometry; empty when
+            none matches, which is a valid answer rather than an error.
+          items: {$ref: '#/components/schemas/ZoneFeature'}

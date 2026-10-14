@@ -1,0 +1,17 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: firewatch-config
+data:
+  APP_ENV: staging
+  OIDC_ISSUER: https://identity.example.invalid/realms/firewatch
+  OIDC_JWKS_URL: https://identity.example.invalid/realms/firewatch/protocol/openid-connect/certs
+  OIDC_AUDIENCE: firewatch-api
+  JOBS_URL: http://jobs:8080
+  RISK_URL: http://risk:8080
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: firewatch-app
+automountServiceAccountToken: false

@@ -1,0 +1,8 @@
+go 1.26.6
+
+use (
+	./contracts/gen
+	./services/gateway
+	./services/jobs
+	./services/risk
+)

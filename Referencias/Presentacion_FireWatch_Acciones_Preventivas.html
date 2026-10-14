@@ -1,0 +1,1342 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="FireWatch: avance implementado y funcionamiento del flujo preventivo validado, desde la lectura territorial hasta el seguimiento trazable de acciones.">
+  <meta name="theme-color" content="#153d33">
+  <title>FireWatch | De la lectura territorial al seguimiento preventivo</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --forest: #153d33;
+      --forest-deep: #102f29;
+      --forest-mid: #28594a;
+      --moss: #62806b;
+      --sage: #e5ece3;
+      --paper: #fbfaf5;
+      --canvas: #e9ede8;
+      --ink: #183b33;
+      --muted: #66746d;
+      --line: #d9e0d8;
+      --ember: #c75f39;
+      --ember-soft: #f6e6dc;
+      --white: #fff;
+      --shadow: 0 18px 50px rgb(22 50 42 / 12%);
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    *,
+    *::before,
+    *::after {
+      box-sizing: border-box;
+    }
+
+    html {
+      scroll-behavior: smooth;
+      scroll-snap-type: y proximity;
+      background: var(--canvas);
+    }
+
+    body {
+      margin: 0;
+      color: var(--ink);
+      background: var(--canvas);
+      font-size: 16px;
+      line-height: 1.5;
+    }
+
+    a {
+      color: inherit;
+    }
+
+    a:focus-visible {
+      outline: 3px solid var(--ember);
+      outline-offset: 4px;
+    }
+
+    .deck-nav {
+      position: sticky;
+      z-index: 5;
+      top: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      min-height: 60px;
+      padding: 10px 18px;
+      background: rgb(233 237 232 / 94%);
+      border-bottom: 1px solid rgb(21 61 51 / 10%);
+      backdrop-filter: blur(12px);
+    }
+
+    .deck-nav a {
+      display: inline-grid;
+      width: 34px;
+      height: 34px;
+      place-items: center;
+      color: var(--forest);
+      background: var(--paper);
+      border: 1px solid var(--line);
+      border-radius: 50%;
+      font-size: 12px;
+      font-weight: 750;
+      text-decoration: none;
+      transition: background-color 160ms ease, color 160ms ease, transform 160ms ease;
+    }
+
+    .deck-nav a:hover {
+      color: var(--white);
+      background: var(--forest);
+      transform: translateY(-2px);
+    }
+
+    .slide {
+      position: relative;
+      display: flex;
+      width: min(1440px, calc(100vw - 48px), calc((100svh - 112px) * 1.77778));
+      aspect-ratio: 16 / 9;
+      flex-direction: column;
+      margin: 22px auto;
+      padding: clamp(34px, 4.2vw, 68px);
+      overflow: hidden;
+      background: var(--paper);
+      border: 1px solid rgb(21 61 51 / 8%);
+      border-radius: 18px;
+      box-shadow: var(--shadow);
+      scroll-margin-top: 72px;
+      scroll-snap-align: start;
+    }
+
+    .slide-head,
+    .slide-footer,
+    .brand-lockup,
+    .slide-controls {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .slide-head {
+      min-height: 34px;
+      gap: 18px;
+    }
+
+    .brand-lockup {
+      justify-content: flex-start;
+      gap: 10px;
+      color: var(--forest);
+      font-size: 13px;
+      font-weight: 760;
+      letter-spacing: .025em;
+    }
+
+    .brand-mark {
+      display: inline-grid;
+      width: 31px;
+      height: 31px;
+      place-items: center;
+      color: var(--white);
+      background: var(--forest);
+      border-radius: 10px 10px 10px 3px;
+      font-size: 14px;
+      font-weight: 800;
+    }
+
+    .status-tag,
+    .eyebrow,
+    .micro-label {
+      font-size: 11px;
+      font-weight: 800;
+      letter-spacing: .12em;
+      line-height: 1.3;
+      text-transform: uppercase;
+    }
+
+    .status-tag {
+      padding: 8px 11px;
+      color: var(--forest);
+      background: var(--sage);
+      border-radius: 999px;
+      white-space: nowrap;
+    }
+
+    .status-tag.proposal {
+      color: #873b20;
+      background: var(--ember-soft);
+    }
+
+    .slide-body {
+      display: flex;
+      min-height: 0;
+      flex: 1;
+      flex-direction: column;
+      justify-content: center;
+      gap: clamp(16px, 2vw, 28px);
+      padding: 22px 0;
+    }
+
+    .eyebrow {
+      margin: 0 0 8px;
+      color: var(--moss);
+    }
+
+    h1,
+    h2,
+    h3,
+    p {
+      margin-top: 0;
+    }
+
+    h1,
+    h2,
+    h3 {
+      color: var(--forest);
+      line-height: 1.08;
+      letter-spacing: -.035em;
+    }
+
+    h1 {
+      max-width: 900px;
+      margin-bottom: 18px;
+      font-size: clamp(42px, 5.7vw, 82px);
+      font-weight: 760;
+    }
+
+    h2 {
+      max-width: 1040px;
+      margin-bottom: 0;
+      font-size: clamp(32px, 3.8vw, 54px);
+      font-weight: 740;
+    }
+
+    h3 {
+      margin-bottom: 10px;
+      font-size: clamp(18px, 1.75vw, 24px);
+      font-weight: 730;
+      letter-spacing: -.02em;
+    }
+
+    .lead {
+      max-width: 760px;
+      margin-bottom: 0;
+      color: var(--muted);
+      font-size: clamp(18px, 1.9vw, 25px);
+      line-height: 1.45;
+    }
+
+    .slide-footer {
+      min-height: 32px;
+      gap: 18px;
+      padding-top: 14px;
+      color: var(--muted);
+      border-top: 1px solid var(--line);
+      font-size: 12px;
+    }
+
+    .slide-count {
+      font-variant-numeric: tabular-nums;
+      font-weight: 760;
+      letter-spacing: .08em;
+    }
+
+    .slide-controls {
+      gap: 16px;
+    }
+
+    .slide-controls a {
+      color: var(--forest);
+      font-weight: 700;
+      text-decoration-thickness: 1px;
+      text-underline-offset: 3px;
+    }
+
+    .cover {
+      color: var(--white);
+      background:
+        radial-gradient(ellipse at 83% 18%, rgb(199 95 57 / 35%), transparent 34%),
+        linear-gradient(135deg, #153d33 0%, #12372f 58%, #102f29 100%);
+      border-color: transparent;
+    }
+
+    .cover::after {
+      position: absolute;
+      right: -110px;
+      bottom: -230px;
+      width: 560px;
+      height: 560px;
+      border: 1px solid rgb(255 255 255 / 15%);
+      border-radius: 50%;
+      box-shadow: 0 0 0 42px rgb(255 255 255 / 3%), 0 0 0 88px rgb(255 255 255 / 2%);
+      content: "";
+      pointer-events: none;
+    }
+
+    .cover .brand-lockup,
+    .cover h1,
+    .cover .lead {
+      color: var(--white);
+    }
+
+    .cover .brand-mark {
+      color: var(--forest);
+      background: #e5efe4;
+    }
+
+    .cover .eyebrow {
+      color: #c7d8c9;
+    }
+
+    .cover .status-tag {
+      color: #fff3ec;
+      background: rgb(199 95 57 / 28%);
+      border: 1px solid rgb(255 255 255 / 18%);
+    }
+
+    .cover .slide-body {
+      position: relative;
+      z-index: 1;
+      display: grid;
+      grid-template-columns: minmax(0, 1.45fr) minmax(230px, .75fr);
+      align-items: center;
+      gap: clamp(28px, 5vw, 78px);
+    }
+
+    .cover-copy {
+      max-width: 900px;
+    }
+
+    .cover-aside {
+      display: grid;
+      gap: 12px;
+    }
+
+    .cover-note {
+      padding: 18px 19px;
+      background: rgb(255 255 255 / 8%);
+      border: 1px solid rgb(255 255 255 / 16%);
+      border-radius: 14px;
+      backdrop-filter: blur(6px);
+    }
+
+    .cover-note strong {
+      display: block;
+      margin-bottom: 5px;
+      color: #dce9db;
+      font-size: 11px;
+      letter-spacing: .1em;
+      text-transform: uppercase;
+    }
+
+    .cover-note p {
+      margin: 0;
+      color: #f1f5ef;
+      font-size: 15px;
+      line-height: 1.45;
+    }
+
+    .cover .slide-footer {
+      color: #c7d8c9;
+      border-color: rgb(255 255 255 / 22%);
+    }
+
+    .cover .slide-controls a {
+      color: var(--white);
+    }
+
+    .section-intro {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .section-intro .eyebrow {
+      margin-bottom: 0;
+    }
+
+    .two-col,
+    .three-col,
+    .four-col,
+    .decision-grid,
+    .source-grid {
+      display: grid;
+      gap: 14px;
+    }
+
+    .two-col {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .three-col {
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+
+    .four-col {
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+    }
+
+    .decision-grid,
+    .source-grid {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .card {
+      padding: clamp(17px, 2vw, 25px);
+      background: var(--white);
+      border: 1px solid var(--line);
+      border-radius: 15px;
+    }
+
+    .card p:last-child,
+    .card ul:last-child,
+    .card ol:last-child {
+      margin-bottom: 0;
+    }
+
+    .card .micro-label {
+      display: inline-block;
+      margin-bottom: 10px;
+      color: var(--moss);
+    }
+
+    .card.proposal-card {
+      background: #fffaf6;
+      border-color: #eed5c7;
+    }
+
+    .card.proposal-card .micro-label {
+      color: #9c4a2b;
+    }
+
+    .plain-list,
+    .check-list {
+      display: grid;
+      gap: 9px;
+      margin: 0;
+      padding-left: 19px;
+      color: var(--muted);
+      font-size: clamp(14px, 1.2vw, 17px);
+    }
+
+    .plain-list li::marker {
+      color: var(--moss);
+    }
+
+    .proposal-card .plain-list li::marker {
+      color: var(--ember);
+    }
+
+    .callout {
+      display: flex;
+      align-items: flex-start;
+      gap: 12px;
+      padding: 14px 17px;
+      color: var(--forest);
+      background: var(--sage);
+      border-left: 4px solid var(--moss);
+      border-radius: 4px 12px 12px 4px;
+      font-size: 15px;
+      font-weight: 630;
+    }
+
+    .callout.warning {
+      color: #71371f;
+      background: var(--ember-soft);
+      border-color: var(--ember);
+    }
+
+    .callout p {
+      margin: 0;
+    }
+
+    .flow {
+      display: grid;
+      grid-template-columns: repeat(5, minmax(0, 1fr));
+      gap: 11px;
+      counter-reset: flow;
+    }
+
+    .flow-step {
+      position: relative;
+      min-height: 155px;
+      padding: 19px 16px 16px;
+      background: var(--white);
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      counter-increment: flow;
+    }
+
+    .flow-step::before {
+      display: block;
+      margin-bottom: 16px;
+      color: var(--ember);
+      content: "0" counter(flow);
+      font-size: 12px;
+      font-weight: 850;
+      letter-spacing: .12em;
+    }
+
+    .flow-step:not(:last-child)::after {
+      position: absolute;
+      z-index: 2;
+      top: 50%;
+      right: -12px;
+      width: 21px;
+      height: 21px;
+      display: grid;
+      place-items: center;
+      color: var(--forest);
+      background: var(--paper);
+      border: 1px solid var(--line);
+      border-radius: 50%;
+      content: "›";
+      font-size: 17px;
+      font-weight: 800;
+      transform: translateY(-50%);
+    }
+
+    .flow-step h3 {
+      margin-bottom: 8px;
+      font-size: clamp(16px, 1.45vw, 20px);
+    }
+
+    .flow-step p {
+      margin-bottom: 0;
+      color: var(--muted);
+      font-size: clamp(13px, 1.05vw, 15px);
+      line-height: 1.45;
+    }
+
+    .flow-step.proposed {
+      background: #fffaf6;
+      border-color: #eed5c7;
+    }
+
+    .architecture-flow {
+      display: grid;
+      grid-template-columns: minmax(120px, 1fr) 30px minmax(120px, 1fr) 30px minmax(120px, 1fr);
+      align-items: stretch;
+      gap: 8px;
+    }
+
+    .architecture-flow .flow-box {
+      display: flex;
+      min-height: 122px;
+      flex-direction: column;
+      justify-content: center;
+      gap: 8px;
+      padding: 17px;
+      background: var(--white);
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      text-align: center;
+    }
+
+    .flow-box strong {
+      color: var(--forest);
+      font-size: 16px;
+    }
+
+    .flow-box span {
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.4;
+    }
+
+    .flow-arrow {
+      display: grid;
+      place-items: center;
+      color: var(--ember);
+      font-size: 25px;
+      font-weight: 800;
+    }
+
+    .branch-label {
+      grid-column: 1 / -1;
+      margin: 2px 0 -3px;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 760;
+      letter-spacing: .09em;
+      text-transform: uppercase;
+    }
+
+    .stat-panel {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 24px;
+      padding: 21px 24px;
+      color: var(--white);
+      background: var(--forest);
+      border-radius: 16px;
+    }
+
+    .stat-panel strong {
+      display: block;
+      margin-bottom: 5px;
+      color: #fff;
+      font-size: clamp(25px, 3vw, 40px);
+      letter-spacing: -.04em;
+    }
+
+    .stat-panel span {
+      display: block;
+      max-width: 700px;
+      color: #d6e3d7;
+      font-size: 14px;
+    }
+
+    .state-chip {
+      flex: 0 0 auto;
+      padding: 9px 12px;
+      color: #fff2ea;
+      background: rgb(199 95 57 / 30%);
+      border: 1px solid rgb(255 255 255 / 22%);
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: 800;
+      letter-spacing: .1em;
+      white-space: nowrap;
+    }
+
+    .fact-list {
+      display: grid;
+      gap: 10px;
+      margin: 0;
+    }
+
+    .fact-list div {
+      display: grid;
+      grid-template-columns: 138px minmax(0, 1fr);
+      gap: 12px;
+      padding-bottom: 9px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .fact-list dt {
+      color: var(--forest);
+      font-size: 13px;
+      font-weight: 750;
+    }
+
+    .fact-list dd {
+      margin: 0;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .decision-item {
+      display: flex;
+      align-items: flex-start;
+      gap: 13px;
+      padding: 17px 18px;
+      background: var(--white);
+      border: 1px solid var(--line);
+      border-radius: 13px;
+    }
+
+    .decision-number {
+      display: inline-grid;
+      width: 29px;
+      height: 29px;
+      flex: 0 0 auto;
+      place-items: center;
+      color: #8a3c21;
+      background: var(--ember-soft);
+      border-radius: 50%;
+      font-size: 12px;
+      font-weight: 850;
+    }
+
+    .decision-item p {
+      margin: 2px 0 0;
+      color: var(--forest);
+      font-size: clamp(14px, 1.3vw, 17px);
+      font-weight: 680;
+      line-height: 1.42;
+    }
+
+    .source-item {
+      padding: 15px 17px;
+      background: var(--white);
+      border-left: 3px solid var(--moss);
+      border-radius: 0 11px 11px 0;
+    }
+
+    .source-item strong {
+      display: block;
+      margin-bottom: 4px;
+      color: var(--forest);
+      font-size: 14px;
+    }
+
+    .source-item span {
+      display: block;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.4;
+    }
+
+    .small-note {
+      margin: 0;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.45;
+    }
+
+    .emphasis {
+      color: var(--forest);
+      font-weight: 750;
+    }
+
+    .mono {
+      padding: 2px 6px;
+      color: #71371f;
+      background: #f4e7de;
+      border-radius: 5px;
+      font-family: ui-monospace, "Cascadia Code", "Segoe UI Mono", monospace;
+      font-size: .93em;
+    }
+
+    .proposal-banner {
+      display: inline-flex;
+      align-items: center;
+      align-self: flex-start;
+      gap: 8px;
+      padding: 8px 12px;
+      color: #873b20;
+      background: var(--ember-soft);
+      border: 1px solid #eed5c7;
+      border-radius: 999px;
+      font-size: 11px;
+      font-weight: 850;
+      letter-spacing: .1em;
+      text-transform: uppercase;
+    }
+
+    .proposal-banner::before {
+      width: 8px;
+      height: 8px;
+      background: var(--ember);
+      border-radius: 50%;
+      content: "";
+    }
+
+    .closing-panel {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 22px;
+      padding: 18px 20px;
+      color: #e8f0e8;
+      background: var(--forest);
+      border-radius: 14px;
+    }
+
+    .closing-panel strong {
+      color: var(--white);
+    }
+
+    .closing-panel p {
+      max-width: 870px;
+      margin: 0;
+      font-size: 14px;
+    }
+
+    .closing-panel .status-tag {
+      color: #fff3ec;
+      background: rgb(199 95 57 / 32%);
+      border: 1px solid rgb(255 255 255 / 18%);
+    }
+
+    @media (max-width: 760px) {
+      html {
+        scroll-snap-type: none;
+      }
+
+      .deck-nav {
+        justify-content: flex-start;
+        gap: 6px;
+        min-height: 54px;
+        overflow-x: auto;
+        padding: 8px 12px;
+      }
+
+      .deck-nav a {
+        width: 32px;
+        height: 32px;
+        flex: 0 0 auto;
+      }
+
+      .slide {
+        width: calc(100vw - 18px);
+        min-height: calc(100svh - 66px);
+        aspect-ratio: auto;
+        margin: 9px auto;
+        padding: 26px 20px;
+        border-radius: 14px;
+        scroll-margin-top: 58px;
+      }
+
+      .slide-body {
+        gap: 20px;
+        padding: 26px 0;
+      }
+
+      .slide-head {
+        align-items: flex-start;
+      }
+
+      .status-tag {
+        max-width: 48%;
+        font-size: 9px;
+        white-space: normal;
+        text-align: center;
+      }
+
+      .cover .slide-body,
+      .two-col,
+      .three-col,
+      .four-col,
+      .decision-grid,
+      .source-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .cover .slide-body {
+        align-content: center;
+      }
+
+      .cover-aside {
+        grid-template-columns: 1fr;
+      }
+
+      .flow {
+        grid-template-columns: 1fr;
+      }
+
+      .flow-step {
+        min-height: 0;
+      }
+
+      .flow-step::before {
+        margin-bottom: 8px;
+      }
+
+      .flow-step:not(:last-child)::after {
+        top: auto;
+        right: 50%;
+        bottom: -12px;
+        transform: translateX(50%) rotate(90deg);
+      }
+
+      .architecture-flow {
+        grid-template-columns: 1fr;
+      }
+
+      .architecture-flow .flow-box {
+        min-height: 94px;
+      }
+
+      .flow-arrow {
+        height: 20px;
+        transform: rotate(90deg);
+      }
+
+      .branch-label {
+        grid-column: 1;
+      }
+
+      .fact-list div {
+        grid-template-columns: 112px minmax(0, 1fr);
+      }
+
+      .stat-panel,
+      .closing-panel {
+        align-items: flex-start;
+        flex-direction: column;
+      }
+
+      .slide-footer {
+        align-items: flex-end;
+      }
+
+      .slide-controls {
+        gap: 10px;
+      }
+    }
+
+    @media (max-height: 700px) and (min-width: 761px) {
+      .slide {
+        padding: 30px 42px;
+      }
+
+      .slide-body {
+        gap: 15px;
+        padding: 14px 0;
+      }
+
+      h2 {
+        font-size: clamp(28px, 3.35vw, 44px);
+      }
+
+      .card {
+        padding: 16px 18px;
+      }
+
+      .flow-step {
+        min-height: 130px;
+        padding: 15px 13px;
+      }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      html {
+        scroll-behavior: auto;
+      }
+
+      *,
+      *::before,
+      *::after {
+        transition-duration: .01ms !important;
+      }
+    }
+
+    @media print {
+      @page {
+        size: 16in 9in;
+        margin: 0;
+      }
+
+      html,
+      body {
+        width: auto;
+        height: auto;
+        margin: 0;
+        background: #fff;
+        scroll-snap-type: none;
+        print-color-adjust: exact;
+        -webkit-print-color-adjust: exact;
+      }
+
+      .deck-nav,
+      .slide-controls {
+        display: none !important;
+      }
+
+      .slide {
+        width: 16in;
+        height: 9in;
+        min-height: 0;
+        max-width: none;
+        aspect-ratio: auto;
+        margin: 0;
+        padding: .52in .68in;
+        overflow: hidden;
+        border: 0;
+        border-radius: 0;
+        box-shadow: none;
+        break-after: page;
+        page-break-after: always;
+        scroll-margin-top: 0;
+      }
+
+      .slide:last-of-type {
+        break-after: auto;
+        page-break-after: auto;
+      }
+
+      .slide-body {
+        gap: 18px;
+        padding: 16px 0;
+      }
+
+      .slide-footer {
+        min-height: 24px;
+        padding-top: 9px;
+      }
+
+      h1 {
+        font-size: 52pt;
+      }
+
+      h2 {
+        font-size: 32pt;
+      }
+
+      h3 {
+        font-size: 16pt;
+      }
+
+      .lead {
+        font-size: 17pt;
+      }
+
+      .card {
+        padding: 16px 19px;
+      }
+
+      .flow-step {
+        min-height: 132px;
+        padding: 15px 13px;
+      }
+
+      .cover::after {
+        right: -60px;
+        bottom: -280px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <nav class="deck-nav" aria-label="Navegación de diapositivas">
+    <a href="#s01" aria-label="Ir a la diapositiva 1: Apertura" title="Apertura">01</a>
+    <a href="#s02" aria-label="Ir a la diapositiva 2: Propósito" title="Propósito">02</a>
+    <a href="#s03" aria-label="Ir a la diapositiva 3: Lo construido" title="Lo construido">03</a>
+    <a href="#s04" aria-label="Ir a la diapositiva 4: Recorrido actual" title="Recorrido actual">04</a>
+    <a href="#s05" aria-label="Ir a la diapositiva 5: Panel actual" title="Panel actual">05</a>
+    <a href="#s06" aria-label="Ir a la diapositiva 6: Flujo validado" title="Flujo validado">06</a>
+    <a href="#s07" aria-label="Ir a la diapositiva 7: Roles y seguimiento" title="Roles y seguimiento">07</a>
+    <a href="#s08" aria-label="Ir a la diapositiva 8: Arquitectura objetivo" title="Arquitectura objetivo">08</a>
+    <a href="#s09" aria-label="Ir a la diapositiva 9: Operación objetivo" title="Operación objetivo">09</a>
+    <a href="#s10" aria-label="Ir a la diapositiva 10: Alcance y fuentes" title="Alcance y fuentes">10</a>
+  </nav>
+
+  <main class="deck" aria-label="Presentación FireWatch">
+    <section class="slide cover" id="s01" aria-labelledby="title-01">
+      <header class="slide-head">
+        <div class="brand-lockup"><span class="brand-mark" aria-hidden="true">F</span><span>FireWatch · prevención trazable</span></div>
+        <span class="status-tag">Demo técnica · flujo validado</span>
+      </header>
+      <div class="slide-body">
+        <div class="cover-copy">
+          <p class="eyebrow">Del análisis territorial al seguimiento preventivo</p>
+          <h1 id="title-01">FireWatch conecta señales con acciones trazables</h1>
+          <p class="lead">Una base implementada para consultar y procesar lotes, junto con una arquitectura objetivo validada que organiza datos, lectura territorial y seguimiento humano.</p>
+        </div>
+        <aside class="cover-aside" aria-label="Resumen de la presentación">
+          <div class="cover-note">
+            <strong>Construido hoy</strong>
+            <p>Gateway, API Risk/Jobs y panel conectados para consultar lotes y seguir trabajos asíncronos.</p>
+          </div>
+          <div class="cover-note">
+            <strong>Operación objetivo validada</strong>
+            <p>Integrar datos y modelo, priorizar sectores y acompañar decisiones humanas con evidencia.</p>
+          </div>
+        </aside>
+      </div>
+      <footer class="slide-footer">
+        <span class="slide-count">01 / 10</span>
+        <nav class="slide-controls" aria-label="Navegación entre diapositivas"><a href="#s10">Alcance y fuentes</a><a href="#s02">Siguiente →</a></nav>
+      </footer>
+    </section>
+
+    <section class="slide" id="s02" aria-labelledby="title-02">
+      <header class="slide-head">
+        <div class="brand-lockup"><span class="brand-mark" aria-hidden="true">F</span><span>FireWatch</span></div>
+        <span class="status-tag">Propósito y progreso</span>
+      </header>
+      <div class="slide-body">
+        <div class="section-intro">
+          <p class="eyebrow">Valor de FireWatch</p>
+          <h2 id="title-02">De una señal territorial a una revisión que deja registro</h2>
+        </div>
+        <div class="two-col">
+          <article class="card">
+            <span class="micro-label">Base construida</span>
+            <h3>Consulta y procesamiento</h3>
+            <ul class="plain-list">
+              <li>API protegida para consultar el último lote, el historial y el estado de trabajos.</li>
+              <li>Panel conectado al gateway, con consulta de lotes y solicitud administrativa de una demo.</li>
+              <li>Procesamiento asíncrono con eventos, persistencia y auditoría del trabajo.</li>
+            </ul>
+          </article>
+          <article class="card">
+            <span class="micro-label">Flujo validado</span>
+            <h3>Decisión humana y seguimiento</h3>
+            <ul class="plain-list">
+              <li>Combinar una lectura orientativa con exposición y preparación del sector.</li>
+              <li>Revisar la sugerencia: aceptar, ajustar o rechazar con el motivo.</li>
+              <li>Seguir la acción mediante responsable, plazo, estado, evidencia y revisión posterior.</li>
+            </ul>
+          </article>
+        </div>
+        <div class="callout"><p>La propuesta complementa el mapa con trazabilidad: una clasificación orienta la revisión, <strong>no se transforma en una orden automática</strong>.</p></div>
+      </div>
+      <footer class="slide-footer">
+        <span class="slide-count">02 / 10</span>
+        <nav class="slide-controls" aria-label="Navegación entre diapositivas"><a href="#s01">← Anterior</a><a href="#s03">Siguiente →</a></nav>
+      </footer>
+    </section>
+
+    <section class="slide" id="s03" aria-labelledby="title-03">
+      <header class="slide-head">
+        <div class="brand-lockup"><span class="brand-mark" aria-hidden="true">F</span><span>FireWatch</span></div>
+        <span class="status-tag">Implementado en el backend</span>
+      </header>
+      <div class="slide-body">
+        <div class="section-intro">
+          <p class="eyebrow">Gateway, APIs y servicios</p>
+          <h2 id="title-03">La base técnica ya conecta consulta y trabajos asíncronos</h2>
+        </div>
+        <div class="three-col">
+          <article class="card">
+            <span class="micro-label">Acceso y consulta</span>
+            <h3>Panel → Gateway → Risk</h3>
+            <p class="small-note">El panel inicia sesión con Keycloak; el gateway verifica el token y enruta consultas protegidas del lote reciente y su historial.</p>
+          </article>
+          <article class="card">
+            <span class="micro-label">Procesamiento</span>
+            <h3>Jobs + eventos</h3>
+            <p class="small-note">Una solicitud administrativa crea un trabajo auditable. PostgreSQL/PostGIS, outbox y RabbitMQ conectan Jobs con Risk.</p>
+          </article>
+          <article class="card">
+            <span class="micro-label">Experiencia actual</span>
+            <h3>Panel conectado a la API</h3>
+            <p class="small-note">Presenta lote, historial y estado del trabajo; el indicador de disponibilidad consulta al gateway.</p>
+          </article>
+        </div>
+        <div class="callout"><p>La arquitectura separa la lectura de resultados del procesamiento en segundo plano; el detalle del recorrido actual aparece en la siguiente diapositiva.</p></div>
+      </div>
+      <footer class="slide-footer">
+        <span class="slide-count">03 / 10</span>
+        <nav class="slide-controls" aria-label="Navegación entre diapositivas"><a href="#s02">← Anterior</a><a href="#s04">Siguiente →</a></nav>
+      </footer>
+    </section>
+
+    <section class="slide" id="s04" aria-labelledby="title-04">
+      <header class="slide-head">
+        <div class="brand-lockup"><span class="brand-mark" aria-hidden="true">F</span><span>FireWatch</span></div>
+        <span class="status-tag">Recorrido actual</span>
+      </header>
+      <div class="slide-body">
+        <div class="section-intro">
+          <p class="eyebrow">Cómo trabaja la demostración</p>
+          <h2 id="title-04">El panel lee lotes y sigue el ciclo de una solicitud</h2>
+        </div>
+        <div class="architecture-flow" aria-label="Recorridos implementados en la demostración">
+          <div class="branch-label">Consulta de un lote publicado</div>
+          <div class="flow-box"><strong>Panel</strong><span>Solicita latest o history.</span></div>
+          <div class="flow-arrow" aria-hidden="true">→</div>
+          <div class="flow-box"><strong>Gateway</strong><span>Verifica el acceso y deriva la solicitud.</span></div>
+          <div class="flow-arrow" aria-hidden="true">→</div>
+          <div class="flow-box"><strong>Risk + datos</strong><span>Devuelve lote, vigencia y estado.</span></div>
+          <div class="branch-label">Solicitud administrativa de un lote demo</div>
+          <div class="flow-box"><strong>Panel → Jobs</strong><span>Registra el trabajo y su auditoría.</span></div>
+          <div class="flow-arrow" aria-hidden="true">→</div>
+          <div class="flow-box"><strong>Eventos → Risk</strong><span>Procesa el lote solicitado.</span></div>
+          <div class="flow-arrow" aria-hidden="true">→</div>
+          <div class="flow-box"><strong>Jobs publicado</strong><span>El panel consulta el estado final.</span></div>
+        </div>
+        <div class="callout"><p>Al finalizar, el panel consulta el estado del trabajo y puede volver a mostrar el nuevo lote publicado.</p></div>
+      </div>
+      <footer class="slide-footer">
+        <span class="slide-count">04 / 10</span>
+        <nav class="slide-controls" aria-label="Navegación entre diapositivas"><a href="#s03">← Anterior</a><a href="#s05">Siguiente →</a></nav>
+      </footer>
+    </section>
+
+    <section class="slide" id="s05" aria-labelledby="title-05">
+      <header class="slide-head">
+        <div class="brand-lockup"><span class="brand-mark" aria-hidden="true">F</span><span>FireWatch</span></div>
+        <span class="status-tag">Panel actual</span>
+      </header>
+      <div class="slide-body">
+        <div class="section-intro">
+          <p class="eyebrow">Dashboard y operación vigente</p>
+          <h2 id="title-05">La demo reúne lectura, historial y seguimiento de trabajos</h2>
+        </div>
+        <div class="three-col">
+          <article class="card">
+            <span class="micro-label">Consulta</span>
+            <h3>Zona y lotes</h3>
+            <p class="small-note">Consulta el último lote y su historial; presenta estado, versión, vigencia e identificador entregados por la API.</p>
+          </article>
+          <article class="card">
+            <span class="micro-label">Trabajo asíncrono</span>
+            <h3>Solicitud y estado</h3>
+            <p class="small-note">Admin solicita un lote de demostración y consulta su estado hasta que el resultado queda publicado.</p>
+          </article>
+          <article class="card">
+            <span class="micro-label">Acceso</span>
+            <h3>Sesión protegida</h3>
+            <p class="small-note">El panel inicia sesión con Keycloak; los servicios validan permisos y el indicador consulta al gateway.</p>
+          </article>
+        </div>
+        <p class="small-note">Nota de lectura: el lote de esta demo usa una fixture sintética y se informa como <span class="mono">not_evaluated</span>.</p>
+      </div>
+      <footer class="slide-footer">
+        <span class="slide-count">05 / 10</span>
+        <nav class="slide-controls" aria-label="Navegación entre diapositivas"><a href="#s04">← Anterior</a><a href="#s06">Siguiente →</a></nav>
+      </footer>
+    </section>
+
+    <section class="slide" id="s06" aria-labelledby="title-06">
+      <header class="slide-head">
+        <div class="brand-lockup"><span class="brand-mark" aria-hidden="true">F</span><span>FireWatch</span></div>
+        <span class="status-tag">Flujo preventivo validado</span>
+      </header>
+      <div class="slide-body">
+        <div class="section-intro">
+          <p class="eyebrow">Funcionamiento de la propuesta</p>
+          <h2 id="title-06">Siete etapas conectan datos, prioridad y seguimiento</h2>
+        </div>
+        <div class="four-col" aria-label="Etapas del flujo preventivo validado">
+          <article class="card"><span class="micro-label">01 · Datos</span><h3>Integrar y revisar</h3><p class="small-note">Antecedentes históricos, meteorológicos y territoriales con fuente, fecha, cobertura y calidad disponibles.</p></article>
+          <article class="card"><span class="micro-label">02 · Lectura</span><h3>Clasificar el sector</h3><p class="small-note">Nivel orientativo, período, vigencia y versión; indicar información insuficiente cuando corresponda.</p></article>
+          <article class="card"><span class="micro-label">03 · Contexto</span><h3>Considerar exposición</h3><p class="small-note">Leer por separado el riesgo estimado, la exposición local y la preparación del sector.</p></article>
+          <article class="card"><span class="micro-label">04 · Prioridad</span><h3>Ordenar la revisión</h3><p class="small-note">Usar la lectura territorial y su contexto para identificar dónde conviene revisar primero.</p></article>
+          <article class="card"><span class="micro-label">05 · Sugerencia</span><h3>Proponer una acción</h3><p class="small-note">Vincular una orientación preventiva al sector y explicar el motivo, sin ejecución automática.</p></article>
+          <article class="card"><span class="micro-label">06 · Decisión humana</span><h3>Aceptar, ajustar o rechazar</h3><p class="small-note">Una persona facultada decide y deja registrado el motivo.</p></article>
+          <article class="card"><span class="micro-label">07 · Seguimiento</span><h3>Documentar y revisar</h3><p class="small-note">Registrar responsable, plazo y estado; vincular evidencia y una lectura posterior independiente.</p></article>
+        </div>
+        <div class="callout"><p>La prioridad orienta una revisión humana; <strong>no es una orden ni una predicción exacta de ignición</strong>.</p></div>
+      </div>
+      <footer class="slide-footer">
+        <span class="slide-count">06 / 10</span>
+        <nav class="slide-controls" aria-label="Navegación entre diapositivas"><a href="#s05">← Anterior</a><a href="#s07">Siguiente →</a></nav>
+      </footer>
+    </section>
+
+    <section class="slide" id="s07" aria-labelledby="title-07">
+      <header class="slide-head">
+        <div class="brand-lockup"><span class="brand-mark" aria-hidden="true">F</span><span>FireWatch</span></div>
+        <span class="status-tag">Roles de la arquitectura objetivo</span>
+      </header>
+      <div class="slide-body">
+        <div class="section-intro">
+          <p class="eyebrow">Responsabilidad y seguimiento del flujo validado</p>
+          <h2 id="title-07">El seguimiento conserva quién decidió, qué se hizo y cómo se revisó</h2>
+        </div>
+        <div class="three-col">
+          <article class="card">
+            <span class="micro-label">Viewer</span>
+            <h3>Consulta</h3>
+            <p class="small-note">Revisa sector, nivel orientativo, vigencia, factores e historial disponible.</p>
+          </article>
+          <article class="card">
+            <span class="micro-label">Admin</span>
+            <h3>Administración</h3>
+            <p class="small-note">Admin gestiona datos, revisa métricas, aprueba versiones y administra acciones, con registro de auditoría.</p>
+          </article>
+          <article class="card">
+            <span class="micro-label">Revisión humana</span>
+            <h3>Decide y fundamenta</h3>
+            <p class="small-note">La persona facultada acepta, ajusta o rechaza la sugerencia; la decisión y su motivo quedan registrados.</p>
+          </article>
+        </div>
+        <dl class="fact-list" aria-label="Trazabilidad del ciclo de acción">
+          <div><dt>Estado</dt><dd>Pendiente, en curso, completada, rechazada o vencida; cada cambio conserva autor y fecha.</dd></div>
+          <div><dt>Evidencia</dt><dd>Se adjunta o referencia y una persona revisora comprueba su suficiencia según el criterio de la acción.</dd></div>
+          <div><dt>Reevaluación</dt><dd>La lectura posterior se registra aparte; puede mantener, reducir o aumentar la prioridad.</dd></div>
+        </dl>
+        <div class="callout"><p>La evidencia ayuda a verificar la ejecución; <strong>no demuestra por sí sola una disminución del riesgo</strong>.</p></div>
+      </div>
+      <footer class="slide-footer">
+        <span class="slide-count">07 / 10</span>
+        <nav class="slide-controls" aria-label="Navegación entre diapositivas"><a href="#s06">← Anterior</a><a href="#s08">Siguiente →</a></nav>
+      </footer>
+    </section>
+
+    <section class="slide" id="s08" aria-labelledby="title-08">
+      <header class="slide-head">
+        <div class="brand-lockup"><span class="brand-mark" aria-hidden="true">F</span><span>FireWatch</span></div>
+        <span class="status-tag">Arquitectura objetivo validada</span>
+      </header>
+      <div class="slide-body">
+        <div class="section-intro">
+          <p class="eyebrow">Contenedores y conexiones</p>
+          <h2 id="title-08">El diseño integra actores, datos, procesamiento, modelo y mapa</h2>
+        </div>
+        <div class="four-col">
+          <article class="card">
+            <span class="micro-label">Personas y web</span>
+            <h3>Viewer / Admin</h3>
+            <p class="small-note">Viewer consulta el mapa, vigencia e historial. Admin gestiona datos, versiones, métricas y acciones preventivas.</p>
+          </article>
+          <article class="card">
+            <span class="micro-label">Interfaz y API</span>
+            <h3>Web + REST/HTTPS</h3>
+            <p class="small-note">React, TypeScript y MapLibre presentan el mapa; Go/Gin gestiona consultas, permisos y coordinación asíncrona.</p>
+          </article>
+          <article class="card">
+            <span class="micro-label">Datos y modelo</span>
+            <h3>Procesar e inferir</h3>
+            <p class="small-note">Históricos CONAF y variables DMC/NASA alimentan Python/scikit-learn; Go/ONNX ejecuta el modelo aprobado por lotes.</p>
+          </article>
+          <article class="card">
+            <span class="micro-label">Persistencia y contexto</span>
+            <h3>Datos versionados</h3>
+            <p class="small-note">Oracle Autonomous Database conserva usuarios, resultados y auditoría; Object Storage guarda conjuntos y modelos. Un proveedor aporta cartografía.</p>
+          </article>
+        </div>
+        <div class="callout"><p>Esta vista describe la <strong>arquitectura objetivo</strong>; la implementación actual de Gateway, Risk, Jobs y panel se presenta en las diapositivas 3–5.</p></div>
+      </div>
+      <footer class="slide-footer">
+        <span class="slide-count">08 / 10</span>
+        <nav class="slide-controls" aria-label="Navegación entre diapositivas"><a href="#s07">← Anterior</a><a href="#s09">Siguiente →</a></nav>
+      </footer>
+    </section>
+
+    <section class="slide" id="s09" aria-labelledby="title-09">
+      <header class="slide-head">
+        <div class="brand-lockup"><span class="brand-mark" aria-hidden="true">F</span><span>FireWatch</span></div>
+        <span class="status-tag">Operación objetivo</span>
+      </header>
+      <div class="slide-body">
+        <div class="section-intro">
+          <p class="eyebrow">Publicación por lotes y consulta del mapa</p>
+          <h2 id="title-09">Cada consulta lee el último lote; el procesamiento ocurre aparte</h2>
+        </div>
+        <div class="architecture-flow" aria-label="Flujo de operación de la arquitectura objetivo">
+          <div class="branch-label">Actualización automática · cada 15 minutos si hay fuentes disponibles</div>
+          <div class="flow-box"><strong>Fuentes</strong><span>Históricos, meteorología y territorio.</span></div>
+          <div class="flow-arrow" aria-hidden="true">→</div>
+          <div class="flow-box"><strong>Worker Python</strong><span>Ingesta, valida y prepara el lote.</span></div>
+          <div class="flow-arrow" aria-hidden="true">→</div>
+          <div class="flow-box"><strong>Inferencia + publicación</strong><span>Modelo aprobado; resultado versionado.</span></div>
+          <div class="branch-label">Consulta de Viewer</div>
+          <div class="flow-box"><strong>Web</strong><span>Selecciona zona y período.</span></div>
+          <div class="flow-arrow" aria-hidden="true">→</div>
+          <div class="flow-box"><strong>API → base</strong><span>Autoriza y lee el lote publicado.</span></div>
+          <div class="flow-arrow" aria-hidden="true">→</div>
+          <div class="flow-box"><strong>Mapa y ficha</strong><span>Muestra nivel, vigencia y estado de datos.</span></div>
+        </div>
+        <div class="callout"><p>El Viewer consulta un lote publicado: <strong>la inferencia no se ejecuta en cada clic</strong>. Admin puede solicitar trabajos, seguir su estado y aprobar una versión tras revisar sus métricas.</p></div>
+      </div>
+      <footer class="slide-footer">
+        <span class="slide-count">09 / 10</span>
+        <nav class="slide-controls" aria-label="Navegación entre diapositivas"><a href="#s08">← Anterior</a><a href="#s10">Siguiente →</a></nav>
+      </footer>
+    </section>
+
+    <section class="slide" id="s10" aria-labelledby="title-10">
+      <header class="slide-head">
+        <div class="brand-lockup"><span class="brand-mark" aria-hidden="true">F</span><span>FireWatch</span></div>
+        <span class="status-tag">Alcance y fuentes</span>
+      </header>
+      <div class="slide-body">
+        <div class="section-intro">
+          <p class="eyebrow">Cierre</p>
+          <h2 id="title-10">Qué se construyó y cómo se espera que funcione</h2>
+        </div>
+        <div class="source-grid" aria-label="Materiales consultados">
+          <div class="source-item"><strong>Implementación actual</strong><span>Lectura estática del gateway, el panel integrado, los servicios Risk/Jobs, mensajería, contratos y persistencia.</span></div>
+          <div class="source-item"><strong>Arquitectura de FireWatch</strong><span>Referencias EP1, C4 y dimensionamiento: alcance, roles de aplicación, flujo de datos y objetivos de diseño.</span></div>
+          <div class="source-item"><strong>Flujo preventivo validado</strong><span>Material FireWatch sobre clasificación orientativa, exposición, sugerencia, decisión humana, evidencia y reevaluación.</span></div>
+          <div class="source-item"><strong>Operación objetivo</strong><span>Actualización programada, consulta del lote publicado y administración de trabajos/versiones según C4 y EP1.</span></div>
+        </div>
+        <div class="closing-panel">
+          <p><strong>Recorrido:</strong> las diapositivas 3–5 muestran lo implementado; 6–7 explican el flujo preventivo validado; 8–9 presentan la arquitectura y operación objetivo.</p>
+          <span class="status-tag">FireWatch · apoyo preventivo</span>
+        </div>
+      </div>
+      <footer class="slide-footer">
+        <span class="slide-count">10 / 10</span>
+        <nav class="slide-controls" aria-label="Navegación entre diapositivas"><a href="#s09">← Anterior</a><a href="#s01">Volver al inicio ↑</a></nav>
+      </footer>
+    </section>
+  </main>
+</body>
+</html>
