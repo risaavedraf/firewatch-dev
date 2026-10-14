@@ -34,11 +34,20 @@ jobs:
         run: go vet ./...
       - name: Vulnerability scan (govulncheck)
         run: go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./...
+      - name: Configure builder for SBOM and provenance attestations
+        working-directory: backend
+        run: |
+          D=cec9f139f45e93c5c69c60f8b07cfad9f43f4ef6b6a6cd917527fea5ff2e3dea
+          IMG="moby/buildkit:buildx-stable-1@sha256:${D}"
+          docker buildx create --name ci-attestations \
+            --driver docker-container --driver-opt "image=$IMG" --use
       - name: Build container with provenance and SBOM
         working-directory: backend
         env:
           SERVICE: ${{ inputs.service }}
-        run: docker build --sbom=true --provenance=true -f "services/$SERVICE/Dockerfile" -t "firewatch-$SERVICE:ci" .
+        run: |
+          docker buildx build --sbom=true --provenance=true --load \
+            -f "services/$SERVICE/Dockerfile" -t "firewatch-$SERVICE:ci" .
       - name: Scan runtime image
         working-directory: backend
         env:
