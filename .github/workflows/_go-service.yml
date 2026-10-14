@@ -22,15 +22,18 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
-          go-version: '1.26.6'
+          go-version: '1.27.2'
           cache-dependency-path: backend/services/${{ inputs.service }}/go.sum
-      - name: Format, integrity, tests and static checks
-        run: |
-          test -z "$(gofmt -l .)"
-          go mod verify
-          go test -race -count=1 ./...
-          go vet ./...
-          go run golang.org/x/vuln/cmd/govulncheck@v1.1.4 ./...
+      - name: Format check (gofmt)
+        run: test -z "$(gofmt -l .)"
+      - name: Module integrity (go mod verify)
+        run: go mod verify
+      - name: Tests (go test -race)
+        run: go test -race -count=1 ./...
+      - name: Static checks (go vet)
+        run: go vet ./...
+      - name: Vulnerability scan (govulncheck)
+        run: go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./...
       - name: Build container with provenance and SBOM
         working-directory: backend
         env:
