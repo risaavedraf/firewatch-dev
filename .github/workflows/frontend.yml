@@ -24,9 +24,17 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: '24'
-      # The page declares no dependencies and ships no lockfile, so there is no
-      # install step; adding one would only fake a supply chain that does not exist.
-      - name: Readback harness (node --test)
+      # The legacy page has no dependencies; the React migration has a lockfile.
+      - name: Install dependencies when declared
+        run: if [ -f package-lock.json ]; then npm ci; fi
+      - name: Lint, typecheck and build when declared
+        run: |
+          if [ -f package-lock.json ]; then
+            npm run lint
+            npm run typecheck
+            npm run build
+          fi
+      - name: Run tests
         run: npm test
-      - name: Loopback smoke (allowlist, CSP, traversal, 720px media query)
+      - name: Loopback smoke
         run: npm run smoke
