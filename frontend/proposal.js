@@ -392,6 +392,11 @@
       shape.setAttribute("aria-pressed", String(selected));
       if (selected) shape.classList.add("zone-selected");
     }
+    // Summary card. No endpoint aggregates levels, so this counts only the zones
+    // whose latest batch this session actually read; the card states that limit.
+    let highZones = 0;
+    for (const level of zoneLevels.values()) if (level === "alto") highZones += 1;
+    setText("metric-high", highZones);
   }
 
   function canonicalLevel(level) {
@@ -625,6 +630,7 @@
     updateZoneSummary();
     showMapEmpty("Conecta un token autorizado para cargar las zonas analizadas.");
     setText("history-count", "\u2014");
+    setText("metric-batches", "\u2014");
     document.getElementById("history-rows").replaceChildren();
     document.getElementById("history-state").textContent = "Conecta un token para consultar el historial.";
     document.querySelector(".history-panel").classList.remove("has-rows");
@@ -1231,6 +1237,7 @@
     const rows = document.getElementById("history-rows");
     rows.replaceChildren();
     setText("history-count", batches.length);
+    setText("metric-batches", batches.length);
     if (batches.length === 0) {
       state.textContent = "La API devolvió un historial vacío.";
       document.querySelector(".history-panel").classList.remove("has-rows");

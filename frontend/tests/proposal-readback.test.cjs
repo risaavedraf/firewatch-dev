@@ -787,3 +787,25 @@ test('sidebar marks the section actually opened and marks nothing else', async (
   assert.ok(!h.node('nav-overview').classes.has('is-active'), 'only one section stays marked');
   assert.equal(h.node('nav-overview').attributes.get('aria-current'), undefined, 'aria-current does not linger on the old link');
 });
+
+// The metric cards summarise the page from data it already holds: the served
+// catalogue, the history it read for the selected zone, and the levels this
+// session actually read. No card may invent a number, and every one clears with
+// the closed session.
+test('metric cards report the real catalogue, history and read-zone counts', async () => {
+  const h = harness();
+  await h.ready();
+  assert.equal(h.node('zone-count').textContent, '2', 'the catalogue size comes from the served features');
+  assert.equal(h.node('metric-batches').textContent, '0', 'an empty history is a real zero, not a blank');
+  assert.equal(h.node('metric-high').textContent, '0', 'nothing read yet means no counted level');
+  await h.select('05102');
+  h.answer('/v1/risk/latest?zone_id=05102', h.batch('05102'));
+  h.answer('/v1/risk/history?zone_id=05102', [h.batch('05102'), h.batch('05102', 'second', 'job2')]);
+  await tick();
+  assert.equal(h.node('metric-batches').textContent, '2', 'the history length is the one actually returned');
+  assert.equal(h.node('metric-high').textContent, '1', 'only the zone whose latest batch this session read is counted');
+  h.node('logout').listeners.click();
+  await tick();
+  assert.equal(h.node('metric-high').textContent, '0', 'a closed session counts no level');
+  assert.equal(h.node('metric-batches').textContent, '\u2014', 'a closed session shows no history length');
+});
