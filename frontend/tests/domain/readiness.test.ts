@@ -41,6 +41,16 @@ describe('service readiness', () => {
     expect(decision.label).toMatch(/verificado/i);
   });
 
+  test('a snapshot dated in the future is never fresh, so it cannot be verified', () => {
+    // Found by independent verification: `age <= maxAge` alone accepts a negative
+    // age, so a clock skewed ahead would have kept the claim true forever.
+    const future = statusBody({ checked_at: new Date(NOW + 60_000).toISOString() });
+    const decision = evaluateServiceStatus({ status: 200, body: future }, NOW);
+    expect(decision.outcome).toBe('unknown');
+    expect(decision.verified).toBe(false);
+    expect(decision.label).not.toMatch(/verificado/i);
+  });
+
   test('is fresh only while the snapshot is inside its own max-age bound', () => {
     const onBound = statusBody({ checked_at: new Date(NOW - 120_000).toISOString() });
     expect(evaluateServiceStatus({ status: 200, body: onBound }, NOW).outcome).toBe('verified');

@@ -26,7 +26,6 @@ single-file, framework-free page; the reasons and the parity obligations are rec
 | `scripts/smoke.mjs` | Loopback check of that server against the build |
 | `scripts/check.mjs` | Source gate: requires the honesty statement, forbids invented data, requires the real endpoints |
 | `tests/` | Vitest suites (domain, core, map, app, views) |
-| `legacy/` | The retired single-file page and its 60-assertion VM harness, kept runnable until every assertion is ported |
 
 ## Running it
 
@@ -111,7 +110,6 @@ npm run verify     # lint → typecheck → tests → source gate → build → 
 | `npm run check` | The honesty statement is present, no fixture or frozen clock ships, the real endpoints are there, no client-side role guard, no persisted token, no secret, no external asset |
 | `npm run build` | The production bundle |
 | `npm run smoke` | Loopback: the built assets, MIME types, CSP, `HEAD`/`405`/`404`, traversal confinement |
-| `npm run test:legacy` | The retired page's 60-assertion VM harness, kept green as the parity baseline |
 
 ## What is not verified
 
@@ -125,8 +123,12 @@ settings it depends on.
 ## History
 
 This directory used to hold one self-contained page (`index.html`, `proposal.css`,
-`proposal.js`) with no framework, no bundler and no build step. It is preserved byte for byte
-in `legacy/`, and the branch that replaced it is `frontend/react-vite`. The retired mockup
-that preceded *that* page is kept at
-`odd/urgent/rediseno-pagina/referencia-mockup/`, and the history of its retirement is in
+`proposal.js`) with no framework, no bundler and no build step, tested by a `node:vm` harness with
+a toy DOM. That page and that harness are gone from the working tree: every one of the harness's
+**60 assertions** was ported to the Vitest suites first, and the port is recorded assertion by
+assertion in
+[`odd/urgent/rediseno-pagina/ledger-aserciones.md`](../odd/urgent/rediseno-pagina/ledger-aserciones.md)
+(60 rows, every cited test name checked to exist). The old page remains readable in the history of
+the `frontend/react-vite` branch at `f4d99b7`. The retired mockup that preceded *that* page is kept
+at `odd/urgent/rediseno-pagina/referencia-mockup/`, and the history of its retirement is in
 [`odd/tasks/architecture/gateway-frontend-separation.md`](../odd/tasks/architecture/gateway-frontend-separation.md).
