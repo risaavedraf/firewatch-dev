@@ -26,6 +26,8 @@
         <a class="nav-link" id="nav-jobs" href="#jobs"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 12h5l3-8 4 16 3-8h5"/></svg><span>Procesamiento</span></a>
         <p class="nav-group">Acceso</p>
         <a class="nav-link" id="nav-session" href="#session"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5" y="10" width="14" height="11" rx="2"/><path d="M8 10V6a4 4 0 0 1 8 0v4m-4 5v2"/></svg><span>Sesión y permisos</span></a>
+        <p class="nav-group">Coordinación</p>
+        <a class="nav-link" id="nav-audit" href="#audit"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="4" width="16" height="17" rx="2"/><path d="M8 9h8M8 13h8M8 17h5"/></svg><span>Registro de actividad</span></a>
       </nav>
       <div class="sidebar-bottom">
         <section class="health-card" aria-labelledby="health-title"><div class="health-head"><strong id="health-title">Gateway</strong><span class="health-dot" aria-hidden="true"></span></div><p id="readiness-status" role="status" aria-live="polite">Consultando disponibilidad del gateway…</p><button id="readiness-refresh" class="side-action" type="button">Actualizar estado</button></section>
@@ -107,6 +109,20 @@
         </section>
 
         <section class="panel jobs-panel" id="jobs"><div class="panel-heading"><div><p class="eyebrow">LOTE DE DEMOSTRACIÓN</p><h3>Procesamiento asíncrono</h3></div><span class="admin-tag">ACCIÓN ADMINISTRATIVA</span></div><div class="job-layout"><div><div class="scenario-field"><label for="scenario-select">Escenario sintético</label><select id="scenario-select" aria-label="Escenario sintético a solicitar" disabled><option value="">Sin escenario (fixture analítico heredado)</option></select><p class="panel-note" id="scenario-note">El escenario se elige en esta página. El servidor asigna su instante de evaluación en UTC, una sola vez por trabajo; son perfiles de prueba, no condiciones observadas.</p></div><p class="panel-note">Solicita el procesamiento de la zona seleccionada. Esta operación requiere permisos de administrador y crea únicamente un trabajo sintético.</p><button id="create-job" class="primary-button" type="button" disabled>Solicitar lote de la zona</button></div><div class="job-result"><p class="eyebrow">ESTADO DEL TRABAJO</p><p id="job-status" role="status" aria-live="polite">Disponible al conectar un token. El servidor determina si tienes permiso.</p><dl class="data-list compact"><div><dt>Estado</dt><dd id="job-state">Sin solicitud</dd></div><div><dt>ID del trabajo</dt><dd id="job-id">—</dd></div><div><dt>Solicitado</dt><dd id="job-requested">—</dd></div></dl><button id="refresh-job" class="secondary-button" type="button" disabled>Actualizar estado</button></div></div>
+        </section>
+
+        <section class="panel audit-panel" id="audit" aria-labelledby="audit-title">
+          <div class="panel-heading"><div><p class="eyebrow">COORDINACIÓN</p><h3 id="audit-title">Registro de actividad</h3></div><span class="neutral-tag" id="audit-badge">SIN CONSULTAR</span></div>
+          <p id="audit-status" class="status-copy" role="status" aria-live="polite">Conecta un token autorizado para consultar el registro de actividad.</p>
+          <p class="panel-note">Endpoint de solo administradores. No acepta parámetros: el servicio acota la respuesta por sí mismo (hasta 100 eventos recientes) y esta página no pagina, no filtra ni ordena. Los identificadores son opacos, sin nombre para mostrar.</p>
+          <p id="audit-unimplemented" class="unimplemented-note">Aún no implementado: el mockup retirado mostraba el nombre del perfil, un detalle de texto libre y su propio identificador de evento. <code>/v1/audit</code> no entrega ninguno de esos datos, así que no se muestran ni se simulan.</p>
+          <div class="table-wrap" id="audit-table" hidden>
+            <table><caption class="sr-only">Registro de actividad devuelto por /v1/audit</caption>
+              <thead><tr><th>Actor (actor_id)</th><th>Acción</th><th>Trabajo (job_id)</th><th>Traza (trace_id)</th><th>Ocurrido (occurred_at)</th></tr></thead>
+              <tbody id="audit-rows"></tbody>
+            </table>
+          </div>
+          <div class="audit-foot"><span class="count-badge" id="audit-count">—</span><button id="audit-refresh" class="secondary-button" type="button" disabled>Actualizar registro</button></div>
         </section>
         <footer><span>FireWatch · Demostración técnica · La API no realiza predicciones ni recomendaciones operativas.</span><button id="reset-filters" type="button"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 10a8 8 0 1 1 1 8M4 3v7h7"/></svg>Restablecer filtros</button></footer>
       </main>

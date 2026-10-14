@@ -606,6 +606,8 @@
     setText("pipeline-status", "Conecta un token autorizado para comprobar los servicios.");
     setText("pipeline-risk", "Sin verificar");
     setText("pipeline-jobs", "Sin verificar");
+    clearAuditPanel("SIN CONSULTAR", "Conecta un token autorizado para consultar el registro de actividad.");
+    document.getElementById("audit-refresh").disabled = true;
     document.getElementById("pipeline-status").classList.remove("risk-good", "risk-error");
     document.getElementById("pipeline-risk").classList.remove("risk-good");
     document.getElementById("pipeline-jobs").classList.remove("risk-good");
@@ -739,6 +741,10 @@
     // block zones, latest or history, and the selector then stays at its
     // legacy-only disabled state instead of inventing a profile.
     loadScenarios(isCurrent);
+    // Also independent: a denied register (403 for a non-admin) must never block
+    // zones, latest, history or the scenario catalogue.
+    document.getElementById("audit-refresh").disabled = false;
+    loadAudit(isCurrent);
   }
 
   async function apiRequest(path, options = {}, isCurrent = () => true) {
@@ -847,6 +853,93 @@
     }
     if (!isCurrent()) return;
     renderSources(result);
+  }
+
+  // --- Activity register ---------------------------------------------------
+  //
+  // `/v1/audit` is admin-only, accepts NO query parameter and the service bounds
+  // the answer itself (the newest rows only), so the page never sends a limit or
+  // an offset and never pages. Every entry is rendered with the five fields the
+  // endpoint carries —`actor_id`, `action`, `job_id`, `trace_id`, `occurred_at`—
+  // and the retired mockup's columns that no backend provides (an actor display
+  // name, a free-text detail and its own event id) are marked as not implemented
+  // in the panel instead of being simulated.
+  const AUDIT_FIELDS = ["actor_id", "action", "job_id", "trace_id", "occurred_at"];
+
+  function clearAuditPanel(badge, reason) {
+    setText("audit-badge", badge);
+    setText("audit-status", reason);
+    document.getElementById("audit-status").classList.remove("risk-good");
+    setText("audit-count", "\u2014");
+    document.getElementById("audit-rows").replaceChildren();
+    document.getElementById("audit-table").setAttribute("hidden", "");
+  }
+
+  function renderAudit(result) {
+    const body = record(result.body) ? result.body : null;
+    const code = body && nonempty(body.code) ? ` \u00b7 ${body.code}` : "";
+    // Admin-only endpoint: a profile without the permission is a stated outcome,
+    // not a hidden panel, so the 403 body itself names the reason and the request.
+    if (result.status === 403) {
+      const request = body && nonempty(body.request_id) ? ` \u00b7 request_id ${body.request_id}` : "";
+      clearAuditPanel("SIN PERMISO", `La API denegó el permiso para consultar el registro de actividad (HTTP 403${code}${request}). Es un endpoint de solo administradores: solicita acceso a un administrador; la página no oculta ni simula los eventos.`);
+      return;
+    }
+    // An event is an entry that states WHAT happened and WHEN. Without both the
+    // payload is not a usable register and nothing is rendered from it: a partial
+    // list would be an invented view of the activity.
+    const events = result.status === 200 && Array.isArray(result.body) ? result.body : null;
+    const usable = events !== null &&
+      events.every((event) => record(event) && nonempty(event.action) && nonempty(event.occurred_at));
+    if (!usable) {
+      clearAuditPanel("NO DISPONIBLE", `La API no devolvió un registro de actividad utilizable (HTTP ${result.status}${code}); no se muestran eventos inventados ni parciales.`);
+      return;
+    }
+    const rows = document.getElementById("audit-rows");
+    rows.replaceChildren();
+    for (const event of events) {
+      const row = document.createElement("tr");
+      for (const field of AUDIT_FIELDS) {
+        const cell = document.createElement("td");
+        // An identifier the service omits is labelled in place: nothing is filled
+        // in from another field and no name is ever derived from an id.
+        cell.textContent = nonempty(event[field]) ? event[field] : "No informado";
+        row.append(cell);
+      }
+      rows.append(row);
+    }
+    setText("audit-count", events.length);
+    setText("audit-badge", "LEÍDO");
+    if (events.length === 0) {
+      setText("audit-status", "El servicio devolvió un registro de actividad sin eventos.");
+      return;
+    }
+    document.getElementById("audit-table").removeAttribute("hidden");
+    setText("audit-status", "Registro real devuelto por /v1/audit. Es un endpoint de solo administradores y no acepta parámetros: el servicio acota la respuesta por sí mismo.");
+    document.getElementById("audit-status").classList.add("risk-good");
+  }
+
+  async function loadAudit(isCurrent = () => accessToken !== "") {
+    if (accessToken === "") return;
+    const button = document.getElementById("audit-refresh");
+    // This single global read needs one concurrency guard: the control itself.
+    // One refresh in flight at a time, so an older answer can never land last.
+    button.disabled = true;
+    setText("audit-badge", "CONSULTANDO");
+    setText("audit-status", "Consultando el registro de actividad en /v1/audit…");
+    document.getElementById("audit-status").classList.remove("risk-good");
+    let result;
+    try {
+      result = await apiRequestStatus(`${gatewayOrigin}/v1/audit`, {}, isCurrent);
+    } catch {
+      if (!isCurrent()) return;
+      clearAuditPanel("NO DISPONIBLE", "No fue posible consultar el registro de actividad; se muestra como no disponible.");
+      button.disabled = false;
+      return;
+    }
+    if (!isCurrent()) return;
+    button.disabled = false;
+    renderAudit(result);
   }
 
   // --- Pipeline status panel -----------------------------------------------
@@ -1483,6 +1576,9 @@
 
   document.getElementById("refresh-job").addEventListener("click", loadJob);
   document.getElementById("readiness-refresh").addEventListener("click", checkReadiness);
+  // Re-reads the same parameterless endpoint once, with no filter or page state
+  // to lose: the service decides which rows the answer carries.
+  document.getElementById("audit-refresh").addEventListener("click", () => loadAudit());
   // Both controls narrow the rows already on screen. The element value is read
   // back from the DOM so the filter state has one source of truth.
   document.getElementById("history-query").addEventListener("input", (event) => {
@@ -1526,7 +1622,7 @@
   // the user actually opened keeps the mockup's active marker honest: it follows
   // the clicked link and the fragment the browser opened, issues no request and
   // never claims a section nobody chose.
-  const NAV_LINK_IDS = ["nav-overview", "nav-history", "nav-sources", "nav-pipeline", "nav-jobs", "nav-session"];
+  const NAV_LINK_IDS = ["nav-overview", "nav-history", "nav-sources", "nav-pipeline", "nav-jobs", "nav-session", "nav-audit"];
   function markActiveNav(activeID) {
     for (const id of NAV_LINK_IDS) {
       const link = document.getElementById(id);
