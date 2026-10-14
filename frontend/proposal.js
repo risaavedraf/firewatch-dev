@@ -449,6 +449,70 @@
     return chosen;
   }
 
+  // --- Synthetic scenario picker -------------------------------------------
+  //
+  // The catalogue is served by the authenticated risk API and its IDs are the
+  // exact built-in profiles. The page never invents a profile name and never
+  // sends an empty value: the server rejects an explicit null/empty scenario_id
+  // with 400 invalid_demo_request, while an OMITTED field keeps the legacy
+  // fixture. So `selectedScenario()` returns "" and the caller omits the field.
+  function selectedScenario() {
+    const select = document.getElementById("scenario-select");
+    return select ? select.value : "";
+  }
+
+  function populateScenarioSelector(items) {
+    const select = document.getElementById("scenario-select");
+    if (!select) return "";
+    const previous = select.value;
+    const options = [];
+    for (const item of items) {
+      if (!item || typeof item.id !== "string" || item.id === "") continue;
+      options.push({
+        id: item.id,
+        description: typeof item.description === "string" ? item.description : "",
+      });
+    }
+    select.replaceChildren();
+    const legacy = document.createElement("option");
+    legacy.value = "";
+    legacy.textContent = "Sin escenario (fixture analítico heredado)";
+    select.append(legacy);
+    for (const scenario of options) {
+      const option = document.createElement("option");
+      option.value = scenario.id;
+      option.textContent = scenario.description === "" ? scenario.id : `${scenario.id} — ${scenario.description}`;
+      select.append(option);
+    }
+    const chosen = options.some((scenario) => scenario.id === previous) ? previous : "";
+    select.value = chosen;
+    select.disabled = false;
+    return chosen;
+  }
+
+  async function loadScenarios(isCurrent = () => true) {
+    try {
+      const catalogue = await apiRequest(`${gatewayOrigin}/v1/risk/synthetic-scenarios`, {}, isCurrent);
+      if (!isCurrent()) return;
+      if (!Array.isArray(catalogue)) {
+        const select = document.getElementById("scenario-select");
+        if (select) { select.value = ""; select.disabled = true; }
+        setText("scenario-note", "La API no devolvió un catálogo de escenarios válido; el trabajo usaría el fixture analítico heredado.");
+        return;
+      }
+      populateScenarioSelector(catalogue);
+      setText("scenario-note", "El escenario se elige en esta página. El servidor asigna su instante de evaluación en UTC, una sola vez por trabajo; son perfiles de prueba, no condiciones observadas.");
+    } catch (error) {
+      if (!isCurrent()) return;
+      if (error.message === "unauthorized") return;
+      const select = document.getElementById("scenario-select");
+      if (select) { select.value = ""; select.disabled = true; }
+      setText("scenario-note", error.message === "forbidden"
+        ? "La API denegó el permiso para listar escenarios (403); el trabajo usaría el fixture analítico heredado."
+        : "No fue posible cargar el catálogo de escenarios; el trabajo usaría el fixture analítico heredado.");
+    }
+  }
+
   async function loadZones(isCurrent = () => true) {
     showMapEmpty("Consultando el catálogo de zonas analizadas…");
     try {
@@ -535,6 +599,17 @@
       select.value = "";
       select.disabled = true;
     }
+    const scenarioSelect = document.getElementById("scenario-select");
+    if (scenarioSelect) {
+      scenarioSelect.replaceChildren();
+      const legacyOption = document.createElement("option");
+      legacyOption.value = "";
+      legacyOption.textContent = "Sin escenario (fixture analítico heredado)";
+      scenarioSelect.append(legacyOption);
+      scenarioSelect.value = "";
+      scenarioSelect.disabled = true;
+    }
+    setText("scenario-note", "El escenario se elige en esta página. El servidor asigna su instante de evaluación en UTC, una sola vez por trabajo; son perfiles de prueba, no condiciones observadas.");
     updateZoneSummary();
     showMapEmpty("Conecta un token autorizado para cargar las zonas analizadas.");
     setText("history-count", "\u2014");
@@ -638,6 +713,10 @@
       .then(() => {
         if (isCurrent()) document.getElementById("auth-status").textContent = "Sesión lista. Las acciones autorizadas se validan en el servidor.";
       });
+    // Deliberately independent of the zone chain: a catalogue failure must never
+    // block zones, latest or history, and the selector then stays at its
+    // legacy-only disabled state instead of inventing a profile.
+    loadScenarios(isCurrent);
   }
 
   async function apiRequest(path, options = {}, isCurrent = () => true) {
@@ -1238,9 +1317,12 @@
     setText("job-state", job.state);
     setText("job-id", job.id);
     setText("job-requested", job.requested_at);
+    // The selected profile is server-assigned metadata on the job; it is shown
+    // only when the server actually reported one, never inferred by the page.
+    const scenario = typeof job.scenario_id === "string" && job.scenario_id !== "" ? ` · escenario ${job.scenario_id}` : "";
     setText("job-status", job.state === "published" && job.batch_id
-      ? `Trabajo publicado · lote ${job.batch_id}`
-      : `Trabajo ${job.state}; el servidor controla su procesamiento.`);
+      ? `Trabajo publicado · lote ${job.batch_id}${scenario}`
+      : `Trabajo ${job.state}${scenario}; el servidor controla su procesamiento.`);
     document.getElementById("refresh-job").disabled = false;
   }
 
@@ -1288,6 +1370,9 @@
     clearBatchDetails();
     const sequence = jobSequence;
     const zone = selectedZone;
+    // Captured at click time, like the zone: a later change in the picker must
+    // not alter a request that is already in flight.
+    const scenario = selectedScenario();
     pollAttempts = 0;
     jobController = new AbortController();
     armDeadline(sequence, zone);
@@ -1306,7 +1391,7 @@
         method: "POST",
         signal: jobController.signal,
         headers: { "Content-Type": "application/json", "Idempotency-Key": crypto.randomUUID() },
-        body: JSON.stringify({ zone_id: zone }),
+        body: JSON.stringify(scenario === "" ? { zone_id: zone } : { zone_id: zone, scenario_id: scenario }),
       }, () => ownsJob(sequence, zone));
       if (!ownsJob(sequence, zone)) return;
       if (job.zone_id !== zone || !job.id) {
