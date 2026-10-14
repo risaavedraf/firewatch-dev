@@ -40,7 +40,8 @@ function harness(catalogue, catalogueStatus = 200, deferZones = false) {
   // Matching stays exact on the resolved URL, never a weakened substring match.
   function answer(path, body, status = 200) { const resolved = path.startsWith('http') ? path : `${GATEWAY_ORIGIN}${path}`; const i = pending.findIndex(x => x.path === resolved); assert.notEqual(i, -1, `pending ${resolved}`); pending.splice(i, 1)[0].resolve({ ok: status < 400, status, json: async () => body }); }
   const batch = (zone = '05101', id = 'batch', job = 'job') => ({ zone_id: zone, id, job_id: job, demo: true, risk_level: 'alto', factors: [{name: 'temperatura', known: true, value: 30, contribution: 0.2, note: ''}], rationale: 'Regla académica', policy: {policy_id: 'academic-rule-v1', params_hash: 'hash', parameters: {weight: '0.2'}}, notice: 'Sintético', geometry: polygon });
-  return { node, calls, pending, timers, answer, batch, async ready() { await tick(); answer('/v1/risk/latest?zone_id=05101', {}, 404); answer('/v1/risk/history?zone_id=05101', []); await tick(); }, async create() { node('create-job').listeners.click(); await tick(); }, async select(code) { node('zone-select').listeners.change({ target: { value: code } }); await tick(); } };
+  const scenarioCatalogue = [{ id: 'mild', description: 'Perfil suave' }, { id: 'dry-windy', description: 'Seco y ventoso' }];
+  return { node, calls, pending, timers, answer, batch, scenarioCatalogue, async ready() { await tick(); answer('/v1/risk/synthetic-scenarios', scenarioCatalogue); answer('/v1/risk/latest?zone_id=05101', {}, 404); answer('/v1/risk/history?zone_id=05101', []); await tick(); }, async create() { node('create-job').listeners.click(); await tick(); }, async select(code) { node('zone-select').listeners.change({ target: { value: code } }); await tick(); } };
 }
 test('actual POST uses CUT; published job automatically reads correlated latest and history', async () => {
   const h = harness(); await h.ready(); await h.create();
@@ -685,4 +686,37 @@ test('every consumed gateway path is absolute on the gateway origin and /token k
   assert.equal(tokenCalls.length, 1, 'exactly one token exchange is performed');
   assert.equal(tokenCalls[0].path, `${ISSUER}/protocol/openid-connect/token`);
   assert.ok(!tokenCalls[0].path.startsWith(GATEWAY_ORIGIN), 'the token call must not resolve against the gateway origin');
+});
+
+test('scenario selector lists the served catalogue and posts scenario_id only when one is chosen', async () => {
+  const h = harness(); await h.ready();
+  const select = h.node('scenario-select');
+  assert.equal(select.disabled, false, 'a connected session enables the scenario selector');
+  assert.deepEqual(select.children.map(option => option.value), ['', 'mild', 'dry-windy']);
+  assert.equal(h.calls.filter(x => x.path === `${GATEWAY_ORIGIN}/v1/risk/synthetic-scenarios`).length, 1, 'the catalogue is fetched once per session');
+
+  // Legacy mode: no scenario chosen. The field must be OMITTED, never sent empty,
+  // because the server rejects an explicit null/empty scenario_id with 400.
+  await h.create();
+  const legacy = JSON.parse(h.calls.find(x => x.path === `${GATEWAY_ORIGIN}/v1/jobs`).options.body);
+  assert.deepEqual(legacy, { zone_id: '05101' });
+  assert.equal(Object.hasOwn(legacy, 'scenario_id'), false, 'the legacy body must omit scenario_id');
+  h.answer('/v1/jobs', { id: 'job', zone_id: '05101', state: 'queued' }); await tick();
+
+  // Selected scenario: the chosen id travels with the request.
+  select.value = 'dry-windy';
+  await h.create();
+  const bodies = h.calls.filter(x => x.path === `${GATEWAY_ORIGIN}/v1/jobs`).map(x => JSON.parse(x.options.body));
+  assert.equal(bodies.length, 2);
+  assert.deepEqual(bodies[1], { zone_id: '05101', scenario_id: 'dry-windy' });
+});
+
+test('logout resets the scenario selector to the legacy-only disabled state', async () => {
+  const h = harness(); await h.ready();
+  h.node('scenario-select').value = 'mild';
+  h.node('logout').listeners.click(); await tick();
+  const select = h.node('scenario-select');
+  assert.equal(select.disabled, true);
+  assert.deepEqual(select.children.map(option => option.value), ['']);
+  assert.equal(select.value, '');
 });
