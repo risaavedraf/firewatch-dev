@@ -9,7 +9,6 @@
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
     "typecheck": "tsc --noEmit",
-    "test:legacy": "node --test legacy/tests/proposal-readback.test.cjs",
     "lint": "eslint .",
     "check": "node scripts/check.mjs",
     "verify": "npm run lint && npm run typecheck && npm run test && npm run check && npm run build && npm run smoke"

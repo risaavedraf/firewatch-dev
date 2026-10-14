@@ -2,7 +2,7 @@ import { render, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 
 import { clearZoneState } from '../../src/app/store';
-import { gatewayOrigin, issuer, pkceTransactionKey } from '../../src/config';
+import { gatewayOrigin, issuer, pkceTransactionKey, timing } from '../../src/config';
 import { completeLogin, resetSession } from '../../src/core/session';
 import { SourcesView } from '../../src/views/SourcesView';
 
@@ -319,4 +319,37 @@ test('a 403 check reads as not authorized to check, never as down, and cannot gr
   expect(text('pipeline-jobs')).not.toMatch(/ca[ií]do|down/i);
   expect(text('pipeline-risk')).toMatch(/verificado/i);
   expect(text('pipeline-badge')).toBe('SIN VERIFICAR');
+});
+
+test('the pipeline refresh is rescheduled while signed in and cancelled on logout', async () => {
+  vi.useFakeTimers();
+  try {
+    const { fetchStub } = await connect();
+    render(<SourcesView />);
+    await flush();
+
+    fetchStub.answer(SOURCES_URL, provenanceBody());
+    fetchStub.answer(RISK_STATUS_URL, statusBody());
+    fetchStub.answer(JOBS_STATUS_URL, statusBody());
+    await flush();
+    const firstCycle = fetchStub.callsFor(RISK_STATUS_URL).length;
+    expect(firstCycle).toBeGreaterThan(0);
+
+    // One bounded cycle later the view asks again: a verification claim is
+    // re-checked rather than kept indefinitely from one snapshot.
+    await vi.advanceTimersByTimeAsync(timing.pipelineRefreshMs);
+    await flush();
+    expect(fetchStub.callsFor(RISK_STATUS_URL).length).toBe(firstCycle + 1);
+
+    resetSession();
+    await flush();
+    const afterLogout = fetchStub.callsFor(RISK_STATUS_URL).length;
+
+    // A closed session must not keep probing the API in the background.
+    await vi.advanceTimersByTimeAsync(timing.pipelineRefreshMs * 3);
+    await flush();
+    expect(fetchStub.callsFor(RISK_STATUS_URL).length).toBe(afterLogout);
+  } finally {
+    vi.useRealTimers();
+  }
 });
