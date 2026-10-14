@@ -280,7 +280,7 @@ td small { margin-top: 4px; color: var(--muted); font-size: 9px; }
 td code { color: var(--forest-700); font-size: 10px; }
 td:last-child { overflow-wrap: anywhere; }
 .empty-state { padding: 16px 10px; color: var(--muted); font-size: 10px; text-align: center; }
-.history-panel:not(.has-rows) .table-wrap { display: none; }
+.history-panel:not(.has-rows) .table-wrap, .history-panel:not(.has-rows) .filter-bar { display: none; }
 .row-index { margin-right: 8px; color: #879787; font-size: 9px; }
 .selected-label { color: var(--forest-700); font-size: 9px; }
 .row-actions { display: flex; align-items: center; gap: 7px; }

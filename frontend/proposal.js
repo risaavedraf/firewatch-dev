@@ -37,6 +37,9 @@
   // away instead of greying out every comuna but one. It is filled from the reads
   // the page already performs (no extra requests) and cleared on logout.
   let zoneLevels = new Map();
+  // Rows the API returned for the SELECTED zone, kept so the search box and the
+  // status filter can narrow them without issuing another read.
+  let historyBatches = [];
   const zoneShapes = new Map();
   // Monotonic sequence for each zone-scoped request kind. A request captures
   // the value it started with and a response is discarded unless that value is
@@ -634,6 +637,7 @@
     document.getElementById("history-rows").replaceChildren();
     document.getElementById("history-state").textContent = "Conecta un token para consultar el historial.";
     document.querySelector(".history-panel").classList.remove("has-rows");
+    resetHistoryFilters();
     setText("job-status", "Disponible al conectar un token. El servidor determina si tienes permiso.");
     setText("job-state", "Sin solicitud");
     setText("job-id", "\u2014");
@@ -1201,6 +1205,58 @@
     return renderBatch(batch);
   }
 
+  // The history panel shows the rows the API returned for ONE zone. Search and
+  // the status filter are client-side over exactly those rows: they issue no
+  // read and cannot reach another zone, while the badge keeps reporting the
+  // returned length and the result count reports what is visible.
+  function populateHistoryStatusFilter(batches) {
+    const select = document.getElementById("history-status-filter");
+    const previous = select.value;
+    const statuses = [...new Set(batches.map((batch) => String(batch.data_status ?? "")).filter((value) => value !== ""))].sort();
+    select.replaceChildren();
+    const any = document.createElement("option");
+    any.value = "";
+    any.textContent = "Todos los estados";
+    select.append(any);
+    for (const status of statuses) {
+      const option = document.createElement("option");
+      option.value = status;
+      option.textContent = status;
+      select.append(option);
+    }
+    select.value = statuses.includes(previous) ? previous : "";
+  }
+
+  function renderHistoryRows() {
+    const rows = document.getElementById("history-rows");
+    const query = document.getElementById("history-query").value.trim().toLowerCase();
+    const status = document.getElementById("history-status-filter").value;
+    const visible = historyBatches.filter((batch) => {
+      if (status !== "" && String(batch.data_status ?? "") !== status) return false;
+      if (query === "") return true;
+      return [batch.requested_at, batch.data_status, batch.id].some((value) => String(value ?? "").toLowerCase().includes(query));
+    });
+    rows.replaceChildren();
+    for (const batch of visible) {
+      const row = document.createElement("tr");
+      for (const value of [batch.requested_at, batch.data_status, batch.id]) {
+        const cell = document.createElement("td");
+        cell.textContent = value == null ? "No informado" : String(value);
+        row.append(cell);
+      }
+      rows.append(row);
+    }
+    setText("history-visible-count", `${visible.length} de ${historyBatches.length}`);
+    document.querySelector(".history-panel").classList.toggle("has-rows", historyBatches.length > 0);
+  }
+
+  function resetHistoryFilters() {
+    historyBatches = [];
+    document.getElementById("history-query").value = "";
+    populateHistoryStatusFilter([]);
+    setText("history-visible-count", "\u2014");
+  }
+
   async function loadHistory(expected = expectedBatch) {
     const state = document.getElementById("history-state");
     if (selectedZone === "") {
@@ -1234,25 +1290,15 @@
       state.textContent = "El historial todavía no informa el lote del trabajo publicado.";
       return false;
     }
-    const rows = document.getElementById("history-rows");
-    rows.replaceChildren();
     setText("history-count", batches.length);
     setText("metric-batches", batches.length);
+    historyBatches = batches;
+    populateHistoryStatusFilter(batches);
+    renderHistoryRows();
     if (batches.length === 0) {
       state.textContent = "La API devolvió un historial vacío.";
-      document.querySelector(".history-panel").classList.remove("has-rows");
       return;
     }
-    for (const batch of batches) {
-      const row = document.createElement("tr");
-      for (const value of [batch.requested_at, batch.data_status, batch.id]) {
-        const cell = document.createElement("td");
-        cell.textContent = value == null ? "No informado" : String(value);
-        row.append(cell);
-      }
-      rows.append(row);
-    }
-    document.querySelector(".history-panel").classList.add("has-rows");
     state.textContent = batches.every((batch) => batch.demo === true)
       ? "Registros sintéticos devueltos por la API."
       : "Registros devueltos por la API.";
@@ -1437,6 +1483,21 @@
 
   document.getElementById("refresh-job").addEventListener("click", loadJob);
   document.getElementById("readiness-refresh").addEventListener("click", checkReadiness);
+  // Both controls narrow the rows already on screen. The element value is read
+  // back from the DOM so the filter state has one source of truth.
+  document.getElementById("history-query").addEventListener("input", (event) => {
+    document.getElementById("history-query").value = event.target.value;
+    renderHistoryRows();
+  });
+  document.getElementById("history-status-filter").addEventListener("change", (event) => {
+    document.getElementById("history-status-filter").value = event.target.value;
+    renderHistoryRows();
+  });
+  document.getElementById("reset-filters").addEventListener("click", () => {
+    document.getElementById("history-query").value = "";
+    document.getElementById("history-status-filter").value = "";
+    renderHistoryRows();
+  });
 
   function selectZone(code) {
     if (!accessToken || !zoneShapes.has(code)) return;
