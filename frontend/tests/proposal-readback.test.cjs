@@ -11,7 +11,10 @@ const source = fs.readFileSync(`${__dirname}/../proposal.js`, 'utf8');
 const GATEWAY_ORIGIN = 'http://localhost:8080';
 const ISSUER = 'http://localhost:8081/realms/firewatch';
 const tick = async () => { for (let i = 0; i < 20; i++) await Promise.resolve(); };
-function harness(catalogue, catalogueStatus = 200, deferZones = false) {
+// `sessionToken` is the exact `access_token` the identity-provider stub returns.
+// Its default keeps every pre-existing test on the hardcoded 'test' value, while
+// a synthetic JWT can be injected to exercise the page's own token decoder.
+function harness(catalogue, catalogueStatus = 200, deferZones = false, sessionToken = 'test') {
   const nodes = new Map(), calls = [], pending = [], timers = [];
   class Element {
     constructor(svg = false) { this.svg = svg; this.attributes = new Map(); this.children = []; this.listeners = {}; this.value = ''; this.textContent = ''; this.classes = new Set(); this.classList = { add: (...v) => v.forEach(x => this.classes.add(x)), remove: (...v) => v.forEach(x => this.classes.delete(x)), toggle: (x, on) => on ? this.classes.add(x) : this.classes.delete(x) }; }
@@ -30,7 +33,7 @@ function harness(catalogue, catalogueStatus = 200, deferZones = false) {
   const fetch = (path, options) => {
     calls.push({ path, options });
     if (path === `${GATEWAY_ORIGIN}/health/ready`) return Promise.resolve({ ok: true, status: 204 });
-    if (path === `${ISSUER}/protocol/openid-connect/token`) return Promise.resolve({ ok: true, status: 200, json: async () => ({ access_token: 'test' }) });
+    if (path === `${ISSUER}/protocol/openid-connect/token`) return Promise.resolve({ ok: true, status: 200, json: async () => ({ access_token: sessionToken }) });
     if (path === `${GATEWAY_ORIGIN}/v1/risk/zones` && !deferZones) return Promise.resolve({ ok: catalogueStatus < 400, status: catalogueStatus, json: async () => zones });
     return new Promise(resolve => pending.push({ path, resolve }));
   };
@@ -40,7 +43,8 @@ function harness(catalogue, catalogueStatus = 200, deferZones = false) {
   // Matching stays exact on the resolved URL, never a weakened substring match.
   function answer(path, body, status = 200) { const resolved = path.startsWith('http') ? path : `${GATEWAY_ORIGIN}${path}`; const i = pending.findIndex(x => x.path === resolved); assert.notEqual(i, -1, `pending ${resolved}`); pending.splice(i, 1)[0].resolve({ ok: status < 400, status, json: async () => body }); }
   const batch = (zone = '05101', id = 'batch', job = 'job') => ({ zone_id: zone, id, job_id: job, demo: true, risk_level: 'alto', factors: [{name: 'temperatura', known: true, value: 30, contribution: 0.2, note: ''}], rationale: 'Regla académica', policy: {policy_id: 'academic-rule-v1', params_hash: 'hash', parameters: {weight: '0.2'}}, notice: 'Sintético', geometry: polygon });
-  return { node, calls, pending, timers, answer, batch, async ready() { await tick(); answer('/v1/risk/latest?zone_id=05101', {}, 404); answer('/v1/risk/history?zone_id=05101', []); await tick(); }, async create() { node('create-job').listeners.click(); await tick(); }, async select(code) { node('zone-select').listeners.change({ target: { value: code } }); await tick(); } };
+  const scenarioCatalogue = [{ id: 'mild', description: 'Perfil suave' }, { id: 'dry-windy', description: 'Seco y ventoso' }];
+  return { node, calls, pending, timers, answer, batch, scenarioCatalogue, async ready() { await tick(); answer('/v1/risk/synthetic-scenarios', scenarioCatalogue); answer('/v1/risk/latest?zone_id=05101', {}, 404); answer('/v1/risk/history?zone_id=05101', []); await tick(); }, async create() { node('create-job').listeners.click(); await tick(); }, async select(code) { node('zone-select').listeners.change({ target: { value: code } }); await tick(); } };
 }
 test('actual POST uses CUT; published job automatically reads correlated latest and history', async () => {
   const h = harness(); await h.ready(); await h.create();
@@ -685,4 +689,488 @@ test('every consumed gateway path is absolute on the gateway origin and /token k
   assert.equal(tokenCalls.length, 1, 'exactly one token exchange is performed');
   assert.equal(tokenCalls[0].path, `${ISSUER}/protocol/openid-connect/token`);
   assert.ok(!tokenCalls[0].path.startsWith(GATEWAY_ORIGIN), 'the token call must not resolve against the gateway origin');
+});
+
+test('scenario selector lists the served catalogue and posts scenario_id only when one is chosen', async () => {
+  const h = harness(); await h.ready();
+  const select = h.node('scenario-select');
+  assert.equal(select.disabled, false, 'a connected session enables the scenario selector');
+  assert.deepEqual(select.children.map(option => option.value), ['', 'mild', 'dry-windy']);
+  assert.equal(h.calls.filter(x => x.path === `${GATEWAY_ORIGIN}/v1/risk/synthetic-scenarios`).length, 1, 'the catalogue is fetched once per session');
+
+  // Legacy mode: no scenario chosen. The field must be OMITTED, never sent empty,
+  // because the server rejects an explicit null/empty scenario_id with 400.
+  await h.create();
+  const legacy = JSON.parse(h.calls.find(x => x.path === `${GATEWAY_ORIGIN}/v1/jobs`).options.body);
+  assert.deepEqual(legacy, { zone_id: '05101' });
+  assert.equal(Object.hasOwn(legacy, 'scenario_id'), false, 'the legacy body must omit scenario_id');
+  h.answer('/v1/jobs', { id: 'job', zone_id: '05101', state: 'queued' }); await tick();
+
+  // Selected scenario: the chosen id travels with the request.
+  select.value = 'dry-windy';
+  await h.create();
+  const bodies = h.calls.filter(x => x.path === `${GATEWAY_ORIGIN}/v1/jobs`).map(x => JSON.parse(x.options.body));
+  assert.equal(bodies.length, 2);
+  assert.deepEqual(bodies[1], { zone_id: '05101', scenario_id: 'dry-windy' });
+});
+
+test('logout resets the scenario selector to the legacy-only disabled state', async () => {
+  const h = harness(); await h.ready();
+  h.node('scenario-select').value = 'mild';
+  h.node('logout').listeners.click(); await tick();
+  const select = h.node('scenario-select');
+  assert.equal(select.disabled, true);
+  assert.deepEqual(select.children.map(option => option.value), ['']);
+  assert.equal(select.value, '');
+});
+
+// Collects every drawn zone shape by its data-zone attribute, whatever the
+// nesting inside the SVG, so a colour claim is checked against the real element.
+function shapesByZone(node) {
+  const found = new Map();
+  const walk = current => {
+    if (!current || typeof current !== 'object') return;
+    if (current['data-zone'] && current.classList) found.set(current['data-zone'], current);
+    for (const child of current.children || []) walk(child);
+  };
+  walk(node);
+  return found;
+}
+
+test('a zone with a published batch keeps its colour after the selection moves away', async () => {
+  const h = harness(); await h.ready();
+  const shapes = () => shapesByZone(h.node('map-svg'));
+
+  await h.select('05102');
+  h.answer('/v1/risk/latest?zone_id=05102', { ...h.batch('05102'), risk_level: 'medio' });
+  h.answer('/v1/risk/history?zone_id=05102', []); await tick();
+  assert.ok(shapes().get('05102').classes.has('level-medio'), '05102 is coloured from its published batch');
+
+  await h.select('05101');
+  h.answer('/v1/risk/latest?zone_id=05101', { ...h.batch('05101'), risk_level: 'alto' });
+  h.answer('/v1/risk/history?zone_id=05101', []); await tick();
+  assert.ok(shapes().get('05101').classes.has('level-alto'), '05101 is coloured from its published batch');
+
+  // The whole point: moving the selection back must NOT grey out 05101, which
+  // still has a published batch. Only the outline marks the selection.
+  await h.select('05102');
+  h.answer('/v1/risk/latest?zone_id=05102', { ...h.batch('05102'), risk_level: 'medio' });
+  h.answer('/v1/risk/history?zone_id=05102', []); await tick();
+  assert.ok(shapes().get('05101').classes.has('level-alto'), 'a deselected zone must keep its colour');
+  assert.ok(shapes().get('05102').classes.has('level-medio'));
+  assert.ok(shapes().get('05102').classes.has('zone-selected'), 'the selection is still shown by the outline');
+});
+
+test('a zone with no published batch stays neutral and logout clears every colour', async () => {
+  const h = harness(); await h.ready();
+  // 404 from latest is absence, not low: the comuna stays grey, never invented.
+  assert.ok(shapesByZone(h.node('map-svg')).get('05101').classes.has('zone-neutral'));
+
+  await h.select('05102');
+  h.answer('/v1/risk/latest?zone_id=05102', { ...h.batch('05102'), risk_level: 'alto' });
+  h.answer('/v1/risk/history?zone_id=05102', []); await tick();
+  assert.ok(shapesByZone(h.node('map-svg')).get('05102').classes.has('level-alto'));
+
+  h.node('logout').listeners.click(); await tick();
+  assert.ok(!shapesByZone(h.node('map-svg')).get('05102').classes.has('level-alto'), 'logout must clear the map colours');
+});
+
+// The sidebar mirrors the page sections as in-page anchors. The active marker is
+// presentation: it must follow the section the user actually opened, never claim
+// a selection nobody made, and add no request of its own.
+test('sidebar marks the section actually opened and marks nothing else', async () => {
+  const h = harness();
+  await h.ready();
+  assert.ok(h.node('nav-overview').classes.has('is-active'), 'the opening section is marked');
+  assert.equal(h.node('nav-overview').attributes.get('aria-current'), 'true');
+  const before = h.calls.length;
+  h.node('nav-history').listeners.click();
+  assert.equal(h.calls.length, before, 'marking a section issues no request');
+  assert.ok(h.node('nav-history').classes.has('is-active'), 'the clicked section is marked');
+  assert.ok(!h.node('nav-overview').classes.has('is-active'), 'only one section stays marked');
+  assert.equal(h.node('nav-overview').attributes.get('aria-current'), undefined, 'aria-current does not linger on the old link');
+});
+
+// The metric cards summarise the page from data it already holds: the served
+// catalogue, the history it read for the selected zone, and the levels this
+// session actually read. No card may invent a number, and every one clears with
+// the closed session.
+test('metric cards report the real catalogue, history and read-zone counts', async () => {
+  const h = harness();
+  await h.ready();
+  assert.equal(h.node('zone-count').textContent, '2', 'the catalogue size comes from the served features');
+  assert.equal(h.node('metric-batches').textContent, '0', 'an empty history is a real zero, not a blank');
+  assert.equal(h.node('metric-high').textContent, '0', 'nothing read yet means no counted level');
+  await h.select('05102');
+  h.answer('/v1/risk/latest?zone_id=05102', h.batch('05102'));
+  h.answer('/v1/risk/history?zone_id=05102', [h.batch('05102'), h.batch('05102', 'second', 'job2')]);
+  await tick();
+  assert.equal(h.node('metric-batches').textContent, '2', 'the history length is the one actually returned');
+  assert.equal(h.node('metric-high').textContent, '1', 'only the zone whose latest batch this session read is counted');
+  h.node('logout').listeners.click();
+  await tick();
+  assert.equal(h.node('metric-high').textContent, '0', 'a closed session counts no level');
+  assert.equal(h.node('metric-batches').textContent, '\u2014', 'a closed session shows no history length');
+});
+
+// The history panel reads one zone at a time. Search and the status filter work
+// ONLY on the rows the API already returned for that zone: they never issue a
+// read, never reach another zone, and the badge keeps reporting what the API
+// returned while the result count reports what is actually visible.
+test('history search and status filter narrow only the rows already returned for the zone', async () => {
+  const h = harness(); await h.ready(); await h.select('05102');
+  const rows = [
+    { ...h.batch('05102', 'lote-uno', 'j1'), requested_at: '2026-01-01T00:00:00Z', data_status: 'sufficient' },
+    { ...h.batch('05102', 'lote-dos', 'j2'), requested_at: '2026-02-02T00:00:00Z', data_status: 'insufficient' },
+  ];
+  h.answer('/v1/risk/latest?zone_id=05102', rows[0]);
+  h.answer('/v1/risk/history?zone_id=05102', rows);
+  await tick();
+  assert.equal(h.node('history-rows').children.length, 2, 'both returned rows are shown');
+  assert.equal(h.node('history-count').textContent, '2', 'the badge counts what the API returned');
+  assert.equal(h.node('history-visible-count').textContent, '2 de 2');
+  const historyReads = h.calls.filter(x => x.path.includes('/v1/risk/history')).length;
+  h.node('history-status-filter').listeners.change({ target: { value: 'insufficient' } });
+  assert.equal(h.node('history-rows').children.length, 1, 'the status filter narrows the visible rows');
+  assert.equal(h.node('history-visible-count').textContent, '1 de 2');
+  assert.equal(h.node('history-count').textContent, '2', 'filtering never rewrites what the API returned');
+  assert.equal(h.calls.filter(x => x.path.includes('/v1/risk/history')).length, historyReads, 'filtering issues no new read');
+  h.node('history-query').listeners.input({ target: { value: 'lote-uno' } });
+  assert.equal(h.node('history-rows').children.length, 0, 'searching inside the narrowed rows finds nothing');
+  assert.equal(h.calls.filter(x => x.path.includes('/v1/risk/history')).length, historyReads, 'searching issues no new read');
+  h.node('reset-filters').listeners.click();
+  assert.equal(h.node('history-rows').children.length, 2, 'resetting filters restores every returned row');
+  assert.equal(h.node('history-visible-count').textContent, '2 de 2');
+  assert.equal(h.node('history-query').value, '', 'the reset control clears the query it owns');
+});
+
+// T6 — the activity register. `/v1/audit` is admin-only, accepts NO query
+// parameter and the service bounds the answer itself, so the panel renders
+// exactly the five fields it carries (`actor_id`, `action`, `job_id`,
+// `trace_id`, `occurred_at`) and labels the retired mockup's missing columns as
+// not implemented instead of inventing a display name, a detail or a severity.
+test('audit panel reads the parameterless admin endpoint once per session and renders the five real fields verbatim', async () => {
+  const h = harness(); await h.ready();
+  const reads = h.calls.filter(x => x.path.startsWith(`${GATEWAY_ORIGIN}/v1/audit`));
+  assert.equal(reads.length, 1, 'a connected session reads /v1/audit exactly once');
+  assert.equal(reads[0].path, `${GATEWAY_ORIGIN}/v1/audit`, 'the endpoint takes no query parameters');
+  assert.equal(reads[0].options.headers.Authorization, 'Bearer test', 'the read is authenticated');
+  h.answer('/v1/audit', [
+    { actor_id: 'actor-opaco-1', action: 'job.requested', job_id: 'job-1', trace_id: 'trace-1', occurred_at: '2026-01-01T00:00:00Z' },
+    { actor_id: 'actor-opaco-2', action: 'batch.published', job_id: 'job-2', trace_id: 'trace-2', occurred_at: '2026-01-02T00:00:00Z' },
+  ]); await tick();
+  assert.equal(h.node('audit-rows').children.length, 2, 'one row per returned event');
+  assert.deepEqual(
+    h.node('audit-rows').children[0].children.map(cell => cell.textContent),
+    ['actor-opaco-1', 'job.requested', 'job-1', 'trace-1', '2026-01-01T00:00:00Z'],
+    'every real field is shown verbatim, in its own cell');
+  assert.equal(h.node('audit-count').textContent, '2', 'the badge reports the returned length');
+  assert.equal(h.node('audit-badge').textContent, 'LEÍDO');
+  assert.equal(h.node('audit-table').hasAttribute('hidden'), false, 'a non-empty register shows its table');
+  assert.ok(h.node('audit-status').classes.has('risk-good'));
+  // Nothing the endpoint does not provide is rendered: no severity, no display
+  // name, no Spanish gloss of the action enum.
+  const status = h.node('audit-status').textContent;
+  assert.doesNotMatch(status, /severidad|nombre para mostrar|riesgo/i);
+});
+
+test('audit 403 renders an explicit admin-only reason instead of hiding the panel', async () => {
+  const h = harness(); await h.ready();
+  h.answer('/v1/audit', { code: 'forbidden', request_id: 'req-9' }, 403); await tick();
+  const status = h.node('audit-status').textContent;
+  assert.equal(h.node('audit-badge').textContent, 'SIN PERMISO');
+  assert.match(status, /403/);
+  assert.match(status, /administrador/i);
+  assert.match(status, /forbidden/);
+  assert.match(status, /req-9/);
+  assert.equal(h.node('audit-rows').children.length, 0);
+  assert.equal(h.node('audit-table').hasAttribute('hidden'), true, 'a denied read shows no event table');
+  assert.equal(h.node('audit-count').textContent, '\u2014');
+  assert.ok(!h.node('audit-status').classes.has('risk-good'));
+});
+
+test('audit payload fails closed unless every entry states an action and a time, and an omitted identifier is labelled in place', async () => {
+  const notArray = harness(); await notArray.ready();
+  notArray.answer('/v1/audit', { code: 'unexpected' }); await tick();
+  assert.equal(notArray.node('audit-badge').textContent, 'NO DISPONIBLE');
+  assert.match(notArray.node('audit-status').textContent, /unexpected/);
+  assert.equal(notArray.node('audit-rows').children.length, 0);
+  assert.equal(notArray.node('audit-table').hasAttribute('hidden'), true);
+
+  const incomplete = harness(); await incomplete.ready();
+  incomplete.answer('/v1/audit', [{ actor_id: 'a', job_id: 'j', trace_id: 't' }]); await tick();
+  assert.equal(incomplete.node('audit-badge').textContent, 'NO DISPONIBLE');
+  assert.equal(incomplete.node('audit-rows').children.length, 0, 'an entry without action or occurred_at is not an event and nothing is invented');
+
+  const partial = harness(); await partial.ready();
+  partial.answer('/v1/audit', [{ actor_id: 'a', action: 'cualquier.valor', job_id: 'j', trace_id: '', occurred_at: '2026-01-01T00:00:00Z' }]); await tick();
+  assert.deepEqual(
+    partial.node('audit-rows').children[0].children.map(cell => cell.textContent),
+    ['a', 'cualquier.valor', 'j', 'No informado', '2026-01-01T00:00:00Z'],
+    'an action outside the documented enum is shown verbatim and an omitted identifier is labelled, never filled in');
+});
+
+test('logout clears the audit panel, a fenced reply cannot repaint it, and the manual refresh re-reads the same endpoint', async () => {
+  const h = harness(); await h.ready();
+  // The initial read is in flight: the control is disabled until it settles, so
+  // an answer can never land after a newer one.
+  assert.equal(h.node('audit-refresh').disabled, true);
+  h.answer('/v1/audit', [{ actor_id: 'a', action: 'job.requested', job_id: 'j', trace_id: 't', occurred_at: '2026-01-01T00:00:00Z' }]); await tick();
+  assert.equal(h.node('audit-rows').children.length, 1);
+  assert.equal(h.node('audit-refresh').disabled, false, 'a settled register leaves the refresh control available');
+
+  h.node('audit-refresh').listeners.click(); await tick();
+  assert.equal(h.calls.filter(x => x.path === `${GATEWAY_ORIGIN}/v1/audit`).length, 2, 'the refresh re-reads the same parameterless endpoint');
+  assert.equal(h.node('audit-badge').textContent, 'CONSULTANDO');
+  h.answer('/v1/audit', []); await tick();
+  assert.equal(h.node('audit-count').textContent, '0', 'an empty register is a real zero');
+  assert.equal(h.node('audit-rows').children.length, 0);
+
+  // Close the session with a read in flight: the late reply owns nothing.
+  h.node('audit-refresh').listeners.click(); await tick();
+  h.node('logout').listeners.click(); await tick();
+  assert.equal(h.node('audit-refresh').disabled, true, 'a closed session cannot re-read the register');
+  h.answer('/v1/audit', [{ actor_id: 'late', action: 'batch.published', job_id: 'j', trace_id: 't', occurred_at: '2026-01-03T00:00:00Z' }]); await tick();
+  assert.equal(h.node('audit-rows').children.length, 0, 'a fenced reply must not repaint the closed panel');
+  assert.equal(h.node('audit-badge').textContent, 'SIN CONSULTAR');
+  assert.equal(h.node('audit-count').textContent, '\u2014');
+  assert.equal(h.node('audit-table').hasAttribute('hidden'), true);
+  assert.equal(h.node('audit-status').textContent, 'Conecta un token autorizado para consultar el registro de actividad.');
+});
+
+// ── T7 · Perfiles y permisos: documentation plus the REAL session role ─────
+//
+// The page holds the access token in memory and never used to decode it. The
+// ONLY real source of the session role is that payload: the gateway proxies
+// exactly /v1/risk, /v1/jobs and /v1/audit, so there is no whoami/me/profile
+// endpoint to ask. The decoded value is a FACT ABOUT THE TOKEN and never an
+// authorization: it may not gate, hide, allow or alter a single request, panel
+// or decision, and the server remains the only authority because only the
+// server verifies the signature.
+//
+// The JWT fixtures are built here with Node's Buffer. The page's own decoder —
+// which cannot use atob, Buffer or TextDecoder — is what reads them back, and
+// the signature segment is a placeholder precisely because the page does NOT
+// verify it.
+const b64url = value => Buffer.from(JSON.stringify(value), 'utf8').toString('base64url');
+const jwt = payload => `${b64url({ alg: 'none', typ: 'JWT' })}.${b64url(payload)}.firma`;
+
+test('session role is decoded from the access token payload and presented as an unverified token fact', async () => {
+  const h = harness(undefined, 200, false, jwt({ realm_access: { roles: ['viewer', 'admin'] } }));
+  await h.ready();
+  assert.equal(h.node('session-roles').textContent, 'viewer, admin', 'the roles the token declares are shown verbatim');
+  assert.equal(h.node('session-roles-badge').textContent, 'TOKEN LEÍDO');
+  const status = h.node('session-roles-status').textContent;
+  assert.match(status, /decodific/i, 'the panel states that the payload is decoded');
+  assert.match(status, /sin verificar la firma/i, 'the panel states that the signature is NOT verified by the page');
+  assert.match(status, /servidor/i);
+  assert.match(status, /única autoridad/i, 'the server remains the only authority');
+  // A single-role token is shown just as literally.
+  const viewer = harness(undefined, 200, false, jwt({ realm_access: { roles: ['viewer'] } }));
+  await viewer.ready();
+  assert.equal(viewer.node('session-roles').textContent, 'viewer');
+});
+
+test('absent, unreadable or role-less tokens show an explicit unavailable state and never a guessed role', async () => {
+  const malformedBase64 = `${b64url({ alg: 'none' })}.@@@@.firma`;
+  const notJson = `${b64url({ alg: 'none' })}.${Buffer.from('no-json', 'utf8').toString('base64url')}.firma`;
+  // Token absent: the provider answers with an empty access_token, so the login
+  // exchange fails and no session is ever connected.
+  const absent = harness(undefined, 200, false, '');
+  await tick();
+  assert.equal(absent.node('session-roles').textContent, 'No disponible');
+  assert.match(absent.node('session-roles-status').textContent, /sin token/i);
+  assert.doesNotMatch(absent.node('session-roles-status').textContent, /\bviewer\b|\badmin\b/);
+  const cases = [
+    ['not a JWT at all', harness(undefined, 200, false, 'test'), 'No disponible', /no es un JWT/i],
+    ['two segments only', harness(undefined, 200, false, 'aaaa.bbbb'), 'No disponible', /no es un JWT/i],
+    ['payload is not decodable base64url', harness(undefined, 200, false, malformedBase64), 'No disponible', /no es un JWT/i],
+    ['payload is not JSON', harness(undefined, 200, false, notJson), 'No disponible', /no es un JWT/i],
+    ['payload is not an object', harness(undefined, 200, false, jwt(['viewer'])), 'No informado', /realm_access\.roles/i],
+    ['no realm_access claim', harness(undefined, 200, false, jwt({ sub: 'x' })), 'No informado', /realm_access\.roles/i],
+    ['roles is a bare string, not an array', harness(undefined, 200, false, jwt({ realm_access: { roles: 'admin' } })), 'No informado', /realm_access\.roles/i],
+    ['roles is an empty array', harness(undefined, 200, false, jwt({ realm_access: { roles: [] } })), 'No informado', /realm_access\.roles/i],
+    ['roles holds no usable string', harness(undefined, 200, false, jwt({ realm_access: { roles: ['', 42, '  '] } })), 'No informado', /realm_access\.roles/i],
+  ];
+  for (const [label, h, expected, message] of cases) {
+    await h.ready();
+    assert.equal(h.node('session-roles').textContent, expected, label);
+    assert.match(h.node('session-roles-status').textContent, message, label);
+    assert.doesNotMatch(
+      `${h.node('session-roles').textContent} ${h.node('session-roles-status').textContent}`,
+      /\bviewer\b|\badmin\b/,
+      `${label}: a role may never be defaulted, guessed or inferred from an HTTP status`
+    );
+  }
+});
+
+test('the decoded role is display-only: a viewer and an admin token drive identical requests and controls', async () => {
+  const viewer = harness(undefined, 200, false, jwt({ realm_access: { roles: ['viewer'] } }));
+  const admin = harness(undefined, 200, false, jwt({ realm_access: { roles: ['viewer', 'admin'] } }));
+  await viewer.ready(); await admin.ready();
+  assert.equal(viewer.node('session-roles').textContent, 'viewer');
+  assert.equal(admin.node('session-roles').textContent, 'viewer, admin');
+  const requests = h => h.calls.map(call => `${call.options && call.options.method ? call.options.method : 'GET'} ${call.path}`);
+  assert.deepEqual(requests(viewer), requests(admin), 'the decoded role may not add, remove, reorder or block a single request');
+  for (const id of ['create-job', 'refresh-job', 'audit-refresh', 'logout', 'zone-select', 'scenario-select', 'login']) {
+    assert.equal(viewer.node(id).disabled, admin.node(id).disabled, `${id} disabled`);
+    assert.equal(viewer.node(id).hidden, admin.node(id).hidden, `${id} hidden`);
+  }
+  for (const id of ['session-state', 'session-detail', 'audit-badge', 'audit-status', 'job-status', 'history-state']) {
+    assert.equal(viewer.node(id).textContent, admin.node(id).textContent, id);
+  }
+});
+
+test('logout returns the role panel to the explicit unavailable state', async () => {
+  const h = harness(undefined, 200, false, jwt({ realm_access: { roles: ['admin'] } }));
+  await h.ready();
+  assert.equal(h.node('session-roles').textContent, 'admin');
+  h.node('logout').listeners.click(); await tick();
+  assert.equal(h.node('session-roles').textContent, 'No disponible');
+  assert.equal(h.node('session-roles-badge').textContent, 'SIN SESIÓN');
+  assert.match(h.node('session-roles-status').textContent, /sin token/i);
+});
+
+// The decoder is exercised end to end: a role with a multi-byte character must
+// survive the page's own base64url + UTF-8 decoding, and the URL-safe alphabet
+// is what the fixture is encoded with.
+test('the self-contained base64url/UTF-8 decoder round-trips a multi-byte role name', async () => {
+  const h = harness(undefined, 200, false, jwt({ realm_access: { roles: ['visór-de-prueba', 'admin'] } }));
+  await h.ready();
+  assert.equal(h.node('session-roles').textContent, 'visór-de-prueba, admin');
+  assert.ok(!/[^\x20-\x7eáéíóúÁÉÍÓÚñÑ]/.test(h.node('session-roles').textContent), 'the decoded text carries no replacement bytes');
+});
+
+// Every matrix row must cite a REAL server-side guard by `path:line`. This test
+// holds its own expectation of what each cited line must contain, so a stale or
+// invented citation fails here instead of being asserted on screen.
+const GUARD_LINES = {
+  'backend/services/gateway/internal/handler/gateway.go:39': /mux\.Handle\("\/v1\/audit"/,
+  'backend/services/gateway/internal/handler/gateway.go:74': /health\/ready/,
+  'backend/services/gateway/internal/handler/gateway.go:96': /auth := strings\.Fields/,
+  'backend/services/gateway/internal/handler/gateway.go:102': /verifier\.Verify\(ctx, auth\[1\]\)/,
+  'backend/services/risk/internal/handler/security.go:43': /role == "viewer" \|\| role == "admin"/,
+  'backend/services/risk/internal/handler/security.go:48': /fail\(w, 403, "forbidden"\)/,
+  'backend/services/risk/internal/handler/api.go:41': /"GET \/v1\/risk\/status"/,
+  'backend/services/risk/internal/handler/api.go:80': /"GET \/v1\/risk\/latest"/,
+  'backend/services/risk/internal/handler/api.go:81': /"GET \/v1\/risk\/history"/,
+  'backend/services/risk/internal/handler/api.go:82': /"GET \/v1\/risk\/zones"/,
+  'backend/services/risk/internal/handler/api.go:83': /"GET \/v1\/risk\/synthetic-scenarios"/,
+  'backend/services/risk/internal/handler/api.go:88': /"GET \/v1\/risk\/sources"/,
+  'backend/services/risk/internal/handler/api.go:89': /return Authorize\(verifier, mux\)/,
+  'backend/services/jobs/internal/handler/security.go:44': /role == "admin"/,
+  'backend/services/jobs/internal/handler/security.go:49': /fail\(w, 403, "forbidden"\)/,
+  'backend/services/jobs/internal/handler/api.go:51': /"GET \/v1\/jobs\/status"/,
+  'backend/services/jobs/internal/handler/api.go:52': /"POST \/v1\/jobs"/,
+  'backend/services/jobs/internal/handler/api.go:135': /"GET \/v1\/jobs\/\{id\}"/,
+  'backend/services/jobs/internal/handler/api.go:152': /"GET \/v1\/audit"/,
+  'backend/services/jobs/internal/handler/api.go:160': /return Authorize\(verifier, mux\)/,
+};
+
+test('the permissions matrix documents the real server guards and marks what it cannot verify', async () => {
+  const h = harness();
+  await h.ready();
+  const rows = h.node('permissions-rows').children;
+  assert.ok(rows.length >= 8, `the matrix documents the real capabilities; got ${rows.length} rows`);
+  const cited = new Set();
+  let unverified = 0;
+  for (const row of rows) {
+    assert.equal(row.children.length, 4, 'every row states capability, both roles and its guard');
+    assert.ok(row.children[0].textContent.trim().length > 0, 'every row names a capability');
+    const cell = row.children[3].textContent;
+    if (cell.startsWith('No verificado')) { unverified += 1; continue; }
+    for (const ref of cell.split(' · ')) {
+      assert.ok(GUARD_LINES[ref], `uncited or unknown guard reference: ${ref}`);
+      cited.add(ref);
+      const [file, line] = ref.split(':');
+      const lines = fs.readFileSync(`${__dirname}/../../${file}`, 'utf8').split('\n');
+      assert.match(lines[Number(line) - 1] ?? '', GUARD_LINES[ref], `${ref} does not hold the guard it claims`);
+    }
+  }
+  assert.ok(unverified >= 1, 'at least one row must be marked as not verified instead of asserted');
+  assert.deepEqual([...cited].sort(), Object.keys(GUARD_LINES).sort(), 'the matrix must cite exactly the guards this test verifies');
+
+  const rowsWith = text => rows.filter(row => row.children[0].textContent.includes(text));
+  const auditRow = rowsWith('/v1/audit');
+  assert.equal(auditRow.length, 1, 'the activity register is documented');
+  assert.match(auditRow[0].children[1].textContent, /^No\b/, 'a viewer may not read the register');
+  assert.match(auditRow[0].children[1].textContent, /403/);
+  assert.match(auditRow[0].children[2].textContent, /^Sí(\s|$)/, 'an admin may read the register');
+  const latestRows = rowsWith('/v1/risk/latest');
+  assert.equal(latestRows.length, 1);
+  assert.match(latestRows[0].children[1].textContent, /^Sí(\s|$)/, 'a viewer may read the risk endpoints');
+  assert.match(latestRows[0].children[2].textContent, /^Sí(\s|$)/);
+  const jobsRow = rowsWith('POST /v1/jobs');
+  assert.equal(jobsRow.length, 1);
+  assert.match(jobsRow[0].children[1].textContent, /^No\b/);
+  assert.match(jobsRow[0].children[2].textContent, /^Sí(\s|$)/);
+});
+
+// S3: the mockup's role selector is deliberately NOT ported, because a page
+// that lets the operator choose a role would be a fake authorization boundary.
+test('no role selector, switcher or picker is ported and the decoded roles have exactly one reader', async () => {
+  const h = harness();
+  await h.ready();
+  assert.doesNotMatch(source, /role-select|role-switch|role-picker|perfil-select/i);
+  const selectIds = [...html.matchAll(/<select[^>]*id="([^"]+)"/g)].map(match => match[1]);
+  assert.ok(selectIds.length > 0);
+  assert.ok(selectIds.every(id => !/rol|perfil/i.test(id)), selectIds.join(','));
+  assert.doesNotMatch(html, /<option[^>]*value="(admin|viewer)"/i, 'no role value is offered as an option');
+  assert.doesNotMatch(html, /id="role|id="rol-/i);
+  // One definition plus one call: the decoded roles feed the display writer and
+  // nothing else, so they cannot reach a request, a panel or a decision.
+  assert.equal([...source.matchAll(/sessionRolesFromPayload/g)].length, 2);
+  assert.doesNotMatch(source, /(realm_access|sessionRoles)\s*[^;]*\.(includes|some|filter)\([^)]*\)\s*\)\s*\{?\s*(if|return|document)/);
+});
+
+
+// Everything the retired mockup offered that the backend cannot back must be
+// DECLARED on the page: visible, named, and offered by no control at all. A
+// silent omission would read as a capability that works.
+test('every capability without a backend is declared as not implemented and offers no action', async () => {
+  const h = harness();
+  await h.ready();
+  const rows = h.node('pending-rows').children;
+  assert.ok(rows.length >= 6, 'the inventory lists every unavailable capability');
+  const rendered = rows.map(row => row.children.map(cell => cell.textContent).join(' | ')).join('\n').toLowerCase();
+  for (const capability of [
+    'cobertura y entorno por sector',
+    'contexto y prioridad por sector',
+    'candidate, in_progress, reviewed y closed',
+    'historial de todas las zonas',
+    'incorporar registros',
+    'publicar lote',
+    'nombre del actor',
+  ]) {
+    assert.ok(rendered.includes(capability), `the inventory must name ${capability}`);
+  }
+  assert.ok(rows.every(row => row.children.length === 3), 'each entry names the capability, the reason and where it would live');
+  assert.ok(rows.every(row => row.children.every(cell => cell.children.length === 0)), 'each entry is plain text: no action is offered or simulated');
+  assert.match(h.node('pending-badge').textContent, /NO IMPLEMENTADO/i, 'the panel states its own status');
+});
+
+// The batch carries a real `contribution` per factor, so the proportion bar is a
+// real proportion: each known factor is drawn against the largest contribution of
+// THIS batch, and a factor the API did not measure gets no bar at all instead of
+// a zero drawn as if it were a measurement.
+test('factor bars use the real contribution and a factor without data draws no bar', async () => {
+  const h = harness(); await h.ready(); await h.select('05102');
+  const batch = {
+    ...h.batch('05102'),
+    factors: [
+      { name: 'temperatura', known: true, value: 30, contribution: 0.5, note: '' },
+      { name: 'humedad', known: true, value: 10, contribution: 0.25, note: '' },
+      { name: 'viento', known: false, value: 0, contribution: 0, note: 'sin dato' },
+    ],
+  };
+  h.answer('/v1/risk/latest?zone_id=05102', batch);
+  h.answer('/v1/risk/history?zone_id=05102', [batch]);
+  await tick();
+  const items = h.node('risk-factors').children;
+  assert.equal(items.length, 3, 'every valid factor is listed in order');
+  const trackOf = (item) => item.children.find(child => child.attributes.get('class') === 'factor-track');
+  const widthOf = (item) => trackOf(item).children[0].attributes.get('style');
+  assert.equal(widthOf(items[0]), 'width:100%', 'the largest contribution fills the bar');
+  assert.equal(widthOf(items[1]), 'width:50%', 'a quarter against a half is half a bar');
+  assert.equal(trackOf(items[2]), undefined, 'a factor without data draws no bar at all');
 });

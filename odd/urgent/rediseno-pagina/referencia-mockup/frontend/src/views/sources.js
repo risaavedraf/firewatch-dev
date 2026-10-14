@@ -1,0 +1,10 @@
+import { canManage } from '../core/selectors.js';
+import { heading, panelHeader, table, escape, chip, button, icon } from '../components/ui.js';
+
+export function sources(state) {
+  const allowed = canManage(state);
+  return `${heading('Datos de entrada', 'La calidad viene primero.', 'Revise las referencias declaradas que sustentan la planificación preventiva.')}
+    <section class="panel">${panelHeader('Catálogo de fuentes', 'Referencias declaradas y su revisión de calidad')}${table(['Fuente', 'Procedencia', 'Revisión', 'Acciones'], state.sources.map(source => `<tr><td><strong>${escape(source.name)}</strong><small>${escape(source.provider)}</small></td><td>${escape(source.detail)}</td><td>${chip(source.quality)}</td><td><div class="row-actions">${button('Revisar', 'REVIEW_SOURCE', { id: source.id, disabled: !allowed, style: 'text' })}${button('Incorporar registros', 'IMPORT_SOURCE', { id: source.id, disabled: !allowed })}</div></td></tr>`), 'Fuentes de datos')}</section>
+     <div class="two-columns"><section class="panel padded">${panelHeader('Controles de entrada', 'Criterios para revisar la calidad de las referencias')}<ol class="quality-steps"><li><strong>Formato y temporalidad</strong><p>Esquemas compatibles, fecha de emisión y ventana de aplicación.</p></li><li><strong>Coordenadas y cobertura</strong><p>Consistencia espacial y sectores con información insuficiente.</p></li><li><strong>Duplicados y faltantes</strong><p>Identificación y corrección trazable antes del uso del lote.</p></li></ol></section><section class="panel padded">${panelHeader('Hallazgos por fuente')}${state.sources.map(source => `<div class="quality-finding"><h3>${escape(source.name)}</h3><p>${escape(source.detail)}</p></div>`).join('')}<p class="panel-footnote">Registre cada hallazgo y el criterio aplicado durante su revisión.</p></section></div>
+     <div class="inline-notice">${icon('info')}<span>Este catálogo enumera referencias declaradas: no se publican conteos de registros mientras no exista procedencia verificable.</span></div>`;
+}

@@ -32,6 +32,14 @@
   // Canonical level of the last published batch for the SELECTED zone. Empty
   // means "no level computed for any zone", which is the honest default.
   let activeLevel = "";
+  // Canonical level remembered for every zone whose latest batch this session has
+  // already read, so the regional map keeps its colours when the selection moves
+  // away instead of greying out every comuna but one. It is filled from the reads
+  // the page already performs (no extra requests) and cleared on logout.
+  let zoneLevels = new Map();
+  // Rows the API returned for the SELECTED zone, kept so the search box and the
+  // status filter can narrow them without issuing another read.
+  let historyBatches = [];
   const zoneShapes = new Map();
   // Monotonic sequence for each zone-scoped request kind. A request captures
   // the value it started with and a response is discarded unless that value is
@@ -378,11 +386,20 @@
       const shape = entry[1];
       shape.classList.remove("zone-neutral", "zone-selected", "level-bajo", "level-medio", "level-alto", "level-desconocido");
       const selected = code === selectedZone;
-      if (selected && activeLevel !== "") shape.classList.add(`level-${activeLevel}`);
+      // The selection's own level comes from the panel's freshly read batch;
+      // every other zone keeps the level the regional fan-out found, so a
+      // published batch does not lose its colour when the selection moves.
+      const level = selected ? activeLevel : zoneLevels.get(code) || "";
+      if (level !== "") shape.classList.add(`level-${level}`);
       else shape.classList.add("zone-neutral");
       shape.setAttribute("aria-pressed", String(selected));
       if (selected) shape.classList.add("zone-selected");
     }
+    // Summary card. No endpoint aggregates levels, so this counts only the zones
+    // whose latest batch this session actually read; the card states that limit.
+    let highZones = 0;
+    for (const level of zoneLevels.values()) if (level === "alto") highZones += 1;
+    setText("metric-high", highZones);
   }
 
   function canonicalLevel(level) {
@@ -449,6 +466,70 @@
     return chosen;
   }
 
+  // --- Synthetic scenario picker -------------------------------------------
+  //
+  // The catalogue is served by the authenticated risk API and its IDs are the
+  // exact built-in profiles. The page never invents a profile name and never
+  // sends an empty value: the server rejects an explicit null/empty scenario_id
+  // with 400 invalid_demo_request, while an OMITTED field keeps the legacy
+  // fixture. So `selectedScenario()` returns "" and the caller omits the field.
+  function selectedScenario() {
+    const select = document.getElementById("scenario-select");
+    return select ? select.value : "";
+  }
+
+  function populateScenarioSelector(items) {
+    const select = document.getElementById("scenario-select");
+    if (!select) return "";
+    const previous = select.value;
+    const options = [];
+    for (const item of items) {
+      if (!item || typeof item.id !== "string" || item.id === "") continue;
+      options.push({
+        id: item.id,
+        description: typeof item.description === "string" ? item.description : "",
+      });
+    }
+    select.replaceChildren();
+    const legacy = document.createElement("option");
+    legacy.value = "";
+    legacy.textContent = "Sin escenario (fixture analítico heredado)";
+    select.append(legacy);
+    for (const scenario of options) {
+      const option = document.createElement("option");
+      option.value = scenario.id;
+      option.textContent = scenario.description === "" ? scenario.id : `${scenario.id} — ${scenario.description}`;
+      select.append(option);
+    }
+    const chosen = options.some((scenario) => scenario.id === previous) ? previous : "";
+    select.value = chosen;
+    select.disabled = false;
+    return chosen;
+  }
+
+  async function loadScenarios(isCurrent = () => true) {
+    try {
+      const catalogue = await apiRequest(`${gatewayOrigin}/v1/risk/synthetic-scenarios`, {}, isCurrent);
+      if (!isCurrent()) return;
+      if (!Array.isArray(catalogue)) {
+        const select = document.getElementById("scenario-select");
+        if (select) { select.value = ""; select.disabled = true; }
+        setText("scenario-note", "La API no devolvió un catálogo de escenarios válido; el trabajo usaría el fixture analítico heredado.");
+        return;
+      }
+      populateScenarioSelector(catalogue);
+      setText("scenario-note", "El escenario se elige en esta página. El servidor asigna su instante de evaluación en UTC, una sola vez por trabajo; son perfiles de prueba, no condiciones observadas.");
+    } catch (error) {
+      if (!isCurrent()) return;
+      if (error.message === "unauthorized") return;
+      const select = document.getElementById("scenario-select");
+      if (select) { select.value = ""; select.disabled = true; }
+      setText("scenario-note", error.message === "forbidden"
+        ? "La API denegó el permiso para listar escenarios (403); el trabajo usaría el fixture analítico heredado."
+        : "No fue posible cargar el catálogo de escenarios; el trabajo usaría el fixture analítico heredado.");
+    }
+  }
+
   async function loadZones(isCurrent = () => true) {
     showMapEmpty("Consultando el catálogo de zonas analizadas…");
     try {
@@ -501,9 +582,13 @@
     selectedZone = "";
     zoneCollection = null;
     activeLevel = "";
+    zoneLevels = new Map();
+    // Repaint before the map is hidden: no colour survives a closed session.
+    applyZoneLevels();
     document.getElementById("session-state").textContent = "Sin conexión";
     document.getElementById("session-detail").textContent = "Token requerido para consultar";
     document.getElementById("logout").hidden = true;
+    renderSessionRole();
     document.getElementById("create-job").disabled = true;
     document.getElementById("refresh-job").disabled = true;
     setText("risk-level", "Sin datos");
@@ -522,6 +607,8 @@
     setText("pipeline-status", "Conecta un token autorizado para comprobar los servicios.");
     setText("pipeline-risk", "Sin verificar");
     setText("pipeline-jobs", "Sin verificar");
+    clearAuditPanel("SIN CONSULTAR", "Conecta un token autorizado para consultar el registro de actividad.");
+    document.getElementById("audit-refresh").disabled = true;
     document.getElementById("pipeline-status").classList.remove("risk-good", "risk-error");
     document.getElementById("pipeline-risk").classList.remove("risk-good");
     document.getElementById("pipeline-jobs").classList.remove("risk-good");
@@ -535,12 +622,25 @@
       select.value = "";
       select.disabled = true;
     }
+    const scenarioSelect = document.getElementById("scenario-select");
+    if (scenarioSelect) {
+      scenarioSelect.replaceChildren();
+      const legacyOption = document.createElement("option");
+      legacyOption.value = "";
+      legacyOption.textContent = "Sin escenario (fixture analítico heredado)";
+      scenarioSelect.append(legacyOption);
+      scenarioSelect.value = "";
+      scenarioSelect.disabled = true;
+    }
+    setText("scenario-note", "El escenario se elige en esta página. El servidor asigna su instante de evaluación en UTC, una sola vez por trabajo; son perfiles de prueba, no condiciones observadas.");
     updateZoneSummary();
     showMapEmpty("Conecta un token autorizado para cargar las zonas analizadas.");
     setText("history-count", "\u2014");
+    setText("metric-batches", "\u2014");
     document.getElementById("history-rows").replaceChildren();
     document.getElementById("history-state").textContent = "Conecta un token para consultar el historial.";
     document.querySelector(".history-panel").classList.remove("has-rows");
+    resetHistoryFilters();
     setText("job-status", "Disponible al conectar un token. El servidor determina si tienes permiso.");
     setText("job-state", "Sin solicitud");
     setText("job-id", "\u2014");
@@ -630,6 +730,7 @@
     document.getElementById("logout").hidden = false;
     document.getElementById("create-job").disabled = false;
     document.getElementById("auth-status").textContent = "Consultando endpoints protegidos…";
+    renderSessionRole();
     refreshPipeline();
     const sequence = ++sessionSequence;
     const isCurrent = () => sequence === sessionSequence && accessToken !== "";
@@ -638,6 +739,14 @@
       .then(() => {
         if (isCurrent()) document.getElementById("auth-status").textContent = "Sesión lista. Las acciones autorizadas se validan en el servidor.";
       });
+    // Deliberately independent of the zone chain: a catalogue failure must never
+    // block zones, latest or history, and the selector then stays at its
+    // legacy-only disabled state instead of inventing a profile.
+    loadScenarios(isCurrent);
+    // Also independent: a denied register (403 for a non-admin) must never block
+    // zones, latest, history or the scenario catalogue.
+    document.getElementById("audit-refresh").disabled = false;
+    loadAudit(isCurrent);
   }
 
   async function apiRequest(path, options = {}, isCurrent = () => true) {
@@ -746,6 +855,93 @@
     }
     if (!isCurrent()) return;
     renderSources(result);
+  }
+
+  // --- Activity register ---------------------------------------------------
+  //
+  // `/v1/audit` is admin-only, accepts NO query parameter and the service bounds
+  // the answer itself (the newest rows only), so the page never sends a limit or
+  // an offset and never pages. Every entry is rendered with the five fields the
+  // endpoint carries —`actor_id`, `action`, `job_id`, `trace_id`, `occurred_at`—
+  // and the retired mockup's columns that no backend provides (an actor display
+  // name, a free-text detail and its own event id) are marked as not implemented
+  // in the panel instead of being simulated.
+  const AUDIT_FIELDS = ["actor_id", "action", "job_id", "trace_id", "occurred_at"];
+
+  function clearAuditPanel(badge, reason) {
+    setText("audit-badge", badge);
+    setText("audit-status", reason);
+    document.getElementById("audit-status").classList.remove("risk-good");
+    setText("audit-count", "\u2014");
+    document.getElementById("audit-rows").replaceChildren();
+    document.getElementById("audit-table").setAttribute("hidden", "");
+  }
+
+  function renderAudit(result) {
+    const body = record(result.body) ? result.body : null;
+    const code = body && nonempty(body.code) ? ` \u00b7 ${body.code}` : "";
+    // Admin-only endpoint: a profile without the permission is a stated outcome,
+    // not a hidden panel, so the 403 body itself names the reason and the request.
+    if (result.status === 403) {
+      const request = body && nonempty(body.request_id) ? ` \u00b7 request_id ${body.request_id}` : "";
+      clearAuditPanel("SIN PERMISO", `La API denegó el permiso para consultar el registro de actividad (HTTP 403${code}${request}). Es un endpoint de solo administradores: solicita acceso a un administrador; la página no oculta ni simula los eventos.`);
+      return;
+    }
+    // An event is an entry that states WHAT happened and WHEN. Without both the
+    // payload is not a usable register and nothing is rendered from it: a partial
+    // list would be an invented view of the activity.
+    const events = result.status === 200 && Array.isArray(result.body) ? result.body : null;
+    const usable = events !== null &&
+      events.every((event) => record(event) && nonempty(event.action) && nonempty(event.occurred_at));
+    if (!usable) {
+      clearAuditPanel("NO DISPONIBLE", `La API no devolvió un registro de actividad utilizable (HTTP ${result.status}${code}); no se muestran eventos inventados ni parciales.`);
+      return;
+    }
+    const rows = document.getElementById("audit-rows");
+    rows.replaceChildren();
+    for (const event of events) {
+      const row = document.createElement("tr");
+      for (const field of AUDIT_FIELDS) {
+        const cell = document.createElement("td");
+        // An identifier the service omits is labelled in place: nothing is filled
+        // in from another field and no name is ever derived from an id.
+        cell.textContent = nonempty(event[field]) ? event[field] : "No informado";
+        row.append(cell);
+      }
+      rows.append(row);
+    }
+    setText("audit-count", events.length);
+    setText("audit-badge", "LEÍDO");
+    if (events.length === 0) {
+      setText("audit-status", "El servicio devolvió un registro de actividad sin eventos.");
+      return;
+    }
+    document.getElementById("audit-table").removeAttribute("hidden");
+    setText("audit-status", "Registro real devuelto por /v1/audit. Es un endpoint de solo administradores y no acepta parámetros: el servicio acota la respuesta por sí mismo.");
+    document.getElementById("audit-status").classList.add("risk-good");
+  }
+
+  async function loadAudit(isCurrent = () => accessToken !== "") {
+    if (accessToken === "") return;
+    const button = document.getElementById("audit-refresh");
+    // This single global read needs one concurrency guard: the control itself.
+    // One refresh in flight at a time, so an older answer can never land last.
+    button.disabled = true;
+    setText("audit-badge", "CONSULTANDO");
+    setText("audit-status", "Consultando el registro de actividad en /v1/audit…");
+    document.getElementById("audit-status").classList.remove("risk-good");
+    let result;
+    try {
+      result = await apiRequestStatus(`${gatewayOrigin}/v1/audit`, {}, isCurrent);
+    } catch {
+      if (!isCurrent()) return;
+      clearAuditPanel("NO DISPONIBLE", "No fue posible consultar el registro de actividad; se muestra como no disponible.");
+      button.disabled = false;
+      return;
+    }
+    if (!isCurrent()) return;
+    button.disabled = false;
+    renderAudit(result);
   }
 
   // --- Pipeline status panel -----------------------------------------------
@@ -1009,11 +1205,27 @@
     setText("risk-rationale", nonempty(batch.rationale) ? batch.rationale : "Justificación ausente o inválida");
     const factors = document.getElementById("risk-factors");
     factors.replaceChildren();
+    // Every factor the batch carries comes with a real `contribution`, so the bar
+    // is a real proportion and never an invention: each known factor is drawn
+    // against the largest contribution of THIS batch, and a factor the API did
+    // not measure gets no bar at all instead of a zero drawn as a measurement.
+    const measured = presentation.factors
+      .filter((factor) => factor.known === true && Number.isFinite(factor.contribution))
+      .map((factor) => factor.contribution);
+    const largest = measured.length > 0 ? Math.max(...measured) : 0;
     for (const factor of presentation.factors) {
       const item = document.createElement("li");
       item.textContent = factor.known
         ? `${factor.name}: ${factor.value} · contribución ${factor.contribution} · ${factor.note}`
         : `${factor.name}: desconocido · ${factor.note}`;
+      if (factor.known === true && largest > 0) {
+        const track = document.createElement("div");
+        track.setAttribute("class", "factor-track");
+        const fill = document.createElement("span");
+        fill.setAttribute("style", `width:${Math.round((factor.contribution / largest) * 100)}%`);
+        track.append(fill);
+        item.append(track);
+      }
       factors.append(item);
     }
     if (presentation.omissions.includes("factores")) {
@@ -1031,6 +1243,11 @@
     setText("valid-until", batch.valid_until);
     setText("batch-id", batch.id);
     activeLevel = presentation.valid ? canonicalLevel(batch.risk_level) : "";
+    // Recorded for the region too: once the selection moves on, this zone must
+    // still show the batch it has, or lose the colour if the batch is invalid.
+    if (typeof batch.zone_id === "string" && batch.zone_id !== "") {
+      if (activeLevel === "") zoneLevels.delete(batch.zone_id); else zoneLevels.set(batch.zone_id, activeLevel);
+    }
     applyZoneLevels();
     setText("risk-status", batch.demo === true
       ? "Entradas de demostración sintéticas: no representan riesgo real observado. La publicación no acredita frescura de observaciones. Clasificación por regla propia no oficial."
@@ -1099,6 +1316,58 @@
     return renderBatch(batch);
   }
 
+  // The history panel shows the rows the API returned for ONE zone. Search and
+  // the status filter are client-side over exactly those rows: they issue no
+  // read and cannot reach another zone, while the badge keeps reporting the
+  // returned length and the result count reports what is visible.
+  function populateHistoryStatusFilter(batches) {
+    const select = document.getElementById("history-status-filter");
+    const previous = select.value;
+    const statuses = [...new Set(batches.map((batch) => String(batch.data_status ?? "")).filter((value) => value !== ""))].sort();
+    select.replaceChildren();
+    const any = document.createElement("option");
+    any.value = "";
+    any.textContent = "Todos los estados";
+    select.append(any);
+    for (const status of statuses) {
+      const option = document.createElement("option");
+      option.value = status;
+      option.textContent = status;
+      select.append(option);
+    }
+    select.value = statuses.includes(previous) ? previous : "";
+  }
+
+  function renderHistoryRows() {
+    const rows = document.getElementById("history-rows");
+    const query = document.getElementById("history-query").value.trim().toLowerCase();
+    const status = document.getElementById("history-status-filter").value;
+    const visible = historyBatches.filter((batch) => {
+      if (status !== "" && String(batch.data_status ?? "") !== status) return false;
+      if (query === "") return true;
+      return [batch.requested_at, batch.data_status, batch.id].some((value) => String(value ?? "").toLowerCase().includes(query));
+    });
+    rows.replaceChildren();
+    for (const batch of visible) {
+      const row = document.createElement("tr");
+      for (const value of [batch.requested_at, batch.data_status, batch.id]) {
+        const cell = document.createElement("td");
+        cell.textContent = value == null ? "No informado" : String(value);
+        row.append(cell);
+      }
+      rows.append(row);
+    }
+    setText("history-visible-count", `${visible.length} de ${historyBatches.length}`);
+    document.querySelector(".history-panel").classList.toggle("has-rows", historyBatches.length > 0);
+  }
+
+  function resetHistoryFilters() {
+    historyBatches = [];
+    document.getElementById("history-query").value = "";
+    populateHistoryStatusFilter([]);
+    setText("history-visible-count", "\u2014");
+  }
+
   async function loadHistory(expected = expectedBatch) {
     const state = document.getElementById("history-state");
     if (selectedZone === "") {
@@ -1132,24 +1401,15 @@
       state.textContent = "El historial todavía no informa el lote del trabajo publicado.";
       return false;
     }
-    const rows = document.getElementById("history-rows");
-    rows.replaceChildren();
     setText("history-count", batches.length);
+    setText("metric-batches", batches.length);
+    historyBatches = batches;
+    populateHistoryStatusFilter(batches);
+    renderHistoryRows();
     if (batches.length === 0) {
       state.textContent = "La API devolvió un historial vacío.";
-      document.querySelector(".history-panel").classList.remove("has-rows");
       return;
     }
-    for (const batch of batches) {
-      const row = document.createElement("tr");
-      for (const value of [batch.requested_at, batch.data_status, batch.id]) {
-        const cell = document.createElement("td");
-        cell.textContent = value == null ? "No informado" : String(value);
-        row.append(cell);
-      }
-      rows.append(row);
-    }
-    document.querySelector(".history-panel").classList.add("has-rows");
     state.textContent = batches.every((batch) => batch.demo === true)
       ? "Registros sintéticos devueltos por la API."
       : "Registros devueltos por la API.";
@@ -1238,10 +1498,311 @@
     setText("job-state", job.state);
     setText("job-id", job.id);
     setText("job-requested", job.requested_at);
+    // The selected profile is server-assigned metadata on the job; it is shown
+    // only when the server actually reported one, never inferred by the page.
+    const scenario = typeof job.scenario_id === "string" && job.scenario_id !== "" ? ` · escenario ${job.scenario_id}` : "";
     setText("job-status", job.state === "published" && job.batch_id
-      ? `Trabajo publicado · lote ${job.batch_id}`
-      : `Trabajo ${job.state}; el servidor controla su procesamiento.`);
+      ? `Trabajo publicado · lote ${job.batch_id}${scenario}`
+      : `Trabajo ${job.state}${scenario}; el servidor controla su procesamiento.`);
     document.getElementById("refresh-job").disabled = false;
+  }
+
+  // --- Perfiles y permisos -------------------------------------------------
+  //
+  // Two clearly separated things, and nothing else:
+  //   1. a documentation matrix of which REAL role may do what, documented from
+  //      the actual server-side guards and cited by `path:line`;
+  //   2. the role this session actually presents, decoded from the access token
+  //      payload.
+  //
+  // The retired mockup let the operator PICK a role. That selector is NOT
+  // ported: a page cannot grant a permission, so a selector would be a fake
+  // authorization boundary. The decoded value is a FACT ABOUT THE TOKEN for
+  // display only; the server is the only authority because only the server
+  // verifies the signature.
+  //
+  // The role guards read from the repository, verified line by line:
+  //   backend/services/risk/internal/handler/security.go:42-43  the risk service
+  //     accepts a token whose realm_access.roles contains "viewer" OR "admin".
+  //   backend/services/risk/internal/handler/security.go:48    any other role is
+  //     answered with 403 forbidden (an unverifiable token is 401 instead).
+  //   backend/services/risk/internal/handler/api.go:89          that guard wraps
+  //     the whole risk mux, so it covers every /v1/risk route below.
+  //   backend/services/jobs/internal/handler/security.go:43-44  the jobs service
+  //     accepts ONLY "admin".
+  //   backend/services/jobs/internal/handler/security.go:49    so a verified
+  //     viewer is answered with 403 forbidden there.
+  //   backend/services/jobs/internal/handler/api.go:160          that guard wraps
+  //     the whole jobs mux: jobs status, job creation, job read and /v1/audit.
+  //   backend/services/gateway/internal/handler/gateway.go:39   the gateway only
+  //     proxies /v1/audit to the jobs service; it adds no role of its own.
+  //   backend/services/gateway/internal/handler/gateway.go:74   /health/ready
+  //     answers 204 before any bearer check, so it needs no role at all.
+  //   backend/services/gateway/internal/handler/gateway.go:96-105  the gateway
+  //     does require a verifiable bearer with a subject, but decides no role.
+  // The role-carrying claim is the one the realm mapper emits in ACCESS tokens:
+  // backend/deploy/local/firewatch-realm.json:28 declares `realm_access.roles`,
+  // multivalued, with `access.token.claim: true` and `id.token.claim: false`.
+  const PERMISSION_MATRIX = [
+    {
+      capability: "Disponibilidad del gateway · GET /health/ready",
+      viewer: "Sí: responde 204 sin comprobar token ni rol",
+      admin: "Sí: responde 204 sin comprobar token ni rol",
+      guards: ["backend/services/gateway/internal/handler/gateway.go:74"],
+    },
+    {
+      capability: "Autenticación de cualquier ruta /v1/* · bearer verificado en el gateway",
+      viewer: "Sí: exige un bearer verificable con sujeto; no decide ningún rol",
+      admin: "Sí: exige un bearer verificable con sujeto; no decide ningún rol",
+      guards: ["backend/services/gateway/internal/handler/gateway.go:96", "backend/services/gateway/internal/handler/gateway.go:102"],
+    },
+    {
+      capability: "Consultar el estado del servicio de riesgo · GET /v1/risk/status",
+      viewer: "Sí",
+      admin: "Sí",
+      guards: ["backend/services/risk/internal/handler/api.go:41", "backend/services/risk/internal/handler/security.go:43", "backend/services/risk/internal/handler/api.go:89"],
+    },
+    {
+      capability: "Consultar el último lote de una zona · GET /v1/risk/latest",
+      viewer: "Sí",
+      admin: "Sí",
+      guards: ["backend/services/risk/internal/handler/api.go:80", "backend/services/risk/internal/handler/security.go:43"],
+    },
+    {
+      capability: "Consultar el historial de una zona · GET /v1/risk/history",
+      viewer: "Sí",
+      admin: "Sí",
+      guards: ["backend/services/risk/internal/handler/api.go:81", "backend/services/risk/internal/handler/security.go:43"],
+    },
+    {
+      capability: "Consultar el catálogo de zonas · GET /v1/risk/zones",
+      viewer: "Sí",
+      admin: "Sí",
+      guards: ["backend/services/risk/internal/handler/api.go:82", "backend/services/risk/internal/handler/security.go:43"],
+    },
+    {
+      capability: "Consultar los escenarios sintéticos · GET /v1/risk/synthetic-scenarios",
+      viewer: "Sí",
+      admin: "Sí",
+      guards: ["backend/services/risk/internal/handler/api.go:83", "backend/services/risk/internal/handler/security.go:43"],
+    },
+    {
+      capability: "Consultar la procedencia geográfica · GET /v1/risk/sources",
+      viewer: "Sí",
+      admin: "Sí",
+      guards: ["backend/services/risk/internal/handler/api.go:88", "backend/services/risk/internal/handler/security.go:43"],
+    },
+    {
+      capability: "Solicitar un lote sintético · POST /v1/jobs",
+      viewer: "No: 403 forbidden",
+      admin: "Sí",
+      guards: ["backend/services/jobs/internal/handler/api.go:52", "backend/services/jobs/internal/handler/security.go:44", "backend/services/jobs/internal/handler/api.go:160"],
+    },
+    {
+      capability: "Consultar un trabajo · GET /v1/jobs/{id}",
+      viewer: "No: 403 forbidden",
+      admin: "Sí",
+      guards: ["backend/services/jobs/internal/handler/api.go:135", "backend/services/jobs/internal/handler/security.go:44"],
+    },
+    {
+      capability: "Consultar el estado del servicio de trabajos · GET /v1/jobs/status",
+      viewer: "No: 403 forbidden",
+      admin: "Sí",
+      guards: ["backend/services/jobs/internal/handler/api.go:51", "backend/services/jobs/internal/handler/security.go:44"],
+    },
+    {
+      capability: "Consultar el registro de actividad · GET /v1/audit",
+      viewer: "No: 403 forbidden",
+      admin: "Sí",
+      guards: ["backend/services/jobs/internal/handler/api.go:152", "backend/services/jobs/internal/handler/security.go:44", "backend/services/gateway/internal/handler/gateway.go:39"],
+    },
+    {
+      capability: "Presentar un tercer rol · cualquier valor que no sea viewer ni admin",
+      viewer: "No: 403 forbidden",
+      admin: "No: 403 forbidden",
+      guards: ["backend/services/risk/internal/handler/security.go:48", "backend/services/jobs/internal/handler/security.go:49"],
+    },
+    {
+      capability: "Rol efectivo que el proveedor de identidad entrega en el token",
+      viewer: "No verificado: depende de la configuración del reino y ningún endpoint lo informa",
+      admin: "No verificado: depende de la configuración del reino y ningún endpoint lo informa",
+      guards: [],
+      note: "No verificado · no hay ruta ni guarda del servidor que consultar; la página solo muestra lo que el token declare",
+    },
+  ];
+
+  // --- Declared, never simulated -------------------------------------------
+  //
+  // Everything the retired mockup offered that the backend cannot back. This
+  // inventory is the only place they appear: no control anywhere on this page
+  // enables any of them, and each entry names why it is missing and where it
+  // would live, so an absence is never mistaken for a working capability.
+  const NOT_IMPLEMENTED = [
+    ["Cobertura y entorno por sector", "La API no publica cobertura ni entorno por comuna: solo el catálogo, el lote publicado y sus factores.", "Tabla de sectores"],
+    ["Contexto y prioridad por sector", "El backend clasifica la zona con el lote publicado y no calcula prioridad regional ni contexto por comuna.", "Ficha de detalle de la zona"],
+    ["Estados candidate, in_progress, reviewed y closed", "El backend informa el estado del trabajo (en cola, publicado) y el estado del dato; esos cuatro estados no existen en ningún contrato.", "Chips de estado"],
+    ["Historial de todas las zonas", "GET /v1/risk/history exige zone_id y no hay endpoint agregado, así que el historial es siempre el de la zona consultada.", "Historial de lotes"],
+    ["Revisar e incorporar registros, y hallazgos de calidad", "GET /v1/risk/sources publica la procedencia y la integridad reales; no existe un catálogo de acciones ni de hallazgos.", "Fuentes y procedencia"],
+    ["Publicar lote, avance manual y reevaluación", "No existe endpoint: el servidor decide y publica por su cuenta; la página solo solicita el trabajo y lee el resultado.", "Procesamiento asíncrono"],
+    ["Nombre del actor, detalle libre e id de evento", "GET /v1/audit entrega actor_id, action, job_id, trace_id y occurred_at: identificadores opacos, sin nombre ni detalle.", "Registro de actividad"],
+  ];
+
+  function renderPendingInventory() {
+    const rows = document.getElementById("pending-rows");
+    rows.replaceChildren();
+    for (const [capability, reason, location] of NOT_IMPLEMENTED) {
+      const row = document.createElement("tr");
+      for (const value of [capability, reason, location]) {
+        const cell = document.createElement("td");
+        cell.textContent = value;
+        row.append(cell);
+      }
+      rows.append(row);
+    }
+    setText("pending-badge", "NO IMPLEMENTADO");
+  }
+
+  function renderPermissionMatrix() {
+    const rows = document.getElementById("permissions-rows");
+    rows.replaceChildren();
+    for (const entry of PERMISSION_MATRIX) {
+      const row = document.createElement("tr");
+      // The guard column is a citation, never prose: `path:line` or an explicit
+      // "No verificado" for the row that cannot be read from the server code.
+      const guard = entry.guards.length > 0 ? entry.guards.join(" · ") : entry.note;
+      for (const value of [entry.capability, entry.viewer, entry.admin, guard]) {
+        const cell = document.createElement("td");
+        cell.textContent = value;
+        row.append(cell);
+      }
+      rows.append(row);
+    }
+  }
+
+  // --- Session role decoded from the token ---------------------------------
+  //
+  // The page holds the access token in memory and never decoded it. That payload
+  // is the ONLY real source of the session role: the gateway proxies exactly
+  // /v1/risk, /v1/jobs and /v1/audit, so there is no whoami/me/profile endpoint
+  // to ask. Reading the payload is DISPLAY ONLY: it never gates, blocks, allows,
+  // hides or alters a request, a panel or a decision, and the page behaves
+  // identically whatever the decoded value says. The server stays the only
+  // authority because it verifies the signature and this page does not.
+  //
+  // This environment denies `atob`, `Buffer` and `TextDecoder`, so base64url and
+  // UTF-8 decoding are implemented here in plain JavaScript.
+  const BASE64URL_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+
+  function decodeBase64URL(value) {
+    if (typeof value !== "string") return null;
+    // Trailing padding is tolerated; an interior or non-URL character is not,
+    // because a payload that does not decode must never be guessed at.
+    const text = value.replace(/=+$/, "");
+    const bytes = [];
+    let accumulator = 0;
+    let bits = 0;
+    for (const character of text) {
+      const index = BASE64URL_ALPHABET.indexOf(character);
+      if (index < 0) return null;
+      accumulator = (accumulator << 6) | index;
+      bits += 6;
+      if (bits >= 8) {
+        bits -= 8;
+        bytes.push((accumulator >> bits) & 0xff);
+        accumulator &= (1 << bits) - 1;
+      }
+    }
+    return bytes;
+  }
+
+  // Strict UTF-8: an overlong, truncated or surrogate sequence is rejected
+  // instead of being turned into replacement characters that would misrepresent
+  // what the token actually declares.
+  function decodeUTF8(bytes) {
+    let text = "";
+    for (let index = 0; index < bytes.length; index += 1) {
+      const byte = bytes[index];
+      let code;
+      if (byte < 0x80) code = byte;
+      else if (byte >= 0xc2 && byte <= 0xdf && index + 1 < bytes.length && (bytes[index + 1] & 0xc0) === 0x80) {
+        code = ((byte & 0x1f) << 6) | (bytes[index + 1] & 0x3f);
+        index += 1;
+      } else if (byte >= 0xe0 && byte <= 0xef && index + 2 < bytes.length &&
+        (bytes[index + 1] & 0xc0) === 0x80 && (bytes[index + 2] & 0xc0) === 0x80) {
+        code = ((byte & 0x0f) << 12) | ((bytes[index + 1] & 0x3f) << 6) | (bytes[index + 2] & 0x3f);
+        index += 2;
+      } else if (byte >= 0xf0 && byte <= 0xf4 && index + 3 < bytes.length &&
+        (bytes[index + 1] & 0xc0) === 0x80 && (bytes[index + 2] & 0xc0) === 0x80 && (bytes[index + 3] & 0xc0) === 0x80) {
+        code = ((byte & 0x07) << 18) | ((bytes[index + 1] & 0x3f) << 12) | ((bytes[index + 2] & 0x3f) << 6) | (bytes[index + 3] & 0x3f);
+        index += 3;
+      } else return null;
+      if (code > 0x10ffff || (code >= 0xd800 && code <= 0xdfff)) return null;
+      if (code > 0xffff) {
+        const shifted = code - 0x10000;
+        text += String.fromCharCode(0xd800 + (shifted >> 10), 0xdc00 + (shifted & 0x3ff));
+      } else text += String.fromCharCode(code);
+    }
+    return text;
+  }
+
+  // Returns the parsed payload, or null when the token is not a three-segment
+  // JWT whose middle segment decodes to JSON. The payload is returned as parsed:
+  // an array or a scalar is still "decodable" and is handled by the role reader.
+  function decodeJWTPayload(token) {
+    if (typeof token !== "string") return null;
+    const parts = token.split(".");
+    if (parts.length !== 3) return null;
+    const bytes = decodeBase64URL(parts[1]);
+    if (bytes === null) return null;
+    const json = decodeUTF8(bytes);
+    if (json === null) return null;
+    try {
+      return JSON.parse(json);
+    } catch {
+      return null;
+    }
+  }
+
+  // The roles the token declares, or null when it declares none usable. No
+  // default, no fallback and no inference: an absent, non-array, empty or
+  // non-string list is "no informado", never "viewer".
+  function sessionRolesFromPayload(payload) {
+    if (!record(payload)) return null;
+    const realmAccess = record(payload.realm_access) ? payload.realm_access : null;
+    if (!realmAccess || !Array.isArray(realmAccess.roles)) return null;
+    const roles = [];
+    for (const role of realmAccess.roles) {
+      if (!nonempty(role)) continue;
+      const name = role.trim();
+      if (!roles.includes(name)) roles.push(name);
+    }
+    return roles.length > 0 ? roles : null;
+  }
+
+  function renderSessionRole() {
+    if (accessToken === "") {
+      setText("session-roles-badge", "SIN SESIÓN");
+      setText("session-roles", "No disponible");
+      setText("session-roles-status", "Sin token en memoria: el rol declarado por la sesión no está disponible; conecta una sesión para leerlo.");
+      return;
+    }
+    const payload = decodeJWTPayload(accessToken);
+    if (payload === null) {
+      setText("session-roles-badge", "NO DISPONIBLE");
+      setText("session-roles", "No disponible");
+      setText("session-roles-status", "El token de acceso en memoria no es un JWT cuyo payload pueda decodificarse, así que el rol de la sesión no está disponible. La página no lo deduce del código HTTP ni de ningún otro dato.");
+      return;
+    }
+    const roles = sessionRolesFromPayload(payload);
+    if (roles === null) {
+      setText("session-roles-badge", "NO INFORMADO");
+      setText("session-roles", "No informado");
+      setText("session-roles-status", "El token de acceso no declara realm_access.roles utilizables (el claim falta, no es un arreglo o viene vacío); el rol de la sesión no está informado y la página no supone ninguno.");
+      return;
+    }
+    setText("session-roles-badge", "TOKEN LEÍDO");
+    setText("session-roles", roles.join(", "));
+    setText("session-roles-status", `El payload del token declara los roles ${roles.join(", ")}. La página decodifica el payload sin verificar la firma: es un dato informativo del token, no una autorización, y el servidor, que sí verifica la firma, sigue siendo la única autoridad.`);
   }
 
   // The pure helpers are exported for offline verification only. `module` is
@@ -1288,6 +1849,9 @@
     clearBatchDetails();
     const sequence = jobSequence;
     const zone = selectedZone;
+    // Captured at click time, like the zone: a later change in the picker must
+    // not alter a request that is already in flight.
+    const scenario = selectedScenario();
     pollAttempts = 0;
     jobController = new AbortController();
     armDeadline(sequence, zone);
@@ -1306,7 +1870,7 @@
         method: "POST",
         signal: jobController.signal,
         headers: { "Content-Type": "application/json", "Idempotency-Key": crypto.randomUUID() },
-        body: JSON.stringify({ zone_id: zone }),
+        body: JSON.stringify(scenario === "" ? { zone_id: zone } : { zone_id: zone, scenario_id: scenario }),
       }, () => ownsJob(sequence, zone));
       if (!ownsJob(sequence, zone)) return;
       if (job.zone_id !== zone || !job.id) {
@@ -1328,6 +1892,24 @@
 
   document.getElementById("refresh-job").addEventListener("click", loadJob);
   document.getElementById("readiness-refresh").addEventListener("click", checkReadiness);
+  // Re-reads the same parameterless endpoint once, with no filter or page state
+  // to lose: the service decides which rows the answer carries.
+  document.getElementById("audit-refresh").addEventListener("click", () => loadAudit());
+  // Both controls narrow the rows already on screen. The element value is read
+  // back from the DOM so the filter state has one source of truth.
+  document.getElementById("history-query").addEventListener("input", (event) => {
+    document.getElementById("history-query").value = event.target.value;
+    renderHistoryRows();
+  });
+  document.getElementById("history-status-filter").addEventListener("change", (event) => {
+    document.getElementById("history-status-filter").value = event.target.value;
+    renderHistoryRows();
+  });
+  document.getElementById("reset-filters").addEventListener("click", () => {
+    document.getElementById("history-query").value = "";
+    document.getElementById("history-status-filter").value = "";
+    renderHistoryRows();
+  });
 
   function selectZone(code) {
     if (!accessToken || !zoneShapes.has(code)) return;
@@ -1352,6 +1934,27 @@
 
   document.getElementById("zone-select").addEventListener("change", (event) => selectZone(event.target.value));
 
+  // The sidebar mirrors the page sections as in-page anchors. Marking the link
+  // the user actually opened keeps the mockup's active marker honest: it follows
+  // the clicked link and the fragment the browser opened, issues no request and
+  // never claims a section nobody chose.
+  const NAV_LINK_IDS = ["nav-overview", "nav-history", "nav-sources", "nav-pipeline", "nav-jobs", "nav-session", "nav-audit", "nav-permissions"];
+  function markActiveNav(activeID) {
+    for (const id of NAV_LINK_IDS) {
+      const link = document.getElementById(id);
+      const isActive = id === activeID;
+      link.classList.toggle("is-active", isActive);
+      if (isActive) link.setAttribute("aria-current", "true");
+      else link.removeAttribute("aria-current");
+    }
+  }
+  for (const id of NAV_LINK_IDS) document.getElementById(id).addEventListener("click", () => markActiveNav(id));
+  const openedSection = `nav-${window.location.hash.slice(1)}`;
+  markActiveNav(NAV_LINK_IDS.includes(openedSection) ? openedSection : NAV_LINK_IDS[0]);
+
+  renderPermissionMatrix();
+  renderSessionRole();
+  renderPendingInventory();
   checkReadiness();
   handleLoginCallback();
 })();

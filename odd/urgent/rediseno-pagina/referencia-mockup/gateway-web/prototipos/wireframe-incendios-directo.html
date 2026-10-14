@@ -1,0 +1,1130 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Prototipo funcional de una plataforma de estimación de riesgo de incendios forestales para la Región de Valparaíso.">
+  <title>FireWatch · Riesgo forestal</title>
+  <style>
+    :root {
+      --ink: #18252b;
+      --ink-soft: #52646b;
+      --muted: #84949a;
+      --line: #dfe8e7;
+      --line-strong: #c8d7d4;
+      --canvas: #f4f8f7;
+      --surface: #ffffff;
+      --surface-soft: #f7faf9;
+      --sidebar: #102f2b;
+      --sidebar-soft: #19433b;
+      --brand: #0f766e;
+      --brand-deep: #0b5f59;
+      --brand-soft: #e4f2ef;
+      --high: #d4513f;
+      --high-soft: #fff0ed;
+      --medium: #d18b26;
+      --medium-soft: #fff7e7;
+      --low: #238b67;
+      --low-soft: #eaf7f1;
+      --neutral: #809096;
+      --shadow: 0 18px 50px rgba(25, 57, 54, .08);
+      --shadow-small: 0 5px 18px rgba(25, 57, 54, .07);
+      --radius: 16px;
+      color-scheme: light;
+    }
+
+    * { box-sizing: border-box; }
+    html { min-width: 320px; background: var(--canvas); }
+    body {
+      margin: 0;
+      color: var(--ink);
+      background: var(--canvas);
+      font: 14px/1.5 Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      -webkit-font-smoothing: antialiased;
+    }
+    button, input, select { font: inherit; }
+    button { cursor: pointer; }
+    button:focus-visible, select:focus-visible, input:focus-visible, [tabindex]:focus-visible {
+      outline: 3px solid rgba(15, 118, 110, .28);
+      outline-offset: 2px;
+    }
+    [hidden] { display: none !important; }
+
+    .demo-strip {
+      min-height: 34px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      padding: 7px 28px;
+      color: #d9f4ed;
+      background: #0b2421;
+      font-size: 12px;
+      letter-spacing: .01em;
+    }
+    .demo-strip strong { color: #9ee2d1; font-weight: 750; }
+    .demo-strip .demo-actions { display: flex; align-items: center; gap: 8px; }
+    .demo-strip button {
+      border: 1px solid rgba(190, 238, 226, .28);
+      border-radius: 7px;
+      padding: 4px 9px;
+      color: #e4faf5;
+      background: transparent;
+      font-size: 11px;
+    }
+    .demo-strip button:hover, .demo-strip button[aria-pressed="true"] { background: var(--sidebar-soft); border-color: #86d7c4; }
+
+    .app-shell { min-height: calc(100vh - 34px); display: flex; }
+    .sidebar {
+      position: sticky;
+      top: 0;
+      z-index: 20;
+      width: 252px;
+      min-height: calc(100vh - 34px);
+      display: flex;
+      flex-direction: column;
+      padding: 24px 16px 18px;
+      color: #d6ece6;
+      background: var(--sidebar);
+    }
+    .brand { display: flex; align-items: center; gap: 11px; padding: 0 10px 26px; }
+    .brand-mark {
+      width: 35px;
+      height: 35px;
+      display: grid;
+      place-items: center;
+      border-radius: 11px;
+      color: #0d3631;
+      background: #b4eadc;
+      box-shadow: 0 8px 18px rgba(0,0,0,.12);
+    }
+    .brand-mark svg { width: 20px; height: 20px; }
+    .brand-name { color: #f1fffb; font-size: 18px; font-weight: 760; letter-spacing: -.04em; }
+    .brand-sub { margin-top: 1px; color: #88afa6; font-size: 10px; letter-spacing: .09em; text-transform: uppercase; }
+    .nav-label { margin: 7px 10px 9px; color: #6f9b92; font-size: 10px; font-weight: 800; letter-spacing: .13em; text-transform: uppercase; }
+    .sidebar nav { display: grid; gap: 4px; }
+    .nav-link {
+      width: 100%;
+      display: flex;
+      align-items: center;
+      gap: 11px;
+      padding: 10px 11px;
+      border: 1px solid transparent;
+      border-radius: 10px;
+      color: #a9c9c1;
+      background: transparent;
+      text-align: left;
+      transition: .18s ease;
+    }
+    .nav-link svg { width: 17px; height: 17px; flex: 0 0 auto; opacity: .82; }
+    .nav-link:hover { color: #effdf9; background: rgba(255,255,255,.06); }
+    .nav-link[aria-current="page"] { color: #f3fffc; background: var(--sidebar-soft); border-color: rgba(155, 227, 211, .13); box-shadow: inset 3px 0 #8bdfcb; }
+    .nav-link[aria-current="page"] svg { color: #9fe2d2; opacity: 1; }
+    .nav-link.admin-only { display: none; }
+    .role-admin .nav-link.admin-only { display: flex; }
+    .side-bottom { margin-top: auto; }
+    .health-card {
+      margin: 20px 4px 17px;
+      padding: 13px;
+      border: 1px solid rgba(157, 220, 208, .14);
+      border-radius: 12px;
+      background: rgba(255,255,255,.045);
+    }
+    .health-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; color: #d5efe8; font-size: 12px; font-weight: 700; }
+    .health-head small { color: #8dc8b9; font-size: 10px; font-weight: 600; }
+    .health-bar { height: 5px; margin: 11px 0 9px; overflow: hidden; border-radius: 10px; background: #275149; }
+    .health-bar span { display: block; width: 96%; height: 100%; border-radius: inherit; background: #8bdfcb; }
+    .health-note { color: #82aba2; font-size: 11px; }
+    .side-user { display: flex; align-items: center; gap: 9px; padding: 13px 10px 0; border-top: 1px solid rgba(210, 246, 239, .1); }
+    .avatar { width: 31px; height: 31px; display: grid; place-items: center; border-radius: 50%; color: #123d35; background: #a9dfd1; font-size: 11px; font-weight: 800; }
+    .side-user strong { display: block; color: #e7faf5; font-size: 12px; }
+    .side-user small { display: block; color: #7da79d; font-size: 10px; }
+
+    .main-area { min-width: 0; flex: 1; }
+    .topbar {
+      height: 72px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 20px;
+      padding: 0 34px;
+      border-bottom: 1px solid var(--line);
+      background: rgba(255,255,255,.83);
+      backdrop-filter: blur(14px);
+    }
+    .topbar-left { display: flex; align-items: center; gap: 14px; min-width: 0; }
+    .mobile-menu { display: none; width: 36px; height: 36px; padding: 8px; border: 1px solid var(--line); border-radius: 9px; color: var(--ink-soft); background: var(--surface); }
+    .mobile-menu svg { width: 18px; height: 18px; }
+    .breadcrumbs { color: var(--muted); font-size: 12px; }
+    .breadcrumbs strong { color: var(--ink); font-weight: 700; }
+    .topbar-actions { display: flex; align-items: center; gap: 9px; }
+    .icon-btn, .outline-btn, .primary-btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 7px;
+      min-height: 37px;
+      padding: 8px 12px;
+      border: 1px solid var(--line-strong);
+      border-radius: 9px;
+      color: var(--ink-soft);
+      background: var(--surface);
+      font-size: 12px;
+      font-weight: 700;
+      transition: .18s ease;
+    }
+    .icon-btn { width: 37px; padding: 8px; }
+    .icon-btn svg, .outline-btn svg, .primary-btn svg { width: 15px; height: 15px; }
+    .icon-btn:hover, .outline-btn:hover { color: var(--brand); border-color: #9acbc1; background: var(--brand-soft); }
+    .primary-btn { color: #fff; border-color: var(--brand); background: var(--brand); box-shadow: 0 5px 12px rgba(15,118,110,.16); }
+    .primary-btn:hover { border-color: var(--brand-deep); background: var(--brand-deep); transform: translateY(-1px); }
+    .top-user { display: flex; align-items: center; gap: 9px; padding-left: 8px; border-left: 1px solid var(--line); }
+    .top-user .avatar { width: 30px; height: 30px; }
+    .top-user strong { display: block; color: var(--ink); font-size: 12px; }
+    .top-user small { display: block; color: var(--muted); font-size: 10px; }
+
+    main { width: min(1500px, 100%); margin: 0 auto; padding: 32px 34px 42px; }
+    .page { display: none; animation: page-in .22s ease-out; }
+    .page.active { display: block; }
+    @keyframes page-in { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+    .page-heading { display: flex; align-items: flex-end; justify-content: space-between; gap: 24px; margin-bottom: 24px; }
+    .eyebrow { color: var(--brand); font-size: 10px; font-weight: 800; letter-spacing: .14em; text-transform: uppercase; }
+    h1, h2, h3, p { margin-top: 0; }
+    h1 { margin: 5px 0 6px; color: #172b31; font-size: clamp(26px, 3vw, 34px); line-height: 1.12; letter-spacing: -.045em; }
+    h2 { margin-bottom: 4px; color: #1b3035; font-size: 19px; line-height: 1.2; letter-spacing: -.025em; }
+    h3 { margin-bottom: 3px; color: #21383c; font-size: 14px; }
+    .heading-copy { max-width: 660px; margin-bottom: 0; color: var(--ink-soft); }
+    .heading-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
+
+    .surface { border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); box-shadow: var(--shadow-small); }
+    .filter-bar { display: flex; align-items: flex-end; gap: 11px; flex-wrap: wrap; padding: 14px; margin-bottom: 19px; }
+    .filter-field { display: grid; gap: 5px; min-width: 156px; }
+    .filter-field.grow { flex: 1; }
+    .filter-field > span, .form-label { color: var(--muted); font-size: 10px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
+    select, input[type="text"], input[type="date"], input[type="file"] {
+      width: 100%;
+      min-height: 37px;
+      padding: 8px 11px;
+      border: 1px solid var(--line-strong);
+      border-radius: 8px;
+      color: var(--ink);
+      background: var(--surface);
+      font-size: 12px;
+    }
+    select { appearance: auto; }
+    .filter-bar .primary-btn { margin-left: auto; }
+    .metrics-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 13px; margin-bottom: 19px; }
+    .metric-card { min-height: 120px; padding: 16px 17px; position: relative; overflow: hidden; }
+    .metric-card::after { content: ""; position: absolute; width: 83px; height: 83px; right: -25px; bottom: -31px; border-radius: 50%; background: var(--brand-soft); opacity: .85; }
+    .metric-card.high::after { background: var(--high-soft); }
+    .metric-card.medium::after { background: var(--medium-soft); }
+    .metric-card.low::after { background: var(--low-soft); }
+    .metric-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; color: var(--muted); font-size: 11px; font-weight: 700; }
+    .metric-icon { width: 28px; height: 28px; display: grid; place-items: center; border-radius: 8px; color: var(--brand); background: var(--brand-soft); }
+    .metric-card.high .metric-icon { color: var(--high); background: var(--high-soft); }
+    .metric-card.medium .metric-icon { color: var(--medium); background: var(--medium-soft); }
+    .metric-card.low .metric-icon { color: var(--low); background: var(--low-soft); }
+    .metric-icon svg { width: 15px; height: 15px; }
+    .metric-value { position: relative; z-index: 1; margin: 10px 0 3px; color: #1a3035; font-size: 25px; font-weight: 800; letter-spacing: -.045em; }
+    .metric-foot { position: relative; z-index: 1; color: var(--ink-soft); font-size: 11px; }
+    .positive { color: var(--low); font-weight: 750; }
+    .attention { color: var(--medium); font-weight: 750; }
+
+    .dashboard-grid { display: grid; grid-template-columns: minmax(0, 1.65fr) minmax(330px, .9fr); gap: 19px; align-items: stretch; }
+    .card-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; padding: 20px 21px 14px; }
+    .card-head p { margin: 5px 0 0; color: var(--muted); font-size: 11px; }
+    .card-head .small-action { color: var(--brand); font-size: 11px; font-weight: 800; text-decoration: none; }
+    .card-head .small-action:hover { text-decoration: underline; }
+
+    .map-card { min-width: 0; overflow: hidden; }
+    .map-tools { display: flex; align-items: center; gap: 6px; padding: 0 21px 13px; }
+    .map-tools .map-tool { min-height: 29px; padding: 5px 9px; border: 1px solid var(--line); border-radius: 7px; color: var(--ink-soft); background: var(--surface); font-size: 10px; font-weight: 700; }
+    .map-tools .map-tool:hover, .map-tools .map-tool[aria-pressed="true"] { border-color: #a5d1c9; color: var(--brand); background: var(--brand-soft); }
+    .map-tools .map-separator { width: 1px; height: 18px; margin: 0 3px; background: var(--line); }
+    .map-frame { position: relative; min-height: 435px; margin: 0 11px 11px; overflow: hidden; border: 1px solid #d5e3df; border-radius: 13px; background: #e7f1ee; }
+    .map-frame::before { content: ""; position: absolute; inset: 0; background-image: linear-gradient(rgba(255,255,255,.34) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,.34) 1px, transparent 1px); background-size: 42px 42px; pointer-events: none; }
+    .map-frame svg { position: relative; z-index: 1; width: 100%; height: 435px; display: block; }
+    .map-label { font-size: 11px; font-weight: 800; fill: #3e6660; pointer-events: none; }
+    .map-label.subtle { font-size: 9px; font-weight: 600; fill: #70918b; }
+    .zone-shape { cursor: pointer; stroke: rgba(255,255,255,.84); stroke-width: 2; vector-effect: non-scaling-stroke; transition: .17s ease; }
+    .zone-shape:hover, .zone-shape.selected { stroke: #143c38; stroke-width: 3; filter: url(#zone-shadow); }
+    .zone-shape.high { fill: #e57a67; }
+    .zone-shape.medium { fill: #e9b45c; }
+    .zone-shape.low { fill: #6cc29f; }
+    .zone-shape.neutral { fill: #b7c7c5; }
+    .map-pin { fill: #fff; stroke: #244943; stroke-width: 2; }
+    .map-overlay { position: absolute; z-index: 2; left: 15px; top: 15px; display: flex; align-items: center; gap: 7px; padding: 7px 9px; border: 1px solid rgba(255,255,255,.7); border-radius: 8px; color: #315b53; background: rgba(255,255,255,.82); box-shadow: 0 4px 12px rgba(36,75,69,.08); font-size: 10px; font-weight: 750; }
+    .pulse { width: 7px; height: 7px; border-radius: 50%; background: #2d9b73; box-shadow: 0 0 0 4px rgba(45,155,115,.15); }
+    .map-zoom { position: absolute; z-index: 2; right: 14px; top: 14px; display: grid; overflow: hidden; border: 1px solid #d1e0dd; border-radius: 8px; box-shadow: 0 4px 12px rgba(36,75,69,.07); }
+    .map-zoom button { width: 30px; height: 29px; padding: 0; border: 0; color: #426b64; background: rgba(255,255,255,.9); font-size: 17px; line-height: 1; }
+    .map-zoom button + button { border-top: 1px solid var(--line); }
+    .map-caption { position: absolute; z-index: 2; left: 15px; bottom: 12px; color: #70918b; font-size: 9px; font-weight: 600; }
+    .map-legend { display: flex; align-items: center; gap: 13px; flex-wrap: wrap; padding: 0 21px 19px; color: var(--ink-soft); font-size: 10px; }
+    .legend-item { display: inline-flex; align-items: center; gap: 5px; }
+    .legend-dot { width: 9px; height: 9px; border-radius: 3px; }
+    .legend-dot.high { background: var(--high); }
+    .legend-dot.medium { background: var(--medium); }
+    .legend-dot.low { background: var(--low); }
+    .legend-dot.neutral { background: var(--neutral); }
+    .legend-note { margin-left: auto; color: var(--muted); }
+
+    .detail-card { min-width: 0; display: flex; flex-direction: column; }
+    .detail-body { padding: 0 21px 20px; }
+    .selected-zone { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; padding: 14px; border: 1px solid #f3d4cf; border-radius: 12px; background: linear-gradient(135deg, #fff7f5, #fff); }
+    .selected-zone .eyebrow { color: var(--high); }
+    .selected-zone h3 { margin: 3px 0 2px; font-size: 17px; }
+    .selected-zone small { color: var(--ink-soft); font-size: 11px; }
+    .risk-pill { display: inline-flex; align-items: center; gap: 5px; padding: 5px 8px; border-radius: 20px; color: #a64031; background: var(--high-soft); font-size: 10px; font-weight: 800; white-space: nowrap; }
+    .risk-pill::before { content: ""; width: 5px; height: 5px; border-radius: 50%; background: currentColor; }
+    .risk-pill.medium { color: #a66c14; background: var(--medium-soft); }
+    .risk-pill.low { color: #1e7958; background: var(--low-soft); }
+    .score-row { display: flex; align-items: end; justify-content: space-between; gap: 10px; margin: 17px 0 7px; }
+    .score-number { color: #24393d; font-size: 36px; font-weight: 850; line-height: .95; letter-spacing: -.07em; }
+    .score-number small { margin-left: 3px; color: var(--muted); font-size: 14px; font-weight: 700; letter-spacing: 0; }
+    .score-caption { color: var(--ink-soft); font-size: 10px; text-align: right; }
+    .score-track { height: 8px; overflow: hidden; border-radius: 10px; background: #edf1f0; }
+    .score-track span { display: block; width: 78%; height: 100%; border-radius: inherit; background: linear-gradient(90deg, #f1b263, #d4513f); transition: width .25s ease; }
+    .detail-divider { height: 1px; margin: 19px 0 14px; background: var(--line); }
+    .detail-section-title { margin-bottom: 10px; color: var(--muted); font-size: 10px; font-weight: 800; letter-spacing: .1em; text-transform: uppercase; }
+    .detail-list { display: grid; gap: 10px; margin: 0; }
+    .detail-list > div { display: flex; justify-content: space-between; gap: 12px; font-size: 11px; }
+    .detail-list dt { color: var(--muted); }
+    .detail-list dd { margin: 0; color: var(--ink); font-weight: 750; text-align: right; }
+    .factor-list { display: grid; gap: 10px; }
+    .factor-line { display: grid; grid-template-columns: 86px 1fr auto; align-items: center; gap: 8px; color: var(--ink-soft); font-size: 10px; }
+    .factor-line .factor-bar { height: 5px; overflow: hidden; border-radius: 9px; background: #edf1f0; }
+    .factor-line .factor-bar span { display: block; height: 100%; border-radius: inherit; background: var(--medium); }
+    .factor-line.high .factor-bar span { background: var(--high); }
+    .factor-line.low .factor-bar span { background: var(--low); }
+    .factor-line strong { color: var(--ink); font-size: 10px; }
+    .detail-foot { margin-top: auto; padding: 14px 21px 18px; border-top: 1px solid var(--line); background: var(--surface-soft); }
+    .freshness { display: flex; align-items: center; gap: 7px; color: var(--low); font-size: 10px; font-weight: 750; }
+    .freshness i { width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+    .detail-foot small { display: block; margin-top: 4px; color: var(--muted); font-size: 10px; }
+
+    .lower-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(280px, .9fr); gap: 19px; margin-top: 19px; }
+    .chart-body { padding: 0 21px 20px; }
+    .chart-bars { height: 128px; display: flex; align-items: end; gap: 13px; padding: 8px 4px 0; border-bottom: 1px solid var(--line); }
+    .bar-col { height: 100%; flex: 1; display: flex; flex-direction: column; justify-content: end; align-items: center; gap: 6px; }
+    .bar-value { color: var(--ink-soft); font-size: 10px; font-weight: 800; }
+    .bar { width: min(38px, 72%); min-height: 4px; border-radius: 6px 6px 0 0; background: var(--brand); transition: height .24s ease; }
+    .bar.high { background: var(--high); }
+    .bar.medium { background: var(--medium); }
+    .bar.low { background: var(--low); }
+    .bar-label { color: var(--muted); font-size: 10px; }
+    .chart-foot { display: flex; justify-content: space-between; gap: 10px; margin-top: 12px; color: var(--muted); font-size: 10px; }
+    .source-list { display: grid; gap: 12px; padding: 0 21px 20px; }
+    .source-row { display: grid; grid-template-columns: 29px 1fr auto; align-items: center; gap: 10px; }
+    .source-icon { width: 29px; height: 29px; display: grid; place-items: center; border-radius: 8px; color: var(--brand); background: var(--brand-soft); }
+    .source-icon svg { width: 15px; height: 15px; }
+    .source-row strong { display: block; color: var(--ink); font-size: 11px; }
+    .source-row small { display: block; color: var(--muted); font-size: 10px; }
+    .source-status { display: flex; align-items: center; gap: 5px; color: var(--low); font-size: 10px; font-weight: 800; }
+    .source-status.warning { color: var(--medium); }
+    .source-status i { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+    .activity-list { display: grid; gap: 16px; padding: 0 21px 20px; }
+    .activity-item { position: relative; display: grid; grid-template-columns: 23px 1fr auto; gap: 9px; align-items: start; }
+    .activity-item:not(:last-child)::after { content: ""; position: absolute; left: 11px; top: 24px; width: 1px; height: 26px; background: var(--line); }
+    .activity-dot { width: 23px; height: 23px; display: grid; place-items: center; border: 4px solid #e9f5f2; border-radius: 50%; color: var(--brand); background: var(--brand); }
+    .activity-dot svg { width: 11px; height: 11px; color: #fff; }
+    .activity-item strong { display: block; color: var(--ink); font-size: 11px; line-height: 1.25; }
+    .activity-item small { display: block; margin-top: 3px; color: var(--muted); font-size: 10px; }
+    .activity-time { color: var(--muted); font-size: 9px; white-space: nowrap; }
+
+    .info-banner { display: flex; align-items: flex-start; gap: 10px; margin-top: 19px; padding: 12px 14px; border: 1px solid #d6e8e3; border-radius: 11px; color: #3e6760; background: #eff8f5; font-size: 11px; }
+    .info-banner svg { width: 16px; height: 16px; flex: 0 0 auto; margin-top: 1px; color: var(--brand); }
+    .info-banner strong { color: #1d5149; }
+
+    .table-card { overflow: hidden; }
+    .table-wrap { overflow-x: auto; padding: 0 21px 20px; }
+    table { width: 100%; min-width: 680px; border-collapse: collapse; }
+    th { padding: 11px 10px; border-bottom: 1px solid var(--line); color: var(--muted); background: var(--surface-soft); font-size: 10px; font-weight: 800; letter-spacing: .06em; text-align: left; text-transform: uppercase; }
+    td { padding: 14px 10px; border-bottom: 1px solid #edf2f1; color: var(--ink-soft); font-size: 11px; vertical-align: middle; }
+    tbody tr:hover { background: #fbfdfc; }
+    td strong { color: var(--ink); font-size: 11px; }
+    .table-empty { padding: 27px 12px; color: var(--muted); text-align: center; }
+    .status-badge { display: inline-flex; align-items: center; gap: 5px; padding: 5px 8px; border-radius: 15px; color: #237354; background: var(--low-soft); font-size: 10px; font-weight: 800; white-space: nowrap; }
+    .status-badge::before { content: ""; width: 5px; height: 5px; border-radius: 50%; background: currentColor; }
+    .status-badge.warning { color: #9a6815; background: var(--medium-soft); }
+    .status-badge.danger { color: #a74435; background: var(--high-soft); }
+    .status-badge.neutral { color: #617178; background: #edf1f2; }
+    .row-actions { display: flex; gap: 6px; }
+    .row-action { padding: 6px 8px; border: 1px solid var(--line); border-radius: 7px; color: var(--brand); background: var(--surface); font-size: 10px; font-weight: 750; }
+    .row-action:hover { border-color: #9acbc1; background: var(--brand-soft); }
+    .split-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 19px; }
+    .admin-card { min-width: 0; }
+    .admin-card .card-head { padding-bottom: 16px; }
+    .dataset-list { display: grid; gap: 10px; padding: 0 21px 21px; }
+    .dataset-item { display: grid; grid-template-columns: 37px 1fr auto; align-items: center; gap: 10px; padding: 11px; border: 1px solid var(--line); border-radius: 10px; }
+    .dataset-item .source-icon { width: 37px; height: 37px; }
+    .dataset-item strong { display: block; color: var(--ink); font-size: 11px; }
+    .dataset-item small { display: block; margin-top: 2px; color: var(--muted); font-size: 10px; }
+    .dataset-meta { color: var(--ink-soft); font-size: 10px; text-align: right; }
+    .dataset-meta strong { color: var(--brand); font-size: 12px; }
+    .metric-mini-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 9px; padding: 0 21px 20px; }
+    .metric-mini { padding: 11px; border: 1px solid var(--line); border-radius: 9px; background: var(--surface-soft); }
+    .metric-mini strong { display: block; color: var(--ink); font-size: 18px; letter-spacing: -.04em; }
+    .metric-mini span { display: block; margin-top: 2px; color: var(--muted); font-size: 10px; }
+    .model-summary { margin: 0 21px 20px; padding: 14px; border: 1px solid #d5e9e4; border-radius: 11px; background: #f0f9f6; }
+    .model-summary-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+    .model-summary strong { color: #1e564d; font-size: 13px; }
+    .model-summary p { margin: 5px 0 0; color: #60817b; font-size: 10px; }
+    .process-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 13px; margin-bottom: 19px; }
+    .process-card { padding: 16px; }
+    .process-card .process-top { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+    .process-card .process-icon { width: 31px; height: 31px; display: grid; place-items: center; border-radius: 9px; color: var(--brand); background: var(--brand-soft); }
+    .process-card .process-icon svg { width: 16px; height: 16px; }
+    .process-card strong { display: block; margin-top: 12px; color: var(--ink); font-size: 13px; }
+    .process-card p { margin: 3px 0 0; color: var(--muted); font-size: 10px; }
+    .process-progress { height: 5px; margin-top: 14px; overflow: hidden; border-radius: 8px; background: #edf1f0; }
+    .process-progress span { display: block; width: 72%; height: 100%; border-radius: inherit; background: var(--brand); }
+    .process-card.warning .process-progress span { width: 39%; background: var(--medium); }
+    .process-card.done .process-progress span { width: 100%; background: var(--low); }
+    .process-foot { display: flex; justify-content: space-between; gap: 8px; margin-top: 7px; color: var(--muted); font-size: 10px; }
+    .audit-note { margin: 0 21px 20px; padding: 13px 14px; border-left: 3px solid var(--brand); color: var(--ink-soft); background: var(--surface-soft); font-size: 11px; }
+    .login-shell { max-width: 480px; margin: 38px auto; }
+    .login-card { padding: 30px; }
+    .login-brand { display: flex; align-items: center; gap: 10px; margin-bottom: 28px; }
+    .login-card h2 { font-size: 25px; letter-spacing: -.04em; }
+    .login-card p { color: var(--ink-soft); font-size: 12px; }
+    .login-form { display: grid; gap: 14px; margin-top: 21px; }
+    .login-form label { display: grid; gap: 6px; color: var(--ink-soft); font-size: 11px; font-weight: 750; }
+    .login-form input { min-height: 42px; font-size: 13px; }
+    .login-form .primary-btn { min-height: 42px; margin-top: 4px; }
+    .login-note { margin: 20px 0 0; padding-top: 15px; border-top: 1px solid var(--line); color: var(--muted); font-size: 10px; }
+    .toast { position: fixed; z-index: 60; right: 23px; bottom: 23px; max-width: min(390px, calc(100vw - 46px)); padding: 13px 15px; border: 1px solid #b8ddd4; border-radius: 11px; color: #194e46; background: #effaf6; box-shadow: var(--shadow); font-size: 12px; font-weight: 650; transform: translateY(18px); opacity: 0; pointer-events: none; transition: .22s ease; }
+    .toast.show { transform: none; opacity: 1; }
+        footer { padding: 0 34px 26px; color: var(--muted); font-size: 10px; text-align: right; }
+
+        /* Admin master console */
+        .console-commandbar { display:flex; align-items:center; justify-content:space-between; gap:16px; padding:13px 16px; margin-bottom:19px; border-color:#cfe7e1; background:linear-gradient(105deg,#f2fbf8,#fff); }
+        .console-command-status { display:flex; align-items:center; gap:9px; min-width:0; }
+        .console-live { width:9px; height:9px; flex:0 0 auto; border-radius:50%; background:var(--low); box-shadow:0 0 0 5px rgba(35,139,103,.13); }
+        .console-command-status strong { display:block; color:#1f4f48; font-size:12px; }
+        .console-command-status small { display:block; margin-top:1px; color:var(--muted); font-size:10px; }
+        .console-command-meta { display:flex; align-items:center; gap:17px; margin-left:auto; color:var(--ink-soft); font-size:10px; }
+        .console-command-meta span { display:inline-flex; align-items:center; gap:5px; white-space:nowrap; }
+        .console-command-meta b { color:var(--ink); font-size:11px; }
+        .console-kpi-grid { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:13px; margin-bottom:19px; }
+        .console-kpi { min-height:106px; padding:15px 16px; }
+        .console-kpi-label { display:flex; align-items:center; justify-content:space-between; gap:8px; color:var(--muted); font-size:10px; font-weight:800; letter-spacing:.06em; text-transform:uppercase; }
+        .console-kpi-label svg { width:15px; height:15px; color:var(--brand); }
+        .console-kpi-value { margin:11px 0 2px; color:var(--ink); font-size:24px; font-weight:850; letter-spacing:-.055em; }
+        .console-kpi-foot { color:var(--ink-soft); font-size:10px; }
+        .console-kpi-foot strong { color:var(--brand); }
+        .console-grid { display:grid; grid-template-columns:minmax(0,1.48fr) minmax(310px,.82fr); gap:19px; align-items:start; }
+        .console-card { min-width:0; overflow:hidden; }
+        .console-card .card-head { padding-bottom:15px; }
+        .console-card .card-head h2 { display:flex; align-items:center; gap:8px; }
+        .section-chip { display:inline-flex; align-items:center; padding:4px 7px; border-radius:5px; color:var(--brand); background:var(--brand-soft); font-size:9px; font-weight:800; letter-spacing:.07em; text-transform:uppercase; }
+        .experiment-grid { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:8px; padding:0 21px 15px; }
+        .experiment-card { min-width:0; padding:12px 10px; border:1px solid var(--line); border-radius:10px; color:var(--ink); background:var(--surface); text-align:left; transition:.18s ease; }
+        .experiment-card:hover { border-color:#9acbc1; background:#fbfefd; transform:translateY(-1px); }
+        .experiment-card.selected { border-color:#6eb7aa; background:#edf8f5; box-shadow:0 0 0 2px rgba(15,118,110,.09); }
+        .experiment-top { display:flex; align-items:center; justify-content:space-between; gap:6px; }
+        .experiment-top strong { overflow:hidden; color:var(--ink); font-size:11px; text-overflow:ellipsis; white-space:nowrap; }
+        .experiment-dot { width:8px; height:8px; flex:0 0 auto; border-radius:3px; background:var(--brand); }
+        .experiment-card.candidate .experiment-dot { background:var(--medium); }
+        .experiment-card.experimental .experiment-dot { background:#7a78c8; }
+        .experiment-type { display:block; margin-top:7px; color:var(--muted); font-size:9px; }
+        .experiment-score { display:flex; align-items:baseline; gap:4px; margin-top:9px; color:var(--ink); font-size:18px; font-weight:850; letter-spacing:-.05em; }
+        .experiment-score small { color:var(--muted); font-size:9px; font-weight:700; letter-spacing:0; }
+        .experiment-foot { display:flex; justify-content:space-between; gap:4px; margin-top:6px; color:var(--ink-soft); font-size:9px; }
+        .experiment-foot b { color:var(--brand); }
+        .lab-detail { margin:0 21px 20px; padding:15px; border:1px solid var(--line); border-radius:11px; background:var(--surface-soft); }
+        .lab-detail-head { display:flex; align-items:flex-start; justify-content:space-between; gap:12px; }
+        .lab-detail-head strong { display:block; color:var(--ink); font-size:14px; }
+        .lab-detail-head small { display:block; margin-top:3px; color:var(--muted); font-size:10px; }
+        .lab-detail-description { max-width:650px; margin:10px 0 13px; color:var(--ink-soft); font-size:10px; }
+        .lab-metric-grid { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:8px; }
+        .lab-metric { padding:9px; border:1px solid var(--line); border-radius:8px; background:var(--surface); }
+        .lab-metric span { display:block; color:var(--muted); font-size:9px; }
+        .lab-metric strong { display:block; margin-top:4px; color:var(--ink); font-size:16px; letter-spacing:-.04em; }
+        .lab-detail-actions { display:flex; justify-content:flex-end; gap:7px; margin-top:13px; }
+        .suggestion-list { display:grid; gap:9px; padding:0 21px 19px; }
+        .suggestion { display:grid; grid-template-columns:28px 1fr auto; align-items:start; gap:9px; padding:10px; border:1px solid var(--line); border-radius:9px; }
+        .suggestion.applied { border-color:#cce5d8; background:#f4fbf7; }
+        .suggestion-icon { width:28px; height:28px; display:grid; place-items:center; border-radius:8px; color:var(--medium); background:var(--medium-soft); }
+        .suggestion.applied .suggestion-icon { color:var(--low); background:var(--low-soft); }
+        .suggestion-icon svg { width:14px; height:14px; }
+        .suggestion strong { display:block; color:var(--ink); font-size:11px; line-height:1.25; }
+        .suggestion p { margin:3px 0 0; color:var(--muted); font-size:10px; line-height:1.35; }
+        .suggestion button { align-self:center; padding:5px 7px; border:1px solid var(--line); border-radius:6px; color:var(--brand); background:var(--surface); font-size:9px; font-weight:800; white-space:nowrap; }
+        .suggestion button:hover { border-color:#9acbc1; background:var(--brand-soft); }
+        .suggestion.applied button { color:var(--low); border-color:#cce5d8; background:var(--low-soft); }
+        .console-lower-grid { display:grid; grid-template-columns:minmax(0,1.08fr) minmax(0,1fr) minmax(250px,.85fr); gap:19px; margin-top:19px; }
+        .pipeline { padding:0 21px 20px; }
+        .pipeline-track { display:grid; grid-template-columns:repeat(5,1fr); align-items:start; }
+        .pipeline-step { position:relative; min-width:0; text-align:center; }
+        .pipeline-step:not(:last-child)::after { content:""; position:absolute; z-index:0; top:10px; left:50%; width:100%; height:2px; background:#cfe5df; }
+        .pipeline-step.done:not(:last-child)::after { background:#86cbb9; }
+        .pipeline-step span { position:relative; z-index:1; width:20px; height:20px; display:grid; place-items:center; margin:0 auto 7px; border:4px solid #e8f5f1; border-radius:50%; color:#fff; background:var(--brand); font-size:8px; font-weight:900; }
+        .pipeline-step.pending span { color:var(--muted); background:#b9c9c6; }
+        .pipeline-step strong { display:block; color:var(--ink); font-size:9px; line-height:1.2; }
+        .pipeline-step small { display:block; margin-top:3px; color:var(--muted); font-size:8px; }
+        .signal-list { display:grid; gap:12px; padding:0 21px 20px; }
+        .signal { display:grid; grid-template-columns:90px 1fr 34px; align-items:center; gap:9px; color:var(--ink-soft); font-size:10px; }
+        .signal-bar { height:6px; overflow:hidden; border-radius:8px; background:#edf1f0; }
+        .signal-bar span { display:block; height:100%; border-radius:inherit; background:var(--brand); }
+        .signal:nth-child(2) .signal-bar span { background:var(--medium); }
+        .signal:nth-child(3) .signal-bar span { background:#7a78c8; }
+        .signal strong { color:var(--ink); font-size:10px; text-align:right; }
+        .console-log { display:grid; gap:10px; padding:0 21px 20px; }
+        .log-line { display:grid; grid-template-columns:8px 1fr auto; align-items:start; gap:8px; color:var(--ink-soft); font-size:10px; }
+        .log-line i { width:7px; height:7px; margin-top:4px; border-radius:50%; background:var(--low); }
+        .log-line.warning i { background:var(--medium); }
+        .log-line strong { display:block; color:var(--ink); font-size:10px; }
+        .log-line small { display:block; margin-top:2px; color:var(--muted); font-size:9px; }
+        .log-time { color:var(--muted); font-size:9px; white-space:nowrap; }
+
+        /* Data explorer */
+        .data-commandbar { display:flex; align-items:center; gap:13px; flex-wrap:wrap; padding:14px; margin-bottom:19px; border-color:#d7e7e4; background:var(--surface-soft); }
+        .data-command-title { margin-right:auto; }
+        .data-command-title strong { display:block; color:var(--ink); font-size:12px; }
+        .data-command-title small { display:block; margin-top:2px; color:var(--muted); font-size:10px; }
+        .data-select { min-width:235px; width:auto; }
+        .data-health-grid { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:13px; margin-bottom:19px; }
+        .data-health-card { padding:14px 15px; }
+        .data-health-card > span { color:var(--muted); font-size:10px; font-weight:800; letter-spacing:.06em; text-transform:uppercase; }
+        .data-health-card strong { display:block; margin-top:8px; color:var(--ink); font-size:22px; letter-spacing:-.05em; }
+        .data-health-card small { display:block; margin-top:3px; color:var(--ink-soft); font-size:10px; }
+        .data-analysis-grid { display:grid; grid-template-columns:minmax(0,1.25fr) minmax(0,.85fr); gap:19px; margin-bottom:19px; }
+        .data-panel { min-width:0; overflow:hidden; }
+        .distribution-chart { height:185px; display:flex; align-items:end; gap:15px; padding:15px 21px 20px; border-top:1px solid #f0f3f2; }
+        .distribution-column { height:100%; flex:1; display:flex; flex-direction:column; align-items:center; justify-content:end; gap:6px; }
+        .distribution-column strong { color:var(--ink-soft); font-size:10px; }
+        .distribution-column > span { width:min(40px,80%); min-height:4px; border-radius:7px 7px 2px 2px; background:var(--brand); transition:height .22s ease; }
+        .distribution-column:nth-child(2) > span { background:var(--medium); }
+        .distribution-column:nth-child(3) > span { background:#7a78c8; }
+        .distribution-column:nth-child(4) > span { background:var(--high); }
+        .distribution-column small { color:var(--muted); font-size:9px; }
+        .distribution-axis { display:flex; justify-content:space-between; padding:0 21px 17px; color:var(--muted); font-size:9px; }
+        .quality-list { display:grid; gap:11px; padding:0 21px 20px; }
+        .quality-item { display:grid; grid-template-columns:1fr auto; gap:10px; align-items:center; }
+        .quality-item strong { display:block; color:var(--ink); font-size:10px; }
+        .quality-item small { display:block; margin-top:2px; color:var(--muted); font-size:9px; }
+        .quality-progress { display:inline-block; width:92px; height:6px; overflow:hidden; border-radius:8px; background:#edf1f0; vertical-align:middle; }
+        .quality-progress span { display:block; height:100%; border-radius:inherit; background:var(--low); }
+        .quality-progress.warning span { background:var(--medium); }
+        .quality-score { display:inline-block; min-width:31px; margin-left:6px; color:var(--ink); font-size:10px; font-weight:800; text-align:right; vertical-align:middle; }
+        .data-preview-card { margin-bottom:19px; }
+        .data-preview-tools { display:flex; align-items:center; gap:8px; padding:0 21px 13px; }
+        .search-field { position:relative; flex:1; min-width:180px; }
+        .search-field input { padding-left:31px; }
+        .search-field svg { position:absolute; left:10px; top:11px; width:14px; height:14px; color:var(--muted); pointer-events:none; }
+        .preview-count { color:var(--muted); font-size:10px; white-space:nowrap; }
+        .data-preview-card table { min-width:720px; }
+        .data-preview-card td, .data-preview-card th { padding-top:10px; padding-bottom:10px; }
+        .data-tag { display:inline-flex; padding:4px 6px; border-radius:5px; color:var(--brand); background:var(--brand-soft); font-size:9px; font-weight:800; }
+        .data-tag.warning { color:#9a6815; background:var(--medium-soft); }
+        .data-footer-note { display:flex; align-items:center; justify-content:space-between; gap:10px; padding:0 21px 19px; color:var(--muted); font-size:10px; }
+
+        @media (max-width: 1240px) {
+          .experiment-grid { grid-template-columns:repeat(2,minmax(0,1fr)); }
+          .console-lower-grid { grid-template-columns:repeat(2,minmax(0,1fr)); }
+          .console-lower-grid .console-log-card { grid-column:span 2; }
+        }
+        @media (max-width: 980px) {
+          .console-command-meta { display:none; }
+          .console-grid, .data-analysis-grid { grid-template-columns:1fr; }
+          .console-lower-grid { grid-template-columns:repeat(2,minmax(0,1fr)); }
+        }
+        @media (max-width: 700px) {
+          .console-kpi-grid, .data-health-grid { grid-template-columns:repeat(2,minmax(0,1fr)); }
+          .console-lower-grid { grid-template-columns:1fr; }
+          .console-lower-grid .console-log-card { grid-column:auto; }
+          .console-commandbar { align-items:flex-start; flex-direction:column; }
+          .data-commandbar { align-items:stretch; flex-direction:column; }
+          .data-command-title { margin-right:0; }
+          .data-select { width:100%; }
+          .lab-metric-grid { grid-template-columns:repeat(2,minmax(0,1fr)); }
+          .data-preview-tools { align-items:stretch; flex-direction:column; }
+          .preview-count { text-align:right; }
+        }
+        @media (max-width: 430px) {
+          .console-kpi-grid, .data-health-grid { gap:9px; }
+          .console-kpi { padding:12px; }
+          .console-kpi-value { font-size:20px; }
+          .experiment-grid { padding-left:14px; padding-right:14px; }
+          .lab-detail, .suggestion-list, .pipeline, .signal-list, .console-log { padding-left:14px; padding-right:14px; }
+          .pipeline-step strong { font-size:8px; }
+          .signal { grid-template-columns:70px 1fr 30px; }
+          .distribution-chart, .distribution-axis, .quality-list, .data-preview-tools, .data-footer-note { padding-left:14px; padding-right:14px; }
+        }
+    
+        @media (max-width: 1240px) {
+      .sidebar { width: 224px; }
+      .dashboard-grid { grid-template-columns: minmax(0, 1.45fr) minmax(300px, .9fr); }
+      .lower-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .lower-grid .activity-card { grid-column: span 2; }
+    }
+    @media (max-width: 980px) {
+      .sidebar { position: fixed; left: -260px; width: 252px; transition: left .22s ease; box-shadow: 12px 0 40px rgba(0,0,0,.16); }
+      .sidebar.open { left: 0; }
+      .mobile-menu { display: grid; place-items: center; }
+      .topbar { padding-inline: 22px; }
+      main { padding-inline: 22px; }
+      footer { padding-inline: 22px; }
+      .dashboard-grid { grid-template-columns: 1fr; }
+      .detail-card { min-height: 0; }
+    }
+    @media (max-width: 700px) {
+      .demo-strip { align-items: flex-start; flex-direction: column; gap: 5px; padding: 8px 15px; }
+      .demo-strip .demo-actions { width: 100%; justify-content: space-between; }
+      .topbar { height: 63px; padding-inline: 15px; }
+      .topbar .outline-btn { display: none; }
+      .top-user div { display: none; }
+      main { padding: 24px 15px 30px; }
+      footer { padding: 0 15px 20px; }
+      .page-heading { align-items: flex-start; flex-direction: column; gap: 14px; }
+      .heading-actions { justify-content: flex-start; }
+      .metrics-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .filter-bar { align-items: stretch; flex-direction: column; }
+      .filter-bar .primary-btn { margin-left: 0; }
+      .filter-field { min-width: 0; }
+      .lower-grid, .split-grid { grid-template-columns: 1fr; }
+      .lower-grid .activity-card { grid-column: auto; }
+      .process-grid { grid-template-columns: 1fr; }
+      .map-frame, .map-frame svg { min-height: 340px; height: 340px; }
+      .legend-note { width: 100%; margin-left: 0; }
+      .login-card { padding: 22px; }
+    }
+    @media (max-width: 430px) {
+      .metrics-grid { gap: 9px; }
+      .metric-card { padding: 13px; }
+      .metric-value { font-size: 22px; }
+      .card-head, .detail-body, .detail-foot, .chart-body, .source-list, .activity-list, .table-wrap, .dataset-list, .metric-mini-grid { padding-left: 14px; padding-right: 14px; }
+      .map-tools, .map-legend { padding-left: 14px; padding-right: 14px; }
+      .map-frame { margin-inline: 7px; }
+      .factor-line { grid-template-columns: 70px 1fr auto; }
+    }
+  </style>
+</head>
+<body>
+  <div class="demo-strip">
+    <span><strong>ENTORNO DEMO</strong> · Prototipo funcional · Datos ilustrativos para validación con cliente</span>
+    <div class="demo-actions" aria-label="Controles de demostración">
+      <span>Ver como:</span>
+      <button type="button" data-role="viewer" aria-pressed="true">Viewer</button>
+      <button type="button" data-role="admin" aria-pressed="false">Admin</button>
+    </div>
+  </div>
+
+  <div class="app-shell" id="app-shell">
+    <aside class="sidebar" id="sidebar">
+      <div class="brand">
+        <div class="brand-mark" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3c1.3 3.2 5.3 4.5 5.3 9.3A5.3 5.3 0 1 1 6.7 12c0-1.8.7-3.5 2.1-5.1.1 2.5 1.4 3.2 2.4 3.8C12.5 8.7 12 5.6 12 3Z"/><path d="M12.1 13.2c.8 1 1.7 1.6 1.7 3a1.8 1.8 0 0 1-3.6 0c0-.9.5-1.7 1.9-3Z"/></svg>
+        </div>
+        <div><div class="brand-name">FireWatch</div><div class="brand-sub">Risk intelligence</div></div>
+      </div>
+
+      <div class="nav-label">Monitoreo</div>
+      <nav aria-label="Navegación principal">
+        <button class="nav-link" type="button" data-page="dashboard" aria-current="page">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3.5 11.5 12 4l8.5 7.5"/><path d="M5.5 10.5V20h13v-9.5M9 20v-5h6v5"/></svg><span>Mapa de riesgo</span>
+        </button>
+        <button class="nav-link" type="button" data-page="history">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5.5h16v14H4z"/><path d="M8 3.5v4M16 3.5v4M4 9.5h16M8 13h3M8 16h5"/></svg><span>Historial</span>
+        </button>
+        <button class="nav-link" type="button" data-page="access">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3.5 19 6v5.4c0 4.5-3 7.5-7 9.1-4-1.6-7-4.6-7-9.1V6l7-2.5Z"/><path d="m9 12 2 2 4-4"/></svg><span>Acceso y roles</span>
+        </button>
+      </nav>
+
+          <div class="nav-label">Administración</div>
+          <nav aria-label="Administración">
+            <button class="nav-link admin-only" type="button" data-page="console">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="5" width="16" height="14" rx="2"/><path d="m8 10 2 2-2 2M12.5 14H16"/></svg><span>Consola central</span><span class="section-chip" style="margin-left:auto;font-size:8px;padding:3px 5px">Hub</span>
+            </button>
+            <button class="nav-link admin-only" type="button" data-page="data">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6.5h16M4 12h16M4 17.5h16"/><circle cx="8" cy="6.5" r="2" fill="currentColor" stroke="none"/><circle cx="15" cy="12" r="2" fill="currentColor" stroke="none"/><circle cx="10" cy="17.5" r="2" fill="currentColor" stroke="none"/></svg><span>Fuentes y datos</span>
+        </button>
+        <button class="nav-link admin-only" type="button" data-page="models">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5 19V9M12 19V5M19 19v-7"/><path d="M3.5 19.5h17"/></svg><span>Modelos y métricas</span>
+        </button>
+        <button class="nav-link admin-only" type="button" data-page="jobs">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v8l5 3"/><circle cx="12" cy="12" r="8.5"/></svg><span>Procesos</span>
+        </button>
+        <button class="nav-link admin-only" type="button" data-page="audit">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5 4h14v16H5z"/><path d="M8 8h8M8 12h8M8 16h5"/></svg><span>Auditoría</span>
+        </button>
+      </nav>
+
+      <div class="side-bottom">
+        <div class="health-card">
+          <div class="health-head"><span>Estado del sistema</span><small>Operativo</small></div>
+          <div class="health-bar"><span></span></div>
+          <div class="health-note">Última sincronización · Hoy, 08:20</div>
+        </div>
+        <div class="side-user">
+          <div class="avatar">VC</div>
+          <div><strong id="side-user-name">Valentina Cruz</strong><small id="side-user-role">Viewer · Consulta</small></div>
+        </div>
+      </div>
+    </aside>
+
+    <div class="main-area">
+      <header class="topbar">
+        <div class="topbar-left">
+          <button class="mobile-menu" id="mobile-menu" type="button" aria-label="Abrir navegación" aria-expanded="false">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 6h16M4 12h16M4 18h16"/></svg>
+          </button>
+          <div class="breadcrumbs"><span>FireWatch</span><span> / </span><strong id="breadcrumb-current">Mapa de riesgo</strong></div>
+        </div>
+        <div class="topbar-actions">
+          <button class="outline-btn" type="button" data-action="help"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8.5"/><path d="M9.7 9a2.4 2.4 0 1 1 3.9 1.9c-.9.7-1.6 1.1-1.6 2.3M12 16.5h.01"/></svg>Ayuda</button>
+          <button class="icon-btn" type="button" data-action="notifications" aria-label="Notificaciones"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M18 9a6 6 0 0 0-12 0c0 7-3 7-3 8.5h18C21 16 18 16 18 9ZM10 21h4"/></svg></button>
+          <div class="top-user"><div class="avatar">VC</div><div><strong id="top-user-name">Valentina Cruz</strong><small id="top-user-role">Viewer</small></div></div>
+        </div>
+      </header>
+
+      <main>
+        <section class="page active" data-screen="dashboard">
+          <div class="page-heading">
+            <div><div class="eyebrow">Monitoreo predictivo · RF-04 / RF-05</div><h1>Mapa de riesgo</h1><p class="heading-copy">Consulta territorial de estimaciones de riesgo para la Región de Valparaíso, con vigencia, fuentes y trazabilidad del modelo.</p></div>
+            <div class="heading-actions"><button class="outline-btn" type="button" data-action="export"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12M7.5 10.5 12 15l4.5-4.5M5 20h14"/></svg>Exportar resumen</button><button class="primary-btn" type="button" data-page="history">Ver historial</button></div>
+          </div>
+
+          <div class="surface filter-bar" aria-label="Filtros del mapa">
+            <label class="filter-field grow"><span>Zona territorial</span><select id="zone-filter"><option value="valparaiso">Región de Valparaíso · Vista general</option><option value="valparaiso-city">Valparaíso</option><option value="vina">Viña del Mar</option><option value="quilpue">Quilpué</option><option value="casablanca">Casablanca</option><option value="andes">Los Andes</option><option value="san-antonio">San Antonio</option></select></label>
+            <label class="filter-field"><span>Horizonte de consulta</span><select id="period-filter"><option value="24h">Próximas 24 horas</option><option value="72h">Próximas 72 horas</option><option value="7d">Próximos 7 días</option></select></label>
+            <label class="filter-field"><span>Estado del dato</span><select id="status-filter"><option value="current">Solo vigentes</option><option value="all">Todos los estados</option><option value="stale">Desactualizados</option></select></label>
+            <button class="primary-btn" id="apply-filters" type="button"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m20 6-11 11-5-5"/></svg>Actualizar vista</button>
+          </div>
+
+          <div class="metrics-grid">
+            <article class="surface metric-card"><div class="metric-top"><span>Zonas monitoreadas</span><span class="metric-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6.5 12 3l8 3.5v11L12 21l-8-3.5v-11Z"/><path d="M4 6.5 12 10l8-3.5M12 10v11"/></svg></span></div><div class="metric-value">38</div><div class="metric-foot"><span class="positive">+4</span> zonas con cobertura nueva</div></article>
+            <article class="surface metric-card high"><div class="metric-top"><span>Riesgo alto</span><span class="metric-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3c1.4 3.5 5.6 4.6 5.6 9.6A5.6 5.6 0 1 1 6.4 12c0-1.9.8-3.7 2.3-5.4.1 2.6 1.3 3.6 2.5 4.2C12.4 8.6 12 5.9 12 3Z"/></svg></span></div><div class="metric-value">6</div><div class="metric-foot"><span class="attention">15,8%</span> del territorio monitoreado</div></article>
+            <article class="surface metric-card medium"><div class="metric-top"><span>Calidad de datos</span><span class="metric-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 17.5V12M10 17.5V7M16 17.5V4M22 17.5V9"/></svg></span></div><div class="metric-value">96<small style="font-size:14px;letter-spacing:0">%</small></div><div class="metric-foot"><span class="positive">Óptima</span> · lote validado</div></article>
+            <article class="surface metric-card low"><div class="metric-top"><span>Modelo activo</span><span class="metric-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 4.5h12v15H6zM9 8h6M9 12h6M9 16h3"/></svg></span></div><div class="metric-value" style="font-size:21px">RF-2026.09</div><div class="metric-foot"><span class="positive">Aprobado</span> · Random Forest</div></article>
+          </div>
+
+          <div class="dashboard-grid">
+            <article class="surface map-card">
+              <div class="card-head"><div><h2>Distribución territorial</h2><p>Estimación para <strong id="map-period-label">próximas 24 horas</strong> · actualización 08:20</p></div><a class="small-action" href="#" data-action="layers">Configurar capas</a></div>
+              <div class="map-tools"><button class="map-tool" type="button" aria-pressed="true" data-map-layer="risk">Riesgo estimado</button><button class="map-tool" type="button" aria-pressed="false" data-map-layer="weather">Condiciones</button><span class="map-separator"></span><button class="map-tool" type="button" data-action="locate">Centrar región</button></div>
+              <div class="map-frame" id="map-frame">
+                <div class="map-overlay"><span class="pulse"></span>Estimación vigente · lote #VAL-0820</div>
+                <div class="map-zoom"><button type="button" data-map-zoom="in" aria-label="Acercar">+</button><button type="button" data-map-zoom="out" aria-label="Alejar">−</button></div>
+                <svg id="risk-map" viewBox="0 0 860 470" role="img" aria-label="Mapa territorial ilustrativo de la Región de Valparaíso">
+                  <defs><filter id="zone-shadow" x="-20%" y="-20%" width="140%" height="140%"><feDropShadow dx="0" dy="3" stdDeviation="3" flood-color="#214942" flood-opacity=".26"/></filter><linearGradient id="water" x1="0" x2="1"><stop offset="0" stop-color="#cfe6e3"/><stop offset="1" stop-color="#e4f1ee"/></linearGradient></defs>
+                  <path d="M0 0h860v470H0z" fill="url(#water)"/>
+                  <path d="M0 0h178c-20 38-23 73-11 105 13 35 3 62-12 92-20 38-18 80 3 122 18 37 11 94-11 151H0Z" fill="#d7ebe7"/>
+                  <path d="M176 0c-18 37-22 72-9 105 13 34 3 63-12 92-20 39-17 79 3 122 18 39 10 94-12 151" fill="none" stroke="#a5cdca" stroke-width="2" stroke-dasharray="5 5"/>
+                  <g opacity=".55" fill="none" stroke="#b5d4cf" stroke-width="1.4"><path d="M197 44c102 19 187 18 273-2 84-20 190-9 300 28"/><path d="M173 102c101 15 206 4 280-18 82-24 187-17 343 18"/><path d="M176 165c99 15 207 10 302-13 94-22 182-18 333 20"/><path d="M185 228c113 8 205 6 303-11 108-19 228-12 342 21"/><path d="M193 291c91 5 199 12 309-8 106-19 221-7 319 19"/><path d="M197 355c111 17 198 13 289-5 119-24 221-10 332 17"/><path d="M193 413c97 16 201 14 292-5 112-23 212-16 338 15"/></g>
+                  <g id="map-zones">
+                    <path class="zone-shape high" data-zone="valparaiso-city" d="M237 89 324 70 381 116 362 180 291 192 229 154Z"/><path class="zone-shape medium" data-zone="vina" d="m381 116 91-33 72 60-24 67-102 30-56-60Z"/><path class="zone-shape high" data-zone="quilpue" d="m472 83 100-14 64 61-33 75-79 5-76-67Z"/><path class="zone-shape medium" data-zone="casablanca" d="m229 154 62 38 102-12 56 60-38 88-125 22-78-81Z"/><path class="zone-shape low" data-zone="andes" d="m572 69 91 20 73 72-37 102-118 8-45-75 33-75Z"/><path class="zone-shape medium" data-zone="san-antonio" d="m208 269 78 81 125-22 43 62-35 53-135 3-89-74Z"/>
+                    <path class="zone-shape low" data-zone="petorca" d="m324 70 104-31 144 16-2 40-98 14-91 33Z"/>
+                  </g>
+                  <g class="map-label"><text x="269" y="132">Valparaíso</text><text x="396" y="162">Viña del Mar</text><text x="493" y="128">Quilpué</text><text x="285" y="245">Casablanca</text><text x="630" y="143">Los Andes</text><text x="249" y="333">San Antonio</text><text x="380" y="55">Petorca</text></g>
+                  <g class="map-label subtle"><text x="40" y="240" transform="rotate(-90 40 240)">OCÉANO PACÍFICO</text><text x="689" y="280">Cordillera de los Andes</text><text x="694" y="294">Zona territorial ilustrativa</text></g>
+                  <g class="map-pin"><circle cx="310" cy="136" r="5"/><circle cx="516" cy="136" r="5"/><circle cx="636" cy="186" r="5"/></g>
+                </svg>
+                <span class="map-caption">Representación territorial ilustrativa · Próxima integración con MapLibre GL JS</span>
+              </div>
+              <div class="map-legend"><span class="legend-item"><i class="legend-dot high"></i>Alto</span><span class="legend-item"><i class="legend-dot medium"></i>Medio</span><span class="legend-item"><i class="legend-dot low"></i>Bajo</span><span class="legend-item"><i class="legend-dot neutral"></i>Sin información</span><span class="legend-note">La estimación no representa un incendio activo</span></div>
+            </article>
+
+            <article class="surface detail-card">
+              <div class="card-head"><div><div class="eyebrow">Detalle de zona</div><h2 id="detail-title">Valparaíso</h2><p id="detail-subtitle">Zona Z-01 · Cordillera de la Costa</p></div><span class="status-badge">Vigente</span></div>
+              <div class="detail-body">
+                <div class="selected-zone"><div><div class="eyebrow" id="detail-region">VALPARAÍSO</div><h3 id="detail-municipality">Comuna de Valparaíso</h3><small id="detail-coordinates">33,04° S · 71,62° O</small></div><span class="risk-pill" id="detail-risk-pill">Riesgo alto</span></div>
+                <div class="score-row"><div class="score-number"><span id="detail-score">78</span><small>/ 100</small></div><div class="score-caption">Índice estimado<br><strong id="detail-period">Próximas 24 horas</strong></div></div>
+                <div class="score-track"><span id="detail-score-bar"></span></div>
+                <div class="detail-divider"></div>
+                <div class="detail-section-title">Trazabilidad del resultado</div>
+                <dl class="detail-list"><div><dt>Emisión</dt><dd id="detail-issued">Hoy, 08:20</dd></div><div><dt>Modelo</dt><dd>RF-2026.09</dd></div><div><dt>Datos de entrada</dt><dd id="detail-sources">3 fuentes validadas</dd></div><div><dt>Histórico asociado</dt><dd id="detail-history">12 registros</dd></div></dl>
+                <div class="detail-divider"></div>
+                <div class="detail-section-title">Factores principales</div>
+                <div class="factor-list" id="factor-list"><div class="factor-line high"><span>Viento</span><span class="factor-bar"><span style="width:84%"></span></span><strong>32 km/h</strong></div><div class="factor-line high"><span>Humedad</span><span class="factor-bar"><span style="width:72%"></span></span><strong>31%</strong></div><div class="factor-line medium"><span>Vegetación</span><span class="factor-bar"><span style="width:55%"></span></span><strong>Media</strong></div></div>
+              </div>
+              <div class="detail-foot"><div class="freshness"><i></i><span id="detail-freshness">Resultado vigente y publicado</span></div><small>La fecha de vigencia y la versión del modelo acompañan cada estimación.</small></div>
+            </article>
+          </div>
+
+          <div class="lower-grid">
+            <article class="surface"><div class="card-head"><div><h2>Distribución del riesgo</h2><p>38 zonas con estimación disponible</p></div><span class="status-badge neutral">24 h</span></div><div class="chart-body"><div class="chart-bars"><div class="bar-col"><span class="bar-value">6</span><span class="bar high" style="height: 72%"></span><span class="bar-label">Alto</span></div><div class="bar-col"><span class="bar-value">14</span><span class="bar medium" style="height: 100%"></span><span class="bar-label">Medio</span></div><div class="bar-col"><span class="bar-value">18</span><span class="bar low" style="height: 118%"></span><span class="bar-label">Bajo</span></div></div><div class="chart-foot"><span>Escala relativa por zona</span><strong>Actualizado hoy</strong></div></div></article>
+            <article class="surface"><div class="card-head"><div><h2>Calidad de las fuentes</h2><p>Validación previa a publicación</p></div><span class="status-badge">96% OK</span></div><div class="source-list"><div class="source-row"><span class="source-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3c1.3 3.2 5.3 4.5 5.3 9.3A5.3 5.3 0 1 1 6.7 12c0-1.8.7-3.5 2.1-5.1.1 2.5 1.4 3.2 2.4 3.8C12.5 8.7 12 5.6 12 3Z"/></svg></span><span><strong>Incendios históricos</strong><small>CONAF · lote H-2026-08</small></span><span class="source-status"><i></i>Validado</span></div><div class="source-row"><span class="source-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M7 17.5a4 4 0 1 1 1-7.9A5.2 5.2 0 0 1 18.2 11a3.3 3.3 0 0 1 .1 6.5H7Z"/><path d="M12 5v4M10.3 7l1.7 2 1.7-2"/></svg></span><span><strong>Condiciones meteorológicas</strong><small>DMC · actualización 08:00</small></span><span class="source-status"><i></i>Validado</span></div><div class="source-row"><span class="source-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m4 17 5-5 3 3 5-7 3 3"/><path d="M4 20h16"/></svg></span><span><strong>Características territoriales</strong><small>Catastro · versión T-04</small></span><span class="source-status warning"><i></i>Revisar 4%</span></div></div></article>
+            <article class="surface activity-card"><div class="card-head"><div><h2>Actividad reciente</h2><p>Eventos trazables del sistema</p></div><a class="small-action" href="#" data-page="audit">Ver todo</a></div><div class="activity-list"><div class="activity-item"><span class="activity-dot"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="m6 12 4 4 8-8"/></svg></span><span><strong>Lote de estimaciones publicado</strong><small>Modelo RF-2026.09 · 38 zonas</small></span><span class="activity-time">08:20</span></div><div class="activity-item"><span class="activity-dot"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="m6 12 4 4 8-8"/></svg></span><span><strong>Fuentes meteorológicas validadas</strong><small>Sin errores de formato</small></span><span class="activity-time">08:04</span></div><div class="activity-item"><span class="activity-dot"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="m6 12 4 4 8-8"/></svg></span><span><strong>Consulta de mapa registrada</strong><small>Usuario viewer · RF-05</small></span><span class="activity-time">07:52</span></div></div></article>
+          </div>
+          <div class="info-banner"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8.5"/><path d="M12 10.5v5M12 7.5h.01"/></svg><span><strong>Uso responsable:</strong> esta interfaz muestra una estimación de riesgo, no detecta incendios activos ni entrega instrucciones de evacuación. Los valores de esta demostración son ilustrativos y deben reemplazarse por datos validados antes de una puesta en producción.</span></div>
+        </section>
+
+        <section class="page" data-screen="history">
+          <div class="page-heading"><div><div class="eyebrow">Consulta · RF-05 / RF-08</div><h1>Historial de estimaciones</h1><p class="heading-copy">Revisa cuándo se emitió cada resultado, a qué período aplica y qué versión del modelo lo generó.</p></div><div class="heading-actions"><button class="outline-btn" type="button" data-action="export-history">Descargar CSV</button></div></div>
+          <div class="surface filter-bar"><label class="filter-field grow"><span>Zona</span><select><option>Todas las zonas</option><option>Valparaíso</option><option>Viña del Mar</option><option>Quilpué</option><option>Casablanca</option></select></label><label class="filter-field"><span>Desde</span><input type="date" value="2026-09-01"></label><label class="filter-field"><span>Hasta</span><input type="date" value="2026-09-15"></label><button class="primary-btn" type="button" data-action="history-filter">Aplicar filtros</button></div>
+          <article class="surface table-card"><div class="card-head"><div><h2>Emisiones registradas</h2><p>Resultados almacenados con fecha, vigencia, datos y modelo</p></div><span class="status-badge neutral">6 registros</span></div><div class="table-wrap"><table><thead><tr><th>Emisión</th><th>Zona</th><th>Período de aplicación</th><th>Riesgo</th><th>Modelo / lote</th><th>Estado</th></tr></thead><tbody><tr><td><strong>15 sep 2026 · 08:20</strong></td><td>Valparaíso</td><td>15 sep · 08:00 — 16 sep · 08:00</td><td><span class="status-badge danger">Alto · 78</span></td><td>RF-2026.09 · VAL-0820</td><td><span class="status-badge">Vigente</span></td></tr><tr><td><strong>15 sep 2026 · 08:20</strong></td><td>Viña del Mar</td><td>15 sep · 08:00 — 16 sep · 08:00</td><td><span class="status-badge warning">Medio · 54</span></td><td>RF-2026.09 · VAL-0820</td><td><span class="status-badge">Vigente</span></td></tr><tr><td><strong>14 sep 2026 · 08:10</strong></td><td>Valparaíso</td><td>14 sep · 08:00 — 15 sep · 08:00</td><td><span class="status-badge danger">Alto · 74</span></td><td>RF-2026.09 · VAL-0810</td><td><span class="status-badge neutral">Archivado</span></td></tr><tr><td><strong>13 sep 2026 · 08:12</strong></td><td>Valparaíso</td><td>13 sep · 08:00 — 14 sep · 08:00</td><td><span class="status-badge warning">Medio · 61</span></td><td>RF-2026.08 · VAL-0812</td><td><span class="status-badge neutral">Archivado</span></td></tr><tr><td><strong>12 sep 2026 · 08:05</strong></td><td>Casablanca</td><td>12 sep · 08:00 — 13 sep · 08:00</td><td><span class="status-badge">Bajo · 36</span></td><td>RF-2026.08 · VAL-0805</td><td><span class="status-badge neutral">Archivado</span></td></tr></tbody></table></div></article>
+          <div class="info-banner"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8.5"/><path d="M12 10.5v5M12 7.5h.01"/></svg><span>Los incendios observados se mantienen separados de las predicciones para permitir evaluar el desempeño del modelo sin confundir ambos tipos de información.</span></div>
+        </section>
+
+            <section class="page" data-screen="console">
+              <div class="page-heading"><div><div class="eyebrow">Administración avanzada · RF-03 / RF-07 / RNF-07</div><h1>Consola central</h1><p class="heading-copy">Un espacio operativo para explorar modelos, comparar experimentos y decidir qué versión está lista para generar estimaciones.</p></div><div class="heading-actions"><button class="outline-btn" type="button" data-action="console-export">Exportar análisis</button><button class="primary-btn" id="run-benchmark" type="button" data-action="run-benchmark">Ejecutar comparativa</button></div></div>
+              <div class="surface console-commandbar"><div class="console-command-status"><span class="console-live"></span><div><strong>Centro de control operativo</strong><small>Pipeline listo · publicación protegida por aprobación manual</small></div></div><div class="console-command-meta"><span>Modelo activo <b>RF-2026.09</b></span><span>Datos <b>96% OK</b></span><span>Última ejecución <b>08:20</b></span></div><button class="outline-btn" type="button" data-action="refresh-console">Actualizar estado</button></div>
+              <div class="console-kpi-grid"><article class="surface console-kpi"><div class="console-kpi-label"><span>Modelos disponibles</span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 18V6l8-3 8 3v12l-8 3-8-3Z"/><path d="m4 6 8 3 8-3M12 9v12"/></svg></div><div class="console-kpi-value">4</div><div class="console-kpi-foot"><strong>2 candidatos</strong> para comparar</div></article><article class="surface console-kpi"><div class="console-kpi-label"><span>Mejor recall</span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 17 9 12l3 3 7-8"/><path d="M15 7h4v4"/></svg></div><div class="console-kpi-value">0,84</div><div class="console-kpi-foot"><strong>RF-2026.09</strong> · aprobado</div></article><article class="surface console-kpi"><div class="console-kpi-label"><span>Experimentos este mes</span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5 19V9M12 19V5M19 19v-7"/><path d="M3.5 19.5h17"/></svg></div><div class="console-kpi-value">12</div><div class="console-kpi-foot"><strong>+3</strong> desde la última revisión</div></article><article class="surface console-kpi"><div class="console-kpi-label"><span>Alertas de entrenamiento</span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m12 4 8 15H4L12 4Z"/><path d="M12 9v4M12 16h.01"/></svg></div><div class="console-kpi-value">3</div><div class="console-kpi-foot"><strong style="color:var(--medium)">Requieren revisión</strong></div></article></div>
+              <div class="console-grid">
+                <article class="surface console-card"><div class="card-head"><div><h2>Laboratorio de modelos <span class="section-chip">Comparativa</span></h2><p>Selecciona una alternativa para inspeccionar su desempeño</p></div><button class="small-action" type="button" data-action="new-experiment">+ Nuevo experimento</button></div><div class="experiment-grid"><button class="experiment-card selected" type="button" data-experiment="rf"><span class="experiment-top"><strong>Random Forest</strong><i class="experiment-dot"></i></span><span class="experiment-type">Modelo activo · tabular</span><span class="experiment-score">0,84 <small>recall</small></span><span class="experiment-foot"><span>AUC <b>0,81</b></span><span>Aprobado</span></span></button><button class="experiment-card candidate" type="button" data-experiment="lr"><span class="experiment-top"><strong>Regresión logística</strong><i class="experiment-dot"></i></span><span class="experiment-type">Línea base · tabular</span><span class="experiment-score">0,71 <small>recall</small></span><span class="experiment-foot"><span>AUC <b>0,74</b></span><span>Revisión</span></span></button><button class="experiment-card candidate" type="button" data-experiment="gb"><span class="experiment-top"><strong>Gradient Boosting</strong><i class="experiment-dot"></i></span><span class="experiment-type">Candidato · CPU</span><span class="experiment-score">0,80 <small>recall</small></span><span class="experiment-foot"><span>AUC <b>0,79</b></span><span>Candidato</span></span></button><button class="experiment-card experimental" type="button" data-experiment="extra"><span class="experiment-top"><strong>Extra Trees</strong><i class="experiment-dot"></i></span><span class="experiment-type">Exploratorio · CPU</span><span class="experiment-score">0,82 <small>recall</small></span><span class="experiment-foot"><span>AUC <b>0,80</b></span><span>Nuevo</span></span></button></div><div class="lab-detail" id="lab-detail"><div class="lab-detail-head"><div><strong id="lab-model-name">Random Forest · RF-2026.09</strong><small id="lab-model-meta">Modelo operativo · entrenado con validación temporal</small></div><span class="status-badge" id="lab-model-status">Aprobado</span></div><p class="lab-detail-description" id="lab-model-description">Buen equilibrio entre sensibilidad y control de falsas alertas. Es la referencia actual para la generación de estimaciones del prototipo.</p><div class="lab-metric-grid"><div class="lab-metric"><span>Recall</span><strong id="lab-recall">0,84</strong></div><div class="lab-metric"><span>Precisión</span><strong id="lab-precision">0,76</strong></div><div class="lab-metric"><span>AUC-ROC</span><strong id="lab-auc">0,81</strong></div><div class="lab-metric"><span>Duración</span><strong id="lab-duration">04:12</strong></div></div><div class="lab-detail-actions"><button class="outline-btn" type="button" data-action="compare-selected">Comparar con activo</button><button class="primary-btn" type="button" data-action="request-training">Probar configuración</button></div></div></article>
+                <article class="surface console-card"><div class="card-head"><div><h2>Sugerencias de entrenamiento</h2><p>Recomendaciones para una próxima ejecución</p></div><span class="status-badge warning">3 pendientes</span></div><div class="suggestion-list"><div class="suggestion" data-suggestion="balance"><span class="suggestion-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v16M5 8h14M7 8l-3 6h6L7 8ZM17 8l-3 6h6l-3-6Z"/></svg></span><span><strong>Revisar desbalance de clases</strong><p>Probar class_weight o SMOTE y comparar el impacto en falsos negativos.</p></span><button type="button" data-recommendation="balance">Aplicar</button></div><div class="suggestion" data-suggestion="temporal"><span class="suggestion-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8.5"/><path d="M12 7v5l3 2"/></svg></span><span><strong>Mantener validación temporal</strong><p>Evitar mezclar información futura y medir desempeño por período.</p></span><button type="button" data-recommendation="temporal">Aplicar</button></div><div class="suggestion" data-suggestion="calibration"><span class="suggestion-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5 19V9M12 19V5M19 19v-7"/><path d="M3.5 19.5h17"/></svg></span><span><strong>Evaluar calibración</strong><p>Antes de mostrar probabilidades, verificar si el puntaje representa el riesgo observado.</p></span><button type="button" data-recommendation="calibration">Aplicar</button></div><div class="suggestion" data-suggestion="features"><span class="suggestion-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m12 3 2.7 5.5L21 9.4l-4.5 4.4 1.1 6.2-5.6-2.9-5.6 2.9 1.1-6.2L3 9.4l6.3-.9L12 3Z"/></svg></span><span><strong>Priorizar variables confiables</strong><p>Excluir columnas con más de 20% de valores faltantes antes de entrenar.</p></span><button type="button" data-recommendation="features">Aplicar</button></div></div></article>
+              </div>
+              <div class="console-lower-grid"><article class="surface console-card"><div class="card-head"><div><h2>Pipeline de publicación</h2><p>Controles antes de activar una versión</p></div><span class="status-badge">Listo</span></div><div class="pipeline"><div class="pipeline-track"><div class="pipeline-step done"><span>✓</span><strong>Datos</strong><small>Validado</small></div><div class="pipeline-step done"><span>✓</span><strong>Entrenar</strong><small>Completado</small></div><div class="pipeline-step done"><span>✓</span><strong>Evaluar</strong><small>0,81 AUC</small></div><div class="pipeline-step pending"><span>4</span><strong>Aprobar</strong><small>Admin</small></div><div class="pipeline-step pending"><span>5</span><strong>Publicar</strong><small>Bloqueado</small></div></div></div></article><article class="surface console-card"><div class="card-head"><div><h2>Señales del conjunto</h2><p>Variables con mayor aporte estimado</p></div><a class="small-action" href="#" data-page="data">Explorar datos</a></div><div class="signal-list"><div class="signal"><span>Humedad relativa</span><span class="signal-bar"><span style="width:86%"></span></span><strong>0,86</strong></div><div class="signal"><span>Velocidad viento</span><span class="signal-bar"><span style="width:74%"></span></span><strong>0,74</strong></div><div class="signal"><span>Vegetación</span><span class="signal-bar"><span style="width:61%"></span></span><strong>0,61</strong></div></div></article><article class="surface console-card console-log-card"><div class="card-head"><div><h2>Registro de control</h2><p>Últimas acciones de la consola</p></div><a class="small-action" href="#" data-page="audit">Auditoría</a></div><div class="console-log"><div class="log-line"><i></i><span><strong>Modelo RF-2026.09 aprobado</strong><small>por Camila Rojas · TRC-8E42</small></span><span class="log-time">15:12</span></div><div class="log-line warning"><i></i><span><strong>Se detectó desbalance</strong><small>Revisar configuración de entrenamiento</small></span><span class="log-time">14:48</span></div><div class="log-line"><i></i><span><strong>Comparativa completada</strong><small>4 alternativas evaluadas</small></span><span class="log-time">14:31</span></div></div></article></div>
+              <div class="info-banner"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8.5"/><path d="M12 10.5v5M12 7.5h.01"/></svg><span><strong>Regla de operación:</strong> la consola permite explorar y comparar candidatos, pero no activa modelos automáticamente. La aprobación debe revisar métricas, datos, preprocesamiento y quedar registrada en auditoría.</span></div>
+            </section>
+
+            <section class="page" data-screen="data">
+          <div class="page-heading"><div><div class="eyebrow">Administración · RF-01 / RF-02 / RF-06</div><h1>Fuentes y calidad de datos</h1><p class="heading-copy">Incorpora fuentes, conserva su procedencia y analiza rápidamente su calidad antes de entrenar.</p></div><div class="heading-actions"><button class="outline-btn" type="button" data-action="download-sample">Descargar muestra</button><button class="primary-btn" type="button" data-action="upload">+ Incorporar conjunto</button></div></div>
+          <div class="surface data-commandbar"><div class="data-command-title"><strong>Explorador de datos</strong><small>Selecciona un conjunto para inspeccionar estructura, distribución y calidad</small></div><label class="filter-field"><span>Conjunto activo</span><select class="data-select" id="data-dataset"><option value="historical">Histórico de incendios · H-2026-08</option><option value="weather">Meteorología · M-2026-09</option><option value="territory">Territorio · T-04</option></select></label><button class="outline-btn" type="button" data-action="reset-data-view">Restablecer vista</button><button class="primary-btn" type="button" data-action="analyze-data">Analizar conjunto</button></div>
+          <div class="data-health-grid"><article class="surface data-health-card"><span>Registros</span><strong id="data-rows">1.248</strong><small id="data-rows-note">filas en el lote activo</small></article><article class="surface data-health-card"><span>Calidad global</span><strong id="data-quality">98%</strong><small id="data-quality-note">sin bloqueos de publicación</small></article><article class="surface data-health-card"><span>Variables</span><strong id="data-columns">18</strong><small id="data-columns-note">columnas utilizables</small></article><article class="surface data-health-card"><span>Valores faltantes</span><strong id="data-missing">2,1%</strong><small id="data-missing-note">dentro del umbral recomendado</small></article></div>
+          <div class="data-analysis-grid"><article class="surface data-panel"><div class="card-head"><div><h2>Distribución de variables</h2><p id="data-analysis-caption">Resumen del histórico de incendios · muestra validada</p></div><span class="status-badge neutral">Análisis rápido</span></div><div class="distribution-chart"><div class="distribution-column"><strong id="data-dist-events-value">12%</strong><span id="data-dist-events" style="height:46%"></span><small>Eventos</small></div><div class="distribution-column"><strong id="data-dist-weather-value">31%</strong><span id="data-dist-weather" style="height:72%"></span><small>Humedad baja</small></div><div class="distribution-column"><strong id="data-dist-wind-value">24%</strong><span id="data-dist-wind" style="height:58%"></span><small>Viento alto</small></div><div class="distribution-column"><strong id="data-dist-missing-value">2,1%</strong><span id="data-dist-missing" style="height:19%"></span><small>Faltantes</small></div></div><div class="distribution-axis"><span>Menor presencia</span><span>Mayor presencia</span></div></article><article class="surface data-panel"><div class="card-head"><div><h2>Chequeos de preparación</h2><p>Reglas que impactan el entrenamiento</p></div><span class="status-badge" id="data-readiness-status">Listo para usar</span></div><div class="quality-list"><div class="quality-item"><span><strong>Formato y tipos</strong><small>Fechas, numéricos y categorías</small></span><span><span class="quality-progress"><span id="quality-format" style="width:100%"></span></span><span class="quality-score">100%</span></span></div><div class="quality-item"><span><strong>Coordenadas y cobertura</strong><small>Ubicación dentro de Valparaíso</small></span><span><span class="quality-progress"><span id="quality-location" style="width:98%"></span></span><span class="quality-score">98%</span></span></div><div class="quality-item"><span><strong>Duplicados</strong><small>Identificadores repetidos</small></span><span><span class="quality-progress"><span id="quality-duplicates" style="width:96%"></span></span><span class="quality-score">96%</span></span></div><div class="quality-item"><span><strong>Valores faltantes</strong><small id="quality-missing-label">Requiere imputación menor</small></span><span><span class="quality-progress warning"><span id="quality-missing" style="width:91%"></span></span><span class="quality-score">91%</span></span></div></div></article></div>
+          <article class="surface data-preview-card"><div class="card-head"><div><h2>Muestra de registros</h2><p>Consulta directa de filas normalizadas antes de construir variables</p></div><span class="status-badge neutral" id="preview-batch">H-2026-08 · vista 1–5</span></div><div class="data-preview-tools"><label class="search-field"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="10.8" cy="10.8" r="6.8"/><path d="m16 16 4.5 4.5"/></svg><input id="data-search" type="text" placeholder="Buscar por zona, fecha o resultado" autocomplete="off"></label><span class="preview-count" id="preview-count">5 filas visibles</span><button class="outline-btn" type="button" data-action="inspect-row">Inspeccionar fila</button></div><div class="table-wrap"><table><thead><tr><th>Fecha</th><th>Zona</th><th>Temperatura</th><th>Humedad</th><th>Viento</th><th id="preview-label-header">Etiqueta observada</th><th>Estado</th></tr></thead><tbody id="data-preview-body"><tr data-preview-row data-search-text="2026-08-18 valparaiso alto 31 28 34 incendio"><td><strong>18 ago 2026</strong></td><td>Valparaíso</td><td>31 °C</td><td>28%</td><td>34 km/h</td><td><span class="data-tag warning">Incendio</span></td><td><span class="status-badge">Validado</span></td></tr><tr data-preview-row data-search-text="2026-08-19 quilpue medio 29 36 29 sin evento"><td><strong>19 ago 2026</strong></td><td>Quilpué</td><td>29 °C</td><td>36%</td><td>29 km/h</td><td><span class="data-tag">Sin evento</span></td><td><span class="status-badge">Validado</span></td></tr><tr data-preview-row data-search-text="2026-08-20 casablanca bajo 24 54 18 sin evento"><td><strong>20 ago 2026</strong></td><td>Casablanca</td><td>24 °C</td><td>54%</td><td>18 km/h</td><td><span class="data-tag">Sin evento</span></td><td><span class="status-badge">Validado</span></td></tr><tr data-preview-row data-search-text="2026-08-21 vina del mar alto 30 30 31 incendio"><td><strong>21 ago 2026</strong></td><td>Viña del Mar</td><td>30 °C</td><td>30%</td><td>31 km/h</td><td><span class="data-tag warning">Incendio</span></td><td><span class="status-badge">Validado</span></td></tr><tr data-preview-row data-search-text="2026-08-22 los andes bajo 22 63 14 sin evento"><td><strong>22 ago 2026</strong></td><td>Los Andes</td><td>22 °C</td><td>63%</td><td>14 km/h</td><td><span class="data-tag">Sin evento</span></td><td><span class="status-badge">Validado</span></td></tr></tbody></table></div><div class="data-footer-note"><span>La muestra es de solo lectura en esta demo.</span><span>Producción: edición versionada + auditoría</span></div></article>
+          <div class="split-grid"><article class="surface admin-card"><div class="card-head"><div><h2>Fuentes registradas</h2><p>Origen, versión y estado de validación</p></div><span class="status-badge">3 activas</span></div><div class="dataset-list"><div class="dataset-item"><span class="source-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3c1.3 3.2 5.3 4.5 5.3 9.3A5.3 5.3 0 1 1 6.7 12c0-1.8.7-3.5 2.1-5.1.1 2.5 1.4 3.2 2.4 3.8C12.5 8.7 12 5.6 12 3Z"/></svg></span><span><strong>Histórico de incendios</strong><small>CONAF · H-2026-08 · actualizado hoy</small></span><span class="dataset-meta"><strong>98%</strong><br>calidad</span></div><div class="dataset-item"><span class="source-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M7 17.5a4 4 0 1 1 1-7.9A5.2 5.2 0 0 1 18.2 11a3.3 3.3 0 0 1 .1 6.5H7Z"/></svg></span><span><strong>Meteorología</strong><small>DMC · M-2026-09 · actualización 08:00</small></span><span class="dataset-meta"><strong>97%</strong><br>calidad</span></div><div class="dataset-item"><span class="source-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m4 17 5-5 3 3 5-7 3 3"/><path d="M4 20h16"/></svg></span><span><strong>Territorio</strong><small>Catastro · T-04 · revisado ayer</small></span><span class="dataset-meta"><strong>93%</strong><br>calidad</span></div></div></article><article class="surface admin-card"><div class="card-head"><div><h2>Última validación</h2><p>Lote VAL-0820 · revisión automática</p></div><span class="status-badge">Aprobado</span></div><div class="metric-mini-grid"><div class="metric-mini"><strong>1.248</strong><span>filas procesadas</span></div><div class="metric-mini"><strong>42</strong><span>valores revisados</span></div><div class="metric-mini"><strong>4%</strong><span>requiere atención</span></div></div><div class="audit-note"><strong>Regla de publicación:</strong> los lotes incompletos o inválidos no se publican. Las correcciones generan una nueva versión y conservan el original.</div><div style="padding:0 21px 20px"><button class="outline-btn" type="button" data-action="validation">Ver informe de validación</button></div></article></div>
+          <div class="info-banner"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8.5"/><path d="M12 10.5v5M12 7.5h.01"/></svg><span>La solución propuesta conserva la fuente original, su procedencia, cobertura, licencia y versión. La decisión final de fuentes y resolución geográfica queda pendiente de validación técnica.</span></div>
+        </section>
+
+        <section class="page" data-screen="models">
+          <div class="page-heading"><div><div class="eyebrow">Administración · RF-03 / RF-07</div><h1>Modelos y métricas</h1><p class="heading-copy">Compara versiones candidatas, revisa sus métricas y activa únicamente modelos aprobados.</p></div><div class="heading-actions"><button class="primary-btn" type="button" data-action="train">Solicitar entrenamiento</button></div></div>
+          <div class="surface model-summary"><div class="model-summary-head"><strong>Modelo operativo · Random Forest RF-2026.09</strong><span class="status-badge">Aprobado</span></div><p>Validación temporal · datos H-2026-08 + M-2026-09 + T-04 · publicación auditada por Administrador</p></div>
+          <article class="surface table-card"><div class="card-head"><div><h2>Versiones evaluadas</h2><p>Las métricas son ilustrativas hasta conectar el pipeline de entrenamiento</p></div><span class="status-badge neutral">2 versiones</span></div><div class="table-wrap"><table><thead><tr><th>Versión</th><th>Algoritmo</th><th>Recall</th><th>Precisión</th><th>AUC-ROC</th><th>Estado</th><th>Acción</th></tr></thead><tbody><tr><td><strong>RF-2026.09</strong><br><small>15 sep 2026</small></td><td>Random Forest</td><td><strong>0,84</strong></td><td>0,76</td><td>0,81</td><td><span class="status-badge">Aprobado</span></td><td><button class="row-action" type="button" data-action="model-detail">Ver detalle</button></td></tr><tr><td><strong>LR-2026.09</strong><br><small>14 sep 2026</small></td><td>Regresión logística</td><td>0,71</td><td>0,69</td><td>0,74</td><td><span class="status-badge warning">En revisión</span></td><td><button class="row-action" type="button" data-action="model-review">Revisar</button></td></tr></tbody></table></div></article>
+          <div class="lower-grid" style="grid-template-columns:repeat(3,minmax(0,1fr))"><article class="surface"><div class="card-head"><div><h2>Recall</h2><p>Prioridad: reducir falsos negativos</p></div></div><div class="chart-body"><div class="metric-value" style="font-size:34px">0,84</div><div class="score-track"><span style="width:84%;background:var(--brand)"></span></div></div></article><article class="surface"><div class="card-head"><div><h2>AUC-ROC</h2><p>Capacidad de discriminación</p></div></div><div class="chart-body"><div class="metric-value" style="font-size:34px">0,81</div><div class="score-track"><span style="width:81%;background:var(--low)"></span></div></div></article><article class="surface"><div class="card-head"><div><h2>Precisión</h2><p>Control de falsas alertas</p></div></div><div class="chart-body"><div class="metric-value" style="font-size:34px">0,76</div><div class="score-track"><span style="width:76%;background:var(--medium)"></span></div></div></article></div>
+        </section>
+
+        <section class="page" data-screen="jobs">
+          <div class="page-heading"><div><div class="eyebrow">Administración · RF-03 / RF-06</div><h1>Procesos y actualizaciones</h1><p class="heading-copy">Supervisa cargas, entrenamientos y publicaciones sin bloquear la consulta del mapa.</p></div><div class="heading-actions"><button class="outline-btn" type="button" data-action="refresh-jobs">Actualizar estados</button></div></div>
+          <div class="process-grid"><article class="surface process-card done"><div class="process-top"><span class="process-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5 9.5 17 19 7.5"/></svg></span><span class="status-badge">Completado</span></div><strong>Ingesta meteorológica</strong><p>JOB-M-2026-09 · DMC</p><div class="process-progress"><span></span></div><div class="process-foot"><span>100%</span><span>08:04</span></div></article><article class="surface process-card"><div class="process-top"><span class="process-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v8l5 3"/><circle cx="12" cy="12" r="8.5"/></svg></span><span class="status-badge neutral">En cola</span></div><strong>Actualización de predicciones</strong><p>JOB-P-2026-09 · 38 zonas</p><div class="process-progress"><span></span></div><div class="process-foot"><span>72%</span><span>08:16</span></div></article><article class="surface process-card warning"><div class="process-top"><span class="process-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v8l5 3"/><circle cx="12" cy="12" r="8.5"/></svg></span><span class="status-badge warning">Revisión</span></div><strong>Validación territorial</strong><p>JOB-T-2026-04 · 4% pendiente</p><div class="process-progress"><span></span></div><div class="process-foot"><span>39%</span><span>Ayer, 17:40</span></div></article></div>
+          <article class="surface table-card"><div class="card-head"><div><h2>Trabajos recientes</h2><p>Cada ejecución conserva un identificador para seguimiento</p></div><span class="status-badge neutral">3 procesos</span></div><div class="table-wrap"><table><thead><tr><th>ID / tipo</th><th>Inicio</th><th>Duración</th><th>Resultado</th><th>Versión</th><th>Estado</th></tr></thead><tbody><tr><td><strong>JOB-P-2026-09</strong><br>Predicciones</td><td>15 sep · 08:16</td><td>04:12 min</td><td>38 zonas procesadas</td><td>RF-2026.09</td><td><span class="status-badge">Completado</span></td></tr><tr><td><strong>JOB-M-2026-09</strong><br>Carga</td><td>15 sep · 08:00</td><td>00:42 min</td><td>1.248 filas aceptadas</td><td>M-2026-09</td><td><span class="status-badge">Completado</span></td></tr><tr><td><strong>JOB-T-2026-04</strong><br>Validación</td><td>14 sep · 17:40</td><td>En curso</td><td>4% de registros pendientes</td><td>T-04</td><td><span class="status-badge warning">Revisión</span></td></tr></tbody></table></div></article>
+          <div class="info-banner"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8.5"/><path d="M12 10.5v5M12 7.5h.01"/></svg><span>Si una actualización falla, se conserva el último lote válido y la interfaz informa su antigüedad. Las operaciones extensas se ejecutan en segundo plano.</span></div>
+        </section>
+
+        <section class="page" data-screen="audit">
+          <div class="page-heading"><div><div class="eyebrow">Administración · RF-09 / RNF-07</div><h1>Registro de auditoría</h1><p class="heading-copy">Trazabilidad de cambios administrativos, procesos y publicaciones del sistema.</p></div><div class="heading-actions"><button class="outline-btn" type="button" data-action="export-audit">Exportar registro</button></div></div>
+          <div class="surface filter-bar"><label class="filter-field grow"><span>Usuario responsable</span><input type="text" placeholder="Buscar usuario"></label><label class="filter-field"><span>Tipo de acción</span><select><option>Todas las acciones</option><option>Actualización de datos</option><option>Entrenamiento</option><option>Modelo aprobado</option><option>Permisos</option></select></label><button class="primary-btn" type="button" data-action="audit-filter">Filtrar registro</button></div>
+          <article class="surface table-card"><div class="card-head"><div><h2>Eventos registrados</h2><p>Sin contraseñas, tokens ni secretos en el detalle</p></div><span class="status-badge">Trazabilidad activa</span></div><div class="table-wrap"><table><thead><tr><th>Fecha y hora</th><th>Responsable</th><th>Acción</th><th>Objeto / versión</th><th>Resultado</th><th>Seguimiento</th></tr></thead><tbody><tr><td><strong>15 sep 2026 · 08:20</strong></td><td>Valentina Cruz</td><td>Publicación de estimaciones</td><td>Lote VAL-0820</td><td><span class="status-badge">Exitoso</span></td><td>TRC-8F21</td></tr><tr><td><strong>15 sep 2026 · 08:04</strong></td><td>Proceso automático</td><td>Validación de fuente</td><td>M-2026-09</td><td><span class="status-badge">Exitoso</span></td><td>TRC-8F18</td></tr><tr><td><strong>14 sep 2026 · 17:40</strong></td><td>Andrés Silva</td><td>Corrección de datos</td><td>T-04 · revisión 2</td><td><span class="status-badge warning">Pendiente</span></td><td>TRC-8E97</td></tr><tr><td><strong>14 sep 2026 · 15:12</strong></td><td>Camila Rojas</td><td>Modelo aprobado</td><td>RF-2026.09</td><td><span class="status-badge">Exitoso</span></td><td>TRC-8E42</td></tr></tbody></table></div></article>
+          <div class="info-banner"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8.5"/><path d="M12 10.5v5M12 7.5h.01"/></svg><span>La auditoría propuesta registra quién realizó cada operación, cuándo, sobre qué versión y con qué resultado. El backend deberá restringir su consulta al rol admin.</span></div>
+        </section>
+
+        <section class="page" data-screen="access">
+          <div class="login-shell"><article class="surface login-card"><div class="login-brand"><div class="brand-mark"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3c1.3 3.2 5.3 4.5 5.3 9.3A5.3 5.3 0 1 1 6.7 12c0-1.8.7-3.5 2.1-5.1.1 2.5 1.4 3.2 2.4 3.8C12.5 8.7 12 5.6 12 3Z"/></svg></div><div><div class="brand-name" style="color:var(--ink)">FireWatch</div><div class="brand-sub" style="color:var(--muted)">Riesgo forestal</div></div></div><div class="eyebrow">Acceso seguro · RNF-01</div><h2>Iniciar sesión</h2><p>El rol determina las funciones disponibles. En esta demostración puede alternarse desde la barra superior.</p><form class="login-form" id="login-form"><label>Correo o usuario<input type="text" autocomplete="off" placeholder="usuario@ejemplo.cl"></label><label>Contraseña<input type="password" autocomplete="off" placeholder="••••••••"></label><button class="primary-btn" type="submit">Entrar a la demostración</button></form><div class="login-note">La versión productiva utilizará autenticación, autorización por rol y comunicación HTTPS. Las credenciales no deben almacenarse en el código fuente.</div></article></div>
+        </section>
+      </main>
+      <footer>FireWatch · Prototipo funcional basado en EP1 · Datos ilustrativos · La estimación no sustituye una alerta oficial ni una instrucción de emergencia.</footer>
+    </div>
+  </div>
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+  <script>
+    (() => {
+      const state = { role: 'viewer', page: 'dashboard', zone: 'valparaiso-city', period: '24h', mapZoom: 1 };
+      const pageLabels = { dashboard: 'Mapa de riesgo', history: 'Historial', access: 'Acceso y roles', console: 'Consola central', data: 'Fuentes y datos', models: 'Modelos y métricas', jobs: 'Procesos', audit: 'Auditoría' };
+      const periodLabels = { '24h': 'próximas 24 horas', '72h': 'próximas 72 horas', '7d': 'próximos 7 días' };
+      const zones = {
+        'valparaiso-city': { name: 'Valparaíso', code: 'Z-01', region: 'VALPARAÍSO', municipality: 'Comuna de Valparaíso', subtitle: 'Cordillera de la Costa', coords: '33,04° S · 71,62° O', risk: 'high', riskLabel: 'Riesgo alto', score: 78, history: '12 registros', factors: [['Viento', '32 km/h', 84, 'high'], ['Humedad', '31%', 72, 'high'], ['Vegetación', 'Media', 55, 'medium']] },
+        vina: { name: 'Viña del Mar', code: 'Z-02', region: 'VALPARAÍSO', municipality: 'Comuna de Viña del Mar', subtitle: 'Litoral central', coords: '33,01° S · 71,55° O', risk: 'medium', riskLabel: 'Riesgo medio', score: 54, history: '8 registros', factors: [['Viento', '24 km/h', 61, 'medium'], ['Humedad', '48%', 44, 'medium'], ['Vegetación', 'Baja', 35, 'low']] },
+        quilpue: { name: 'Quilpué', code: 'Z-03', region: 'VALPARAÍSO', municipality: 'Comuna de Quilpué', subtitle: 'Valle interior', coords: '33,05° S · 71,44° O', risk: 'high', riskLabel: 'Riesgo alto', score: 69, history: '10 registros', factors: [['Viento', '29 km/h', 76, 'high'], ['Humedad', '36%', 63, 'high'], ['Vegetación', 'Alta', 72, 'high']] },
+        casablanca: { name: 'Casablanca', code: 'Z-04', region: 'VALPARAÍSO', municipality: 'Comuna de Casablanca', subtitle: 'Cuenca de Casablanca', coords: '33,32° S · 71,41° O', risk: 'medium', riskLabel: 'Riesgo medio', score: 47, history: '6 registros', factors: [['Viento', '21 km/h', 52, 'medium'], ['Humedad', '51%', 37, 'low'], ['Vegetación', 'Media', 56, 'medium']] },
+        andes: { name: 'Los Andes', code: 'Z-05', region: 'VALPARAÍSO', municipality: 'Comuna de Los Andes', subtitle: 'Precordillera', coords: '32,83° S · 70,60° O', risk: 'low', riskLabel: 'Riesgo bajo', score: 31, history: '4 registros', factors: [['Viento', '14 km/h', 32, 'low'], ['Humedad', '63%', 22, 'low'], ['Vegetación', 'Baja', 29, 'low']] },
+        'san-antonio': { name: 'San Antonio', code: 'Z-06', region: 'VALPARAÍSO', municipality: 'Comuna de San Antonio', subtitle: 'Litoral sur', coords: '33,59° S · 71,61° O', risk: 'medium', riskLabel: 'Riesgo medio', score: 58, history: '9 registros', factors: [['Viento', '27 km/h', 68, 'medium'], ['Humedad', '42%', 49, 'medium'], ['Vegetación', 'Media', 57, 'medium']] },
+        petorca: { name: 'Petorca', code: 'Z-07', region: 'VALPARAÍSO', municipality: 'Comuna de Petorca', subtitle: 'Valle norte', coords: '32,25° S · 70,93° O', risk: 'low', riskLabel: 'Riesgo bajo', score: 28, history: '3 registros', factors: [['Viento', '16 km/h', 38, 'low'], ['Humedad', '58%', 25, 'low'], ['Vegetación', 'Baja', 26, 'low']] }
+      };
+      const experiments = {
+rf: { name: 'Random Forest', version: 'RF-2026.09', meta: 'Modelo operativo · entrenado con validación temporal', status: 'Aprobado', statusClass: '', recall: '0,84', precision: '0,76', auc: '0,81', duration: '04:12', description: 'Buen equilibrio entre sensibilidad y control de falsas alertas. Es la referencia actual para la generación de estimaciones del prototipo.' },
+lr: { name: 'Regresión logística', version: 'LR-2026.09', meta: 'Línea base · entrenamiento interpretable', status: 'En revisión', statusClass: 'warning', recall: '0,71', precision: '0,69', auc: '0,74', duration: '01:46', description: 'Línea base simple para comparar el aporte de nuevas variables y mantener una referencia explicable.' },
+gb: { name: 'Gradient Boosting', version: 'GB-2026.10', meta: 'Candidato · uso eficiente de CPU', status: 'Candidato', statusClass: 'warning', recall: '0,80', precision: '0,74', auc: '0,79', duration: '03:28', description: 'Alternativa para capturar relaciones no lineales. Conviene revisar su sensibilidad al desbalance y calibrar sus puntajes.' },
+extra: { name: 'Extra Trees', version: 'ET-2026.10', meta: 'Exploratorio · conjunto de árboles', status: 'Nuevo', statusClass: 'neutral', recall: '0,82', precision: '0,75', auc: '0,80', duration: '03:51', description: 'Candidato exploratorio compatible con CPU. Requiere completar la validación temporal antes de considerarlo para producción.' }
+      };
+      const datasets = {
+historical: { batch: 'H-2026-08', rows: '1.248', rowsNote: 'filas en el lote activo', quality: '98%', qualityNote: 'sin bloqueos de publicación', columns: '18', columnsNote: 'columnas utilizables', missing: '2,1%', missingNote: 'dentro del umbral recomendado', caption: 'Resumen del histórico de incendios · muestra validada', events: '12%', weather: '31%', wind: '24%', missingHeight: '19%', format: '100%', location: '98%', duplicates: '96%', missingQuality: '91%', missingLabel: 'Requiere imputación menor', previewLabel: 'Etiqueta observada', preview: [['18 ago 2026', 'Valparaíso', '31 °C', '28%', '34 km/h', 'Incendio', 'warning'], ['19 ago 2026', 'Quilpué', '29 °C', '36%', '29 km/h', 'Sin evento', ''], ['20 ago 2026', 'Casablanca', '24 °C', '54%', '18 km/h', 'Sin evento', ''], ['21 ago 2026', 'Viña del Mar', '30 °C', '30%', '31 km/h', 'Incendio', 'warning'], ['22 ago 2026', 'Los Andes', '22 °C', '63%', '14 km/h', 'Sin evento', '']] },
+weather: { batch: 'M-2026-09', rows: '3.820', rowsNote: 'observaciones meteorológicas', quality: '97%', qualityNote: '2 columnas para revisar', columns: '14', columnsNote: 'variables climáticas', missing: '3,4%', missingNote: 'requiere imputación controlada', caption: 'Resumen meteorológico · actualización 08:00', events: '86%', weather: '42%', wind: '36%', missingHeight: '31%', format: '100%', location: '99%', duplicates: '98%', missingQuality: '84%', missingLabel: 'Imputación recomendada', previewLabel: 'Condición', preview: [['15 sep 2026', 'Valparaíso', '27 °C', '34%', '32 km/h', 'Viento alto', 'warning'], ['15 sep 2026', 'Quilpué', '26 °C', '39%', '29 km/h', 'Viento medio', ''], ['15 sep 2026', 'Casablanca', '23 °C', '52%', '21 km/h', 'Condición normal', ''], ['15 sep 2026', 'Viña del Mar', '25 °C', '48%', '24 km/h', 'Condición normal', ''], ['15 sep 2026', 'Los Andes', '21 °C', '61%', '14 km/h', 'Condición normal', '']] },
+territory: { batch: 'T-04', rows: '418', rowsNote: 'unidades territoriales', quality: '93%', qualityNote: '4% requiere revisión', columns: '26', columnsNote: 'características territoriales', missing: '6,8%', missingNote: 'supera el umbral recomendado', caption: 'Resumen territorial · catastro versionado', events: '64%', weather: '18%', wind: '72%', missingHeight: '58%', format: '100%', location: '93%', duplicates: '99%', missingQuality: '76%', missingLabel: 'Revisar antes de entrenar', previewLabel: 'Cobertura', preview: [['Zona Z-01', 'Valparaíso', 'Bosque mixto', '78%', '34,2 ha', 'Completa', ''], ['Zona Z-02', 'Viña del Mar', 'Interfaz urbana', '84%', '21,6 ha', 'Completa', ''], ['Zona Z-03', 'Quilpué', 'Matorral', '69%', '45,1 ha', 'Revisar', 'warning'], ['Zona Z-04', 'Casablanca', 'Cultivo', '91%', '62,8 ha', 'Completa', ''], ['Zona Z-05', 'Los Andes', 'Matorral seco', '63%', '38,4 ha', 'Completa', '']] }
+      };
+    
+      const root = document.documentElement;
+      const shell = document.getElementById('app-shell');
+      const toast = document.getElementById('toast');
+      let toastTimer;
+      const $ = (selector, scope = document) => scope.querySelector(selector);
+      const $$ = (selector, scope = document) => [...scope.querySelectorAll(selector)];
+
+      function notify(message) {
+        toast.textContent = message;
+        toast.classList.add('show');
+        clearTimeout(toastTimer);
+        toastTimer = setTimeout(() => toast.classList.remove('show'), 3200);
+      }
+
+          function selectExperiment(experimentId) {
+            const experiment = experiments[experimentId] || experiments.rf;
+            state.experiment = experimentId;
+            $$('.experiment-card').forEach(card => card.classList.toggle('selected', card.dataset.experiment === experimentId));
+            $('#lab-model-name').textContent = `${experiment.name} · ${experiment.version}`;
+            $('#lab-model-meta').textContent = experiment.meta;
+            $('#lab-model-description').textContent = experiment.description;
+            $('#lab-model-status').textContent = experiment.status;
+            $('#lab-model-status').className = `status-badge ${experiment.statusClass}`.trim();
+            $('#lab-recall').textContent = experiment.recall;
+            $('#lab-precision').textContent = experiment.precision;
+            $('#lab-auc').textContent = experiment.auc;
+            $('#lab-duration').textContent = experiment.duration;
+          }
+
+          function filterPreviewRows() {
+            const query = $('#data-search').value.trim().toLocaleLowerCase();
+            let visible = 0;
+            $$('[data-preview-row]').forEach(row => {
+              const matches = !query || row.dataset.searchText.includes(query);
+              row.hidden = !matches;
+              if (matches) visible += 1;
+            });
+            $('#preview-count').textContent = `${visible} fila${visible === 1 ? '' : 's'} visible${visible === 1 ? '' : 's'}`;
+          }
+
+          function renderDatasetPreview(dataset) {
+            const body = $('#data-preview-body');
+            body.replaceChildren();
+            dataset.preview.forEach(([date, zone, temperature, humidity, wind, label, tone]) => {
+              const row = document.createElement('tr');
+              row.dataset.previewRow = 'true';
+              row.dataset.searchText = [date, zone, temperature, humidity, wind, label].join(' ').toLocaleLowerCase();
+              const dateCell = document.createElement('td');
+              const dateValue = document.createElement('strong');
+              dateValue.textContent = date;
+              dateCell.append(dateValue);
+              const zoneCell = document.createElement('td');
+              zoneCell.textContent = zone;
+              const temperatureCell = document.createElement('td');
+              temperatureCell.textContent = temperature;
+              const humidityCell = document.createElement('td');
+              humidityCell.textContent = humidity;
+              const windCell = document.createElement('td');
+              windCell.textContent = wind;
+              const labelCell = document.createElement('td');
+              const labelTag = document.createElement('span');
+              labelTag.className = `data-tag ${tone}`.trim();
+              labelTag.textContent = label;
+              labelCell.append(labelTag);
+              const statusCell = document.createElement('td');
+              const status = document.createElement('span');
+              status.className = 'status-badge';
+              status.textContent = 'Validado';
+              statusCell.append(status);
+              row.append(dateCell, zoneCell, temperatureCell, humidityCell, windCell, labelCell, statusCell);
+              body.append(row);
+            });
+            $('#preview-label-header').textContent = dataset.previewLabel;
+            $('#preview-batch').textContent = `${dataset.batch} · vista 1–${dataset.preview.length}`;
+            filterPreviewRows();
+          }
+
+          function updateDataset(datasetId) {
+            const dataset = datasets[datasetId] || datasets.historical;
+            state.dataset = datasetId;
+            $('#data-dataset').value = datasetId;
+            $('#data-rows').textContent = dataset.rows;
+            $('#data-rows-note').textContent = dataset.rowsNote;
+            $('#data-quality').textContent = dataset.quality;
+            $('#data-quality-note').textContent = dataset.qualityNote;
+            $('#data-columns').textContent = dataset.columns;
+            $('#data-columns-note').textContent = dataset.columnsNote;
+            $('#data-missing').textContent = dataset.missing;
+            $('#data-missing-note').textContent = dataset.missingNote;
+            $('#data-analysis-caption').textContent = dataset.caption;
+            $('#data-dist-events-value').textContent = dataset.events;
+            $('#data-dist-weather-value').textContent = dataset.weather;
+            $('#data-dist-wind-value').textContent = dataset.wind;
+            $('#data-dist-missing-value').textContent = dataset.missing;
+            $('#data-dist-events').style.height = `${Number.parseFloat(dataset.events.replace(',', '.'))}%`;
+            $('#data-dist-weather').style.height = `${Number.parseFloat(dataset.weather.replace(',', '.'))}%`;
+            $('#data-dist-wind').style.height = `${Number.parseFloat(dataset.wind.replace(',', '.'))}%`;
+            $('#data-dist-missing').style.height = dataset.missingHeight;
+            $('#quality-format').style.width = dataset.format;
+            $('#quality-location').style.width = dataset.location;
+            $('#quality-duplicates').style.width = dataset.duplicates;
+            $('#quality-missing').style.width = dataset.missingQuality;
+            $('#quality-missing-label').textContent = dataset.missingLabel;
+            const readiness = $('#data-readiness-status');
+            const needsReview = datasetId === 'territory';
+            readiness.textContent = needsReview ? 'Revisión requerida' : 'Listo para usar';
+            readiness.className = `status-badge${needsReview ? ' warning' : ''}`;
+            renderDatasetPreview(dataset);
+          }
+
+          function applyRecommendation(recommendationId) {
+            const button = $$('[data-recommendation]').find(item => item.dataset.recommendation === recommendationId);
+            if (!button) return;
+            const item = button.closest('.suggestion');
+            item.classList.add('applied');
+            button.disabled = true;
+            button.textContent = 'Aplicada';
+            notify('Sugerencia incorporada a la configuración del próximo experimento.');
+          }
+
+          function runBenchmark() {
+            const button = $('#run-benchmark');
+            if (state.benchmarking) return;
+            state.benchmarking = true;
+            button.disabled = true;
+            button.textContent = 'Comparando…';
+            notify('Comparativa iniciada: validación temporal sobre 4 alternativas.');
+            window.setTimeout(() => {
+              state.benchmarking = false;
+              button.disabled = false;
+              button.textContent = 'Ejecutar comparativa';
+              notify('Comparativa completada: Random Forest conserva el mejor recall de la muestra.');
+            }, 900);
+          }
+
+          function showPage(page) {
+        const protectedPages = ['console', 'data', 'models', 'jobs', 'audit'];
+        if (protectedPages.includes(page) && state.role !== 'admin') {
+          notify('Esta sección está disponible para el rol Admin. Activa el modo Admin en la barra superior.');
+          return;
+        }
+        state.page = page;
+        $$('[data-screen]').forEach(section => section.classList.toggle('active', section.dataset.screen === page));
+        $$('.nav-link[data-page]').forEach(link => {
+          link.setAttribute('aria-current', link.dataset.page === page ? 'page' : 'false');
+        });
+        $('#breadcrumb-current').textContent = pageLabels[page] || pageLabels.dashboard;
+        $('#sidebar').classList.remove('open');
+        $('#mobile-menu').setAttribute('aria-expanded', 'false');
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+      }
+
+      function updateRole(role) {
+        state.role = role;
+        shell.classList.toggle('role-admin', role === 'admin');
+        $$('[data-role]').forEach(button => button.setAttribute('aria-pressed', String(button.dataset.role === role)));
+        const admin = role === 'admin';
+        $('#side-user-name').textContent = admin ? 'Martín Herrera' : 'Valentina Cruz';
+        $('#side-user-role').textContent = admin ? 'Admin · Gestión' : 'Viewer · Consulta';
+        $('#top-user-name').textContent = admin ? 'Martín Herrera' : 'Valentina Cruz';
+        $('#top-user-role').textContent = admin ? 'Admin' : 'Viewer';
+        if (admin) showPage('console');
+        else if (['console', 'data', 'models', 'jobs', 'audit'].includes(state.page)) showPage('dashboard');
+        notify(admin ? 'Modo Admin activo: se habilitaron las funciones de gestión.' : 'Modo Viewer activo: solo consultas y visualizaciones.');
+      }
+
+      function setSelectedZone(zoneId) {
+        const zone = zones[zoneId] || zones['valparaiso-city'];
+        state.zone = zoneId;
+        $('#zone-filter').value = zoneId;
+        $('#detail-title').textContent = zone.name;
+        $('#detail-subtitle').textContent = `${zone.code} · ${zone.subtitle}`;
+        $('#detail-region').textContent = zone.region;
+        $('#detail-municipality').textContent = zone.municipality;
+        $('#detail-coordinates').textContent = zone.coords;
+        $('#detail-risk-pill').textContent = zone.riskLabel;
+        $('#detail-risk-pill').className = `risk-pill ${zone.risk === 'high' ? '' : zone.risk}`.trim();
+        $('#detail-score').textContent = zone.score;
+        $('#detail-score-bar').style.width = `${zone.score}%`;
+            let scoreGradient = 'linear-gradient(90deg,#90d5b5,#238b67)';
+            if (zone.risk === 'high') scoreGradient = 'linear-gradient(90deg,#f1b263,#d4513f)';
+            else if (zone.risk === 'medium') scoreGradient = 'linear-gradient(90deg,#f3d072,#d18b26)';
+            $('#detail-score-bar').style.background = scoreGradient;
+        $('#detail-history').textContent = zone.history;
+        $('#detail-period').textContent = periodLabels[state.period];
+            const factorList = $('#factor-list');
+            factorList.replaceChildren();
+            zone.factors.forEach(([label, value, width, tone]) => {
+              const row = document.createElement('div');
+              row.className = `factor-line ${tone}`;
+              const labelNode = document.createElement('span');
+              labelNode.textContent = label;
+              const bar = document.createElement('span');
+              bar.className = 'factor-bar';
+              const fill = document.createElement('span');
+              fill.style.width = `${width}%`;
+              bar.append(fill);
+              const valueNode = document.createElement('strong');
+              valueNode.textContent = value;
+              row.append(labelNode, bar, valueNode);
+              factorList.append(row);
+            });
+        $$('.zone-shape').forEach(path => path.classList.toggle('selected', path.dataset.zone === zoneId));
+      }
+
+      function updatePeriod() {
+        state.period = $('#period-filter').value;
+        $('#map-period-label').textContent = periodLabels[state.period];
+        $('#detail-period').textContent = periodLabels[state.period];
+        notify(`Vista actualizada para ${periodLabels[state.period]}.`);
+      }
+
+      function handleAction(action) {
+        const messages = {
+          help: 'La ayuda contextual explicará la lectura del índice, la vigencia y el alcance del sistema.',
+          notifications: 'No hay notificaciones críticas. Todas las fuentes principales están disponibles.',
+          export: 'Resumen preparado para exportar. En la versión productiva se generará un archivo con filtros y trazabilidad.',
+          'export-history': 'Historial listo para descargar como CSV.',
+          'export-audit': 'Registro de auditoría listo para exportar. Los secretos se excluyen del archivo.',
+          layers: 'Las capas territoriales se podrán configurar cuando se conecte el proveedor cartográfico.',
+          locate: 'Mapa centrado en la Región de Valparaíso.',
+          upload: 'Flujo de incorporación iniciado: seleccionar archivo, registrar procedencia y validar antes de publicar.',
+          validation: 'Informe de validación: 1.248 filas procesadas, 96% de calidad global.',
+          train: 'Solicitud de entrenamiento registrada como JOB-ML-2026-10. El proceso se ejecutará en segundo plano.',
+          'model-detail': 'Detalle RF-2026.09: validación temporal, recall 0,84 y AUC-ROC 0,81.',
+          'model-review': 'La versión LR-2026.09 quedó disponible para revisión del administrador.',
+          'refresh-jobs': 'Estados de procesos actualizados. No se detectaron errores nuevos.',
+          'audit-filter': 'Filtro aplicado al registro de auditoría.',
+          'history-filter': 'Historial filtrado con los criterios seleccionados.',
+          'console-export': 'Reporte de consola preparado con métricas, sugerencias y trazabilidad.',
+          'refresh-console': 'Consola actualizada: datos, modelos y procesos están sincronizados.',
+          'new-experiment': 'Nuevo experimento preparado. Selecciona una familia de modelo y configura sus variables.',
+          'compare-selected': 'Comparación preparada contra RF-2026.09 usando la misma partición temporal.',
+          'request-training': 'Entrenamiento solicitado para el modelo seleccionado. Se generará un ID de trabajo.',
+          'download-sample': 'Muestra preparada para descargar en formato CSV.',
+          'inspect-row': 'Fila seleccionada: se conservarían origen, versión y cambios en el detalle de auditoría.'
+        };
+        if (action === 'run-benchmark') {
+          runBenchmark();
+          return;
+        }
+        if (action === 'analyze-data') {
+          updateDataset($('#data-dataset').value);
+          notify('Análisis actualizado: calidad, distribución y reglas de preparación recalculadas.');
+          return;
+        }
+        if (action === 'reset-data-view') {
+          $('#data-search').value = '';
+          updateDataset('historical');
+          notify('Vista de datos restablecida al histórico de incendios.');
+          return;
+        }
+        if (messages[action]) notify(messages[action]);
+      }
+
+      $$('.nav-link[data-page], [data-page]').forEach(button => {
+        button.addEventListener('click', event => {
+          event.preventDefault();
+          showPage(button.dataset.page);
+        });
+      });
+      $$('[data-role]').forEach(button => button.addEventListener('click', () => updateRole(button.dataset.role)));
+      $$('[data-action]').forEach(button => button.addEventListener('click', event => { event.preventDefault(); handleAction(button.dataset.action); }));
+      $('#mobile-menu').addEventListener('click', () => {
+        const open = $('#sidebar').classList.toggle('open');
+        $('#mobile-menu').setAttribute('aria-expanded', String(open));
+      });
+      $('#zone-filter').addEventListener('change', event => setSelectedZone(event.target.value));
+      $('#period-filter').addEventListener('change', updatePeriod);
+      $('#apply-filters').addEventListener('click', () => { setSelectedZone($('#zone-filter').value); updatePeriod(); notify('Filtros aplicados: mostrando el último lote válido.'); });
+      $$('.zone-shape').forEach(path => path.addEventListener('click', () => setSelectedZone(path.dataset.zone)));
+      $$('.map-tool[data-map-layer]').forEach(button => button.addEventListener('click', () => {
+        $$('.map-tool[data-map-layer]').forEach(item => item.setAttribute('aria-pressed', String(item === button)));
+        notify(button.dataset.mapLayer === 'weather' ? 'Capa de condiciones seleccionada. En el backend se asociará al lote meteorológico.' : 'Capa de riesgo estimado seleccionada.');
+      }));
+      $$('[data-map-zoom]').forEach(button => button.addEventListener('click', () => {
+        state.mapZoom = Math.max(.9, Math.min(1.16, state.mapZoom + (button.dataset.mapZoom === 'in' ? .08 : -.08)));
+        $('#risk-map').style.transform = `scale(${state.mapZoom})`;
+        $('#risk-map').style.transformOrigin = '50% 50%';
+      }));
+      $$('.experiment-card').forEach(card => card.addEventListener('click', () => selectExperiment(card.dataset.experiment)));
+      $$('[data-recommendation]').forEach(button => button.addEventListener('click', () => applyRecommendation(button.dataset.recommendation)));
+      $('#data-dataset').addEventListener('change', event => updateDataset(event.target.value));
+      $('#data-search').addEventListener('input', filterPreviewRows);
+      $('#login-form').addEventListener('submit', event => { event.preventDefault(); notify('Acceso de demostración correcto. Se mantiene el rol seleccionado en la barra superior.'); showPage('dashboard'); });
+      selectExperiment('rf');
+      updateDataset('historical');
+      setSelectedZone(state.zone);
+    })();
+  </script>
+</body>
+</html>
