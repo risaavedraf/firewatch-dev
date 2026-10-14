@@ -158,7 +158,7 @@ test('synthetic warning independent of notice; unknown factor never displays zer
   assert.doesNotMatch(h.node('risk-factors').children[0].textContent, /0/);
 });
 
-const realCatalogue = JSON.parse(fs.readFileSync(`${__dirname}/../../backend/contracts/gen/geo/valparaiso-comunas.geojson`, 'utf8'));
+const realCatalogue = JSON.parse(fs.readFileSync(`${__dirname}/../../../backend/contracts/gen/geo/valparaiso-comunas.geojson`, 'utf8'));
 const apiCatalogue = {type: 'FeatureCollection', features: realCatalogue.features.map(f => ({geometry: f.geometry, properties: {code: f.properties.CUT_COM, name: f.properties.COMUNA, province: f.properties.PROVINCIA}}))};
 test('38 real polygons, both island frames, click/Enter/Space select catalogue identities', async () => {
   const h = harness(apiCatalogue);
@@ -1083,7 +1083,7 @@ test('the permissions matrix documents the real server guards and marks what it 
       assert.ok(GUARD_LINES[ref], `uncited or unknown guard reference: ${ref}`);
       cited.add(ref);
       const [file, line] = ref.split(':');
-      const lines = fs.readFileSync(`${__dirname}/../../${file}`, 'utf8').split('\n');
+      const lines = fs.readFileSync(`${__dirname}/../../../${file}`, 'utf8').split('\n');
       assert.match(lines[Number(line) - 1] ?? '', GUARD_LINES[ref], `${ref} does not hold the guard it claims`);
     }
   }

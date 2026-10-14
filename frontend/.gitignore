@@ -1,0 +1,3 @@
+# Vite build output. The served artifact is produced by `npm run build`; the
+# repository never tracks it.
+dist/

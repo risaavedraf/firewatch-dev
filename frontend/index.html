@@ -1,158 +1,17 @@
 <!doctype html>
 <html lang="es">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="theme-color" content="#173c3b">
-  <title>FireWatch | Centro de monitoreo</title>
-  <meta name="description" content="Panel FireWatch conectado a la API de demostración. Entrada sintética clasificada por una regla académica propia, declarada no oficial.">
-  <link rel="stylesheet" href="/proposal.css">
-  <script src="/proposal.js" defer></script>
-</head>
-<body>
-  <a class="skip-link" href="#content">Saltar al contenido</a>
-  <div class="demo-strip"><strong>ENTORNO DE DEMOSTRACIÓN</strong><span>Entrada sintética · No riesgo real observado · Clasificación por regla propia no oficial · Sin uso operativo</span></div>
-  <div class="app-shell">
-    <aside class="sidebar">
-      <a class="brand" href="#overview" aria-label="FireWatch, inicio"><span class="brand-mark" aria-hidden="true">F</span><span><strong>FireWatch</strong><small>Prevención territorial</small></span></a>
-      <div class="workspace"><span class="workspace-mark" aria-hidden="true">V</span><div>Valparaíso<small>Ámbito regional</small></div><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m12 3 10 5-10 5L2 8l10-5Zm-10 9 10 5 10-5M2 16l10 5 10-5"/></svg></div>
-      <nav aria-label="Navegación principal">
-        <p class="nav-group">Prevención</p>
-        <a class="nav-link is-active" id="nav-overview" href="#overview" aria-current="true"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m3 5 6-2 6 2 6-2v16l-6 2-6-2-6 2V5Zm6-2v16m6-14v16"/></svg><span>Territorio</span></a>
-        <a class="nav-link" id="nav-history" href="#history"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 11a9 9 0 1 1 2 7M3 4v7h7m2-5v6l4 2"/></svg><span>Historial de lotes</span></a>
-        <p class="nav-group">Información</p>
-        <a class="nav-link" id="nav-sources" href="#sources"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m12 3 10 5-10 5L2 8l10-5Zm-10 9 10 5 10-5M2 16l10 5 10-5"/></svg><span>Fuentes y calidad</span></a>
-        <a class="nav-link" id="nav-pipeline" href="#pipeline"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 12 4 4L19 6"/></svg><span>Servicios dependientes</span></a>
-        <a class="nav-link" id="nav-jobs" href="#jobs"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 12h5l3-8 4 16 3-8h5"/></svg><span>Procesamiento</span></a>
-        <p class="nav-group">Acceso</p>
-        <a class="nav-link" id="nav-session" href="#session"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5" y="10" width="14" height="11" rx="2"/><path d="M8 10V6a4 4 0 0 1 8 0v4m-4 5v2"/></svg><span>Sesión y permisos</span></a>
-        <p class="nav-group">Coordinación</p>
-        <a class="nav-link" id="nav-audit" href="#audit"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="4" width="16" height="17" rx="2"/><path d="M8 9h8M8 13h8M8 17h5"/></svg><span>Registro de actividad</span></a>
-        <a class="nav-link" id="nav-permissions" href="#permissions"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l7 3v6c0 4.4-3 7.6-7 9-4-1.4-7-4.6-7-9V6l7-3Z"/><path d="M9 12l2 2 4-4"/></svg><span>Perfiles y permisos</span></a>
-      </nav>
-      <div class="sidebar-bottom">
-        <section class="health-card" aria-labelledby="health-title"><div class="health-head"><strong id="health-title">Gateway</strong><span class="health-dot" aria-hidden="true"></span></div><p id="readiness-status" role="status" aria-live="polite">Consultando disponibilidad del gateway…</p><button id="readiness-refresh" class="side-action" type="button">Actualizar estado</button></section>
-        <div class="session-card"><span class="session-mark" aria-hidden="true">●</span><div><strong id="session-state">Sin conexión</strong><small id="session-detail">Token requerido para consultar</small></div><button id="logout" type="button" hidden>Cerrar sesión</button></div>
-      </div>
-    </aside>
-
-    <div class="main-area">
-      <header class="topbar"><div><span class="breadcrumbs">FireWatch <span>/</span> Monitoreo</span><h1>Centro de monitoreo</h1></div><div class="zone-chip"><span aria-hidden="true">⌖</span><div><small>ZONA</small><strong id="zone-chip-name">Sin zona</strong></div></div></header>
-      <div class="update-bar"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 11a9 9 0 1 1 2 7M3 4v7h7m2-5v6l4 2"/></svg><span>Información revisada: <strong id="update-checked">sin verificar, conecta un token para comprobar los servicios</strong></span></div>
-      <main id="content">
-        <section class="intro-row" id="overview"><div><p class="eyebrow">VISTA TERRITORIAL · VALPARAÍSO</p><h2>Estado de la zona</h2><p class="subheading">Consulta de lote y trazabilidad disponible desde el servicio FireWatch.</p></div><span class="dataset-badge"><i aria-hidden="true"></i> DEMO SINTÉTICA</span></section>
-        <section class="warning-banner" aria-label="Límite de esta demostración"><span class="warning-icon" aria-hidden="true">!</span><p><strong>Entrada de demostración: todavía no hay ingestión de datos reales.</strong> La API clasifica un lote sintético con una regla académica propia, declarada como no oficial y no calibrada contra incendios observados. Esta vista no predice fecha ni lugar, no emite alertas y no sustituye a CONAF ni a SENAPRED.</p></section>
-
-        <section class="metrics-grid metrics-three" aria-label="Resumen real de la sesión">
-          <article class="metric"><div class="metric-top"><span>Zonas analizadas</span><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m3 5 6-2 6 2 6-2v16l-6 2-6-2-6 2V5Zm6-2v16m6-14v16"/></svg></div><strong id="zone-count">—</strong><p>Comunas del catálogo servido por <code>/v1/risk/zones</code>: features reales, no un valor copiado.</p></article>
-          <article class="metric"><div class="metric-top"><span>Lotes en el historial</span><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 11a9 9 0 1 1 2 7M3 4v7h7m2-5v6l4 2"/></svg></div><strong id="metric-batches">—</strong><p>Registros que <code>/v1/risk/history</code> devolvió para la zona seleccionada; sin agregar métricas calculadas.</p></article>
-          <article class="metric metric-attention"><div class="metric-top"><span>Comunas con nivel alto</span><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m12 3 8 3v6c0 5-8 9-8 9s-8-4-8-9V6l8-3Zm-4 9 3 3 5-6"/></svg></div><strong id="metric-high">0</strong><p>Cuenta solo las comunas cuyo último lote ya se leyó en esta sesión: la API responde por zona y no existe endpoint agregado.</p></article>
-        </section>
-
-        <section class="dashboard-grid" aria-label="Estado del riesgo y ubicación">
-          <article class="panel map-panel"><div class="panel-heading"><div><p class="eyebrow">ZONAS ANALIZADAS · REGIÓN DE VALPARAÍSO</p><h3>Vista territorial de las comunas</h3></div><span class="neutral-tag">Proyección esquemática</span></div>
-            <div class="map-toolbar"><label for="zone-select">Zona consultada</label><select id="zone-select" aria-label="Zona a consultar" disabled><option value="">Selecciona una zona analizada</option></select><p class="map-summary"><strong id="map-location">Sin zona seleccionada</strong><span id="map-coordinates">La capa territorial se carga desde /v1/risk/zones al conectar.</span></p></div>
-            <div class="map-stage"><div class="map-viewport"><svg id="map-svg" class="map-svg" role="group" aria-label="Comunas seleccionables: clic, Enter o Espacio" hidden><title id="map-title">Mapa esquemático de las comunas de la Región de Valparaíso</title><desc id="map-desc">Cada comuna se dibuja con una proyección esquemática propia, sin mapa base ni teselas. Cada comuna con un lote publicado conserva su color según el último lote de esa zona, aunque no esté seleccionada; el gris neutro significa que esa comuna no tiene lote publicado.</desc></svg><p id="map-empty" class="map-empty" role="status" aria-live="polite">Conecta un token autorizado para cargar las zonas analizadas.</p></div><aside class="map-insets" id="map-insets" aria-label="Territorios insulares representados en recuadros aparte, fuera de su posición geográfica"></aside></div>
-            <p class="map-inset-note">Los recuadros insulares corresponden a comunas de la región que están lejos del continente, Juan Fernández e Isla de Pascua. Se dibujan aparte, con su propia escala, y NO están posicionados geográficamente respecto del continente.</p>
-            <ul class="map-legend" aria-label="Leyenda de niveles de riesgo"><li><span class="legend-swatch swatch-bajo" aria-hidden="true"></span><span>BAJO</span></li><li><span class="legend-swatch swatch-medio" aria-hidden="true"></span><span>MEDIO</span></li><li><span class="legend-swatch swatch-alto" aria-hidden="true"></span><span>ALTO</span></li><li><span class="legend-swatch swatch-desconocido" aria-hidden="true"></span><span>INFORMACIÓN INSUFICIENTE</span></li><li><span class="legend-swatch swatch-neutral" aria-hidden="true"></span><span>Sin evaluación para esta zona</span></li></ul>
-            <p class="map-legend-note">Cada comuna con un lote publicado conserva su color según el último lote de esa zona, aunque no esté seleccionada; el gris neutro significa que esa comuna no tiene lote publicado. El contorno indica la selección. El color requiere un lote con campos de clasificación válidos; geografía real no significa riesgo observado.</p>
-            <div class="map-source"><p><span class="source-label">ATRIBUCIÓN</span><span id="map-attribution">Subsecretaria de Desarrollo Regional y Administrativo (SUBDERE), Instituto Geografico Militar (IGM) e Instituto Nacional de Estadisticas (INE)</span></p><p><span class="source-label">RESTRICCIÓN</span><span id="map-restriction">las publicaciones y productos derivados de esta cartografia deben ser revisadas y validadas por DIFROL.</span></p><p class="map-caption">Atribución y restricción declaradas por la fuente IDE Chile. Cartografía esquemática para una vista regional: no es un mapa base ni una proyección cartográfica, y no sustituye a la cartografía oficial.</p></div>
-          </article>
-          <article class="panel risk-panel"><div class="panel-heading"><div><p class="eyebrow">ESTADO DEL RIESGO</p><h3>Último lote publicado</h3></div><span class="risk-pill" id="risk-pill">SIN CONSULTAR</span></div>
-            <p id="risk-status" class="status-copy" role="status" aria-live="polite">Conecta un token autorizado para consultar la API.</p>
-            <div class="risk-state"><span class="risk-symbol" aria-hidden="true">—</span><div><strong id="risk-level">Sin datos</strong><small>Clasificación informada por el backend</small></div></div>
-            <dl class="data-list">
-              <div><dt>Código CUT</dt><dd id="zone-code">No informado</dd></div>
-              <div><dt>Comuna</dt><dd id="zone-name">No informado</dd></div>
-              <div><dt>Provincia</dt><dd id="zone-province">No informado</dd></div>
-            </dl>
-            <p id="batch-origin">Sin consultar</p>
-            <p id="batch-notice">Entorno sintético: no riesgo real observado.</p>
-            <p id="batch-validity" role="status" aria-live="polite">Sin consultar</p>
-            <h4>Factores</h4><ul id="risk-factors"></ul>
-            <h4>Justificación</h4><p id="risk-rationale">Sin consultar</p>
-            <h4>Política informada</h4><p id="risk-policy">Sin consultar</p>
-            <dl class="data-list"><div><dt>Estado del dato</dt><dd id="data-status">Sin consultar</dd></div><div><dt>Versión</dt><dd id="model-version">Sin consultar</dd></div><div><dt>Vigencia hasta</dt><dd id="valid-until">Sin consultar</dd></div><div><dt>Identificador</dt><dd id="batch-id">Sin consultar</dd></div></dl><p class="unimplemented-note"><span class="unimplemented">NO IMPLEMENTADO</span> Cobertura por sector: la API no publica un porcentaje de cobertura por comuna, así que esta ficha no lo muestra.</p>
-          </article>
-        </section>
-
-        <section class="lower-grid">
-          <article class="panel history-panel" id="history"><div class="panel-heading"><div><p class="eyebrow">TRAZABILIDAD</p><h3>Historial de lotes</h3></div><span class="count-badge" id="history-count">—</span></div><p class="panel-note">Registros devueltos por <code>/v1/risk/history</code>; sin agregar métricas calculadas.</p><div class="filter-bar"><div class="search-field"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="10" cy="10" r="6"/><path d="m15 15 6 6"/></svg><input id="history-query" type="search" aria-label="Buscar en el historial de la zona" placeholder="Buscar por fecha, estado o lote"></div><label class="filter-label">Estado del dato<select id="history-status-filter" aria-label="Filtrar el historial por estado del dato"><option value="">Todos los estados</option></select></label><span class="result-count" id="history-visible-count">—</span></div><div id="history-state" class="empty-state">Conecta un token para consultar el historial.</div><div class="table-wrap"><table><thead><tr><th>Solicitado</th><th>Estado</th><th>Lote</th></tr></thead><tbody id="history-rows"></tbody></table></div><p class="unimplemented-note"><span class="unimplemented">NO IMPLEMENTADO</span> Historial de todas las zonas: <code>/v1/risk/history</code> exige <code>zone_id</code> y no existe endpoint agregado, así que esta tabla muestra siempre la zona consultada.</p></article>
-          <article class="panel auth-panel" id="session"><div class="panel-heading"><div><p class="eyebrow">ACCESO A LA API</p><h3>Conectar sesión</h3></div><span class="lock-mark" aria-hidden="true">⌑</span></div><p class="panel-note">Inicia sesión en Keycloak. FireWatch nunca solicita ni recibe tu contraseña; la API valida los permisos.</p>
-            <button id="login" class="primary-button" type="button">Iniciar sesión con Keycloak</button><p class="panel-note">El token de acceso permanece solo en memoria mientras esta página está abierta. No se guardan tokens ni se envían cookies.</p><p id="auth-status" class="auth-status" role="status" aria-live="polite"></p>
-          </article>
-        </section>
-
-        <section class="lower-grid" aria-label="Procedencia de fuentes y estado comprobable del pipeline">
-          <article class="panel sources-panel" id="sources" aria-labelledby="sources-title">
-            <div class="panel-heading"><div><p class="eyebrow">PROCEDENCIA GEOGRÁFICA</p><h3 id="sources-title">Fuentes y procedencia</h3></div><span class="neutral-tag" id="sources-badge">SIN CONSULTAR</span></div>
-            <p id="sources-status" class="status-copy" role="status" aria-live="polite">Conecta un token autorizado para consultar la procedencia.</p>
-            <dl class="data-list">
-              <div><dt>Proveedor</dt><dd id="sources-provider">Sin consultar</dd></div>
-              <div><dt>Atribución</dt><dd id="sources-attribution">Sin consultar</dd></div>
-              <div><dt>Restricción</dt><dd id="sources-restriction">Sin consultar</dd></div>
-              <div><dt>Registros de la capa</dt><dd id="sources-record-count">Sin consultar</dd></div>
-              <div><dt>Hash derivado (sha256)</dt><dd id="sources-derived-sha256">Sin consultar</dd></div>
-              <div><dt>Integridad declarada</dt><dd id="sources-integrity">Sin consultar</dd></div>
-              <div><dt>Corte de fuente</dt><dd id="sources-cutoff">Sin consultar</dd></div>
-              <div><dt>Entrada de riesgo</dt><dd id="sources-input">Sin consultar</dd></div>
-            </dl>
-            <p class="unimplemented-note"><span class="unimplemented">NO IMPLEMENTADO</span> Acciones de revisión e incorporación de registros, y hallazgos de calidad: <code>/v1/risk/sources</code> publica la procedencia y la integridad reales, no un catálogo de acciones ni de hallazgos.</p>
-          </article>
-          <article class="panel pipeline-panel" id="pipeline" aria-labelledby="pipeline-title">
-            <div class="panel-heading"><div><p class="eyebrow">ESTADO COMPROBABLE DEL PIPELINE</p><h3 id="pipeline-title">Servicios dependientes</h3></div><span class="neutral-tag" id="pipeline-badge">SIN VERIFICAR</span></div>
-            <p id="pipeline-status" class="status-copy" role="status" aria-live="polite">Conecta un token autorizado para comprobar los servicios.</p>
-            <dl class="data-list compact">
-              <div><dt>Servicio de riesgo</dt><dd id="pipeline-risk">Sin verificar</dd></div>
-              <div><dt>Servicio de trabajos</dt><dd id="pipeline-jobs">Sin verificar</dd></div>
-              <div><dt>Gateway</dt><dd id="pipeline-gateway">La tarjeta "Gateway" solo informa disponibilidad del gateway; un 204 no acredita el pipeline.</dd></div>
-            </dl>
-          </article>
-        </section>
-
-        <section class="panel jobs-panel" id="jobs"><div class="panel-heading"><div><p class="eyebrow">LOTE DE DEMOSTRACIÓN</p><h3>Procesamiento asíncrono</h3></div><span class="admin-tag">ACCIÓN ADMINISTRATIVA</span></div><div class="job-layout"><div><div class="scenario-field"><label for="scenario-select">Escenario sintético</label><select id="scenario-select" aria-label="Escenario sintético a solicitar" disabled><option value="">Sin escenario (fixture analítico heredado)</option></select><p class="panel-note" id="scenario-note">El escenario se elige en esta página. El servidor asigna su instante de evaluación en UTC, una sola vez por trabajo; son perfiles de prueba, no condiciones observadas.</p></div><p class="panel-note">Solicita el procesamiento de la zona seleccionada. Esta operación requiere permisos de administrador y crea únicamente un trabajo sintético.</p><button id="create-job" class="primary-button" type="button" disabled>Solicitar lote de la zona</button></div><div class="job-result"><p class="eyebrow">ESTADO DEL TRABAJO</p><p id="job-status" role="status" aria-live="polite">Disponible al conectar un token. El servidor determina si tienes permiso.</p><dl class="data-list compact"><div><dt>Estado</dt><dd id="job-state">Sin solicitud</dd></div><div><dt>ID del trabajo</dt><dd id="job-id">—</dd></div><div><dt>Solicitado</dt><dd id="job-requested">—</dd></div></dl><button id="refresh-job" class="secondary-button" type="button" disabled>Actualizar estado</button></div></div>
-          <p class="unimplemented-note"><span class="unimplemented">NO IMPLEMENTADO</span> Publicar lote, el avance manual del estado y la reevaluación: no existen como endpoint; el servidor decide y publica por su cuenta, y esta página solo solicita el trabajo y lee el resultado.</p>
-        </section>
-
-        <section class="panel pending-panel" id="pending" aria-labelledby="pending-title">
-          <div class="panel-heading"><div><p class="eyebrow">ALCANCE DE ESTA ENTREGA</p><h3 id="pending-title">Aún no implementado</h3></div><span class="unimplemented" id="pending-badge">NO IMPLEMENTADO</span></div>
-          <p id="pending-status" class="status-copy">Estas capacidades del mockup retirado no tienen respaldo en el backend actual. Declararlas es parte de la entrega: no se simulan y ningún control de esta página las ofrece.</p>
-          <div class="table-wrap"><table><caption class="sr-only">Capacidades sin respaldo en el backend, con su motivo y su ubicación prevista</caption><thead><tr><th>Capacidad</th><th>Por qué no está</th><th>Dónde iría</th></tr></thead><tbody id="pending-rows"></tbody></table></div>
-        </section>
-
-        <section class="panel audit-panel" id="audit" aria-labelledby="audit-title">
-          <div class="panel-heading"><div><p class="eyebrow">COORDINACIÓN</p><h3 id="audit-title">Registro de actividad</h3></div><span class="neutral-tag" id="audit-badge">SIN CONSULTAR</span></div>
-          <p id="audit-status" class="status-copy" role="status" aria-live="polite">Conecta un token autorizado para consultar el registro de actividad.</p>
-          <p class="panel-note">Endpoint de solo administradores. No acepta parámetros: el servicio acota la respuesta por sí mismo (hasta 100 eventos recientes) y esta página no pagina, no filtra ni ordena. Los identificadores son opacos, sin nombre para mostrar.</p>
-          <p id="audit-unimplemented" class="unimplemented-note">Aún no implementado: el mockup retirado mostraba el nombre del perfil, un detalle de texto libre y su propio identificador de evento. <code>/v1/audit</code> no entrega ninguno de esos datos, así que no se muestran ni se simulan.</p>
-          <div class="table-wrap" id="audit-table" hidden>
-            <table><caption class="sr-only">Registro de actividad devuelto por /v1/audit</caption>
-              <thead><tr><th>Actor (actor_id)</th><th>Acción</th><th>Trabajo (job_id)</th><th>Traza (trace_id)</th><th>Ocurrido (occurred_at)</th></tr></thead>
-              <tbody id="audit-rows"></tbody>
-            </table>
-          </div>
-          <div class="audit-foot"><span class="count-badge" id="audit-count">—</span><button id="audit-refresh" class="secondary-button" type="button" disabled>Actualizar registro</button></div>
-        </section>
-        <section class="panel access-panel permissions-panel" id="permissions" aria-labelledby="permissions-title">
-          <div class="panel-heading"><div><p class="eyebrow">COORDINACIÓN</p><h3 id="permissions-title">Perfiles y permisos</h3></div><span class="neutral-tag" id="session-roles-badge">SIN SESIÓN</span></div>
-          <p id="session-roles-status" class="status-copy" role="status" aria-live="polite">Sin token en memoria: el rol declarado por la sesión no está disponible; conecta una sesión para leerlo.</p>
-          <dl class="data-list compact">
-            <div><dt>Roles declarados por el token</dt><dd id="session-roles">No disponible</dd></div>
-          </dl>
-          <p id="session-role-note" class="panel-note">El rol se lee del claim <code>realm_access.roles</code> del token de acceso, que es la única fuente real: el gateway solo publica riesgo, trabajos y auditoría, así que no existe un endpoint de identidad al que preguntar. La página decodifica el payload y <strong>no verifica su firma</strong>; por eso el valor es un dato informativo sobre el token y no una autorización. Quien decide es el servidor, que sí verifica la firma: concede el riesgo con <code>viewer</code> o <code>admin</code> y las acciones de trabajo solo con <code>admin</code>.</p>
-          <h4>Matriz de perfiles y permisos</h4>
-          <p id="permissions-matrix-note" class="panel-note">Documentación verificada contra las guardas reales del servidor, no contra lo que la interfaz promete. Cada fila cita la guarda por <code>ruta:línea</code>: <code>backend/services/risk/internal/handler/security.go:43</code> acepta <code>viewer</code> o <code>admin</code> y <code>backend/services/jobs/internal/handler/security.go:44</code> acepta solo <code>admin</code>, con <code>api.go:89</code> y <code>api.go:160</code> envolviendo sus mux completos. Un token verificado sin ninguno de esos roles recibe 403; un token que no se puede verificar recibe 401.</p>
-          <div class="table-wrap">
-            <table><caption class="sr-only">Matriz documentada de perfiles y permisos, con la guarda real del servidor que la sustenta</caption>
-              <thead><tr><th>Capacidad</th><th>viewer</th><th>admin</th><th>Guarda verificada (ruta:línea)</th></tr></thead>
-              <tbody id="permissions-rows"></tbody>
-            </table>
-          </div>
-          <p id="permissions-unimplemented" class="unimplemented-note">No portado a propósito: el mockup retirado permitía <em>elegir</em> un rol en la página. Ese selector no se implementa porque la página no puede conceder permisos y un selector sería un límite de autorización falso. Tampoco hay selector, conmutador ni preferencia de rol en ninguna parte de esta vista: el rol mostrado es el que el token declara y no altera ninguna petición, panel ni decisión.</p>
-        </section>
-        <footer><span>FireWatch · Demostración técnica · La API no realiza predicciones ni recomendaciones operativas.</span><button id="reset-filters" type="button"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 10a8 8 0 1 1 1 8M4 3v7h7"/></svg>Restablecer filtros</button></footer>
-      </main>
-    </div>
-  </div>
-</body>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#173c3b" />
+    <title>FireWatch | Centro de monitoreo</title>
+    <meta
+      name="description"
+      content="Centro de monitoreo FireWatch: estado del riesgo por comuna, historial de lotes, procedencia de fuentes y registro de actividad de la API FireWatch."
+    />
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
 </html>
