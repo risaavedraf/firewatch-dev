@@ -139,6 +139,8 @@ Formato para registrar una entrega:
 
 Antes de cerrar trabajo documental, comprueba que cada documento nuevo tenga carpeta, enlace válido, estado y faltantes explícitos en este índice.
 
+**Convenciones de PR:** este repositorio usa rama más descripción, sin flujo issue-first, sin etiquetas `type:*` y sin plantilla de PR. La decisión y su evidencia están en [`../PR-CONVENTIONS.md`](../PR-CONVENTIONS.md).
+
 ### Rutas antiguas que siguen apareciendo
 
 La organización física está completa: cada documento vive en su área y este índice apunta a la ruta nueva. Las referencias que todavía muestran rutas antiguas están en `odd/urgent/README.md` (superficie de la sesión backend) y en entradas de Log históricas, que no se reescriben por decisión del repositorio. La tabla de abajo resuelve la navegación.
