@@ -230,6 +230,23 @@ test('a shape that fails its guard is malformed and never a partial value', asyn
   expect(expectFailure(await statusRead).kind).toBe('malformed');
 });
 
+test.each([
+  ['missing', undefined],
+  ['malformed', {}],
+])('latest and history retain a batch with %s notice for the mandatory warning', async (_label, notice) => {
+  const { fetchStub } = await connectedSession();
+  const incoming = { ...batch(), notice };
+  const latestRead = latest('05101');
+  await flush();
+  fetchStub.answer(`${gatewayOrigin}/v1/risk/latest?zone_id=05101`, incoming);
+  expect(await latestRead).toEqual({ ok: true, data: incoming });
+
+  const historyRead = history('05101');
+  await flush();
+  fetchStub.answer(`${gatewayOrigin}/v1/risk/history?zone_id=05101`, [incoming]);
+  expect(await historyRead).toEqual({ ok: true, data: [incoming] });
+});
+
 test('malformed JSON is reported as malformed, never as a value', async () => {
   const { fetchStub } = await connectedSession();
   const outcome = zones();

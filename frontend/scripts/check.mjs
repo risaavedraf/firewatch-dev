@@ -22,7 +22,7 @@ import console from 'node:console';
 // covered by the Vitest suites instead, not asserted here.
 
 const root = fileURLToPath(new URL('../', import.meta.url));
-const IGNORED_DIRECTORIES = new Set(['node_modules', 'dist', 'legacy', 'coverage', '.git']);
+const IGNORED_DIRECTORIES = new Set(['node_modules', 'dist', 'coverage', '.git']);
 
 async function filesIn(directory) {
   const entries = await readdir(directory, { withFileTypes: true });

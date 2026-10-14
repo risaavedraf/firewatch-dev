@@ -466,6 +466,20 @@ test('synthetic warning independent of notice; unknown factor never displays zer
   expect(element('risk-factors').children[0].textContent).not.toMatch(/0/);
 });
 
+test.each([
+  ['missing', undefined],
+  ['malformed', {}],
+])('demo mandatory warning with %s notice', async (_label, notice) => {
+  await openSignedIn();
+  await serveCatalogue(catalogue([feature('05101', 'Valparaíso')]));
+  const incoming = { ...batch('05101'), notice };
+  await serveZone('05101', incoming, 200, [incoming]);
+  expect(textOf('batch-origin')).toMatch(/Sintético/);
+  expect(textOf('batch-notice')).toMatch(/no riesgo real observado/);
+  expect(textOf('batch-notice')).toMatch(/ausente o inválido/);
+  expect(textOf('batch-notice')).not.toContain('[object Object]');
+});
+
 test('factor bars use the real contribution and a factor without data draws no bar', async () => {
   await openSignedIn();
   await serveCatalogue(catalogue([feature('05101', 'Valparaíso')]));

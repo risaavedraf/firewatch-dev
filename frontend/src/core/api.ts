@@ -288,7 +288,8 @@ function isRiskBatch(value: unknown): value is RiskBatch {
   if (!Array.isArray(value.factors) || !value.factors.every(isFactor)) return false;
   if (typeof value.rationale !== 'string') return false;
   if (!isPolicy(value.policy)) return false;
-  if (typeof value.notice !== 'string') return false;
+  // The warning is mandatory even when the upstream notice is absent or unreadable.
+  // The view renders a fixed fallback; no malformed notice becomes visible text.
   if (value.geometry !== undefined && !isGeometry(value.geometry)) return false;
   if (!optionalString(value.published_at) || !optionalString(value.valid_until) || !optionalString(value.requested_at)) return false;
   if (!optionalString(value.model_version) || !optionalString(value.data_status)) return false;
