@@ -1205,11 +1205,27 @@
     setText("risk-rationale", nonempty(batch.rationale) ? batch.rationale : "Justificación ausente o inválida");
     const factors = document.getElementById("risk-factors");
     factors.replaceChildren();
+    // Every factor the batch carries comes with a real `contribution`, so the bar
+    // is a real proportion and never an invention: each known factor is drawn
+    // against the largest contribution of THIS batch, and a factor the API did
+    // not measure gets no bar at all instead of a zero drawn as a measurement.
+    const measured = presentation.factors
+      .filter((factor) => factor.known === true && Number.isFinite(factor.contribution))
+      .map((factor) => factor.contribution);
+    const largest = measured.length > 0 ? Math.max(...measured) : 0;
     for (const factor of presentation.factors) {
       const item = document.createElement("li");
       item.textContent = factor.known
         ? `${factor.name}: ${factor.value} · contribución ${factor.contribution} · ${factor.note}`
         : `${factor.name}: desconocido · ${factor.note}`;
+      if (factor.known === true && largest > 0) {
+        const track = document.createElement("div");
+        track.setAttribute("class", "factor-track");
+        const fill = document.createElement("span");
+        fill.setAttribute("style", `width:${Math.round((factor.contribution / largest) * 100)}%`);
+        track.append(fill);
+        item.append(track);
+      }
       factors.append(item);
     }
     if (presentation.omissions.includes("factores")) {
