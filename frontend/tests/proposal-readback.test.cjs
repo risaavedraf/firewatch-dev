@@ -840,3 +840,97 @@ test('history search and status filter narrow only the rows already returned for
   assert.equal(h.node('history-visible-count').textContent, '2 de 2');
   assert.equal(h.node('history-query').value, '', 'the reset control clears the query it owns');
 });
+
+// T6 — the activity register. `/v1/audit` is admin-only, accepts NO query
+// parameter and the service bounds the answer itself, so the panel renders
+// exactly the five fields it carries (`actor_id`, `action`, `job_id`,
+// `trace_id`, `occurred_at`) and labels the retired mockup's missing columns as
+// not implemented instead of inventing a display name, a detail or a severity.
+test('audit panel reads the parameterless admin endpoint once per session and renders the five real fields verbatim', async () => {
+  const h = harness(); await h.ready();
+  const reads = h.calls.filter(x => x.path.startsWith(`${GATEWAY_ORIGIN}/v1/audit`));
+  assert.equal(reads.length, 1, 'a connected session reads /v1/audit exactly once');
+  assert.equal(reads[0].path, `${GATEWAY_ORIGIN}/v1/audit`, 'the endpoint takes no query parameters');
+  assert.equal(reads[0].options.headers.Authorization, 'Bearer test', 'the read is authenticated');
+  h.answer('/v1/audit', [
+    { actor_id: 'actor-opaco-1', action: 'job.requested', job_id: 'job-1', trace_id: 'trace-1', occurred_at: '2026-01-01T00:00:00Z' },
+    { actor_id: 'actor-opaco-2', action: 'batch.published', job_id: 'job-2', trace_id: 'trace-2', occurred_at: '2026-01-02T00:00:00Z' },
+  ]); await tick();
+  assert.equal(h.node('audit-rows').children.length, 2, 'one row per returned event');
+  assert.deepEqual(
+    h.node('audit-rows').children[0].children.map(cell => cell.textContent),
+    ['actor-opaco-1', 'job.requested', 'job-1', 'trace-1', '2026-01-01T00:00:00Z'],
+    'every real field is shown verbatim, in its own cell');
+  assert.equal(h.node('audit-count').textContent, '2', 'the badge reports the returned length');
+  assert.equal(h.node('audit-badge').textContent, 'LEÍDO');
+  assert.equal(h.node('audit-table').hasAttribute('hidden'), false, 'a non-empty register shows its table');
+  assert.ok(h.node('audit-status').classes.has('risk-good'));
+  // Nothing the endpoint does not provide is rendered: no severity, no display
+  // name, no Spanish gloss of the action enum.
+  const status = h.node('audit-status').textContent;
+  assert.doesNotMatch(status, /severidad|nombre para mostrar|riesgo/i);
+});
+
+test('audit 403 renders an explicit admin-only reason instead of hiding the panel', async () => {
+  const h = harness(); await h.ready();
+  h.answer('/v1/audit', { code: 'forbidden', request_id: 'req-9' }, 403); await tick();
+  const status = h.node('audit-status').textContent;
+  assert.equal(h.node('audit-badge').textContent, 'SIN PERMISO');
+  assert.match(status, /403/);
+  assert.match(status, /administrador/i);
+  assert.match(status, /forbidden/);
+  assert.match(status, /req-9/);
+  assert.equal(h.node('audit-rows').children.length, 0);
+  assert.equal(h.node('audit-table').hasAttribute('hidden'), true, 'a denied read shows no event table');
+  assert.equal(h.node('audit-count').textContent, '\u2014');
+  assert.ok(!h.node('audit-status').classes.has('risk-good'));
+});
+
+test('audit payload fails closed unless every entry states an action and a time, and an omitted identifier is labelled in place', async () => {
+  const notArray = harness(); await notArray.ready();
+  notArray.answer('/v1/audit', { code: 'unexpected' }); await tick();
+  assert.equal(notArray.node('audit-badge').textContent, 'NO DISPONIBLE');
+  assert.match(notArray.node('audit-status').textContent, /unexpected/);
+  assert.equal(notArray.node('audit-rows').children.length, 0);
+  assert.equal(notArray.node('audit-table').hasAttribute('hidden'), true);
+
+  const incomplete = harness(); await incomplete.ready();
+  incomplete.answer('/v1/audit', [{ actor_id: 'a', job_id: 'j', trace_id: 't' }]); await tick();
+  assert.equal(incomplete.node('audit-badge').textContent, 'NO DISPONIBLE');
+  assert.equal(incomplete.node('audit-rows').children.length, 0, 'an entry without action or occurred_at is not an event and nothing is invented');
+
+  const partial = harness(); await partial.ready();
+  partial.answer('/v1/audit', [{ actor_id: 'a', action: 'cualquier.valor', job_id: 'j', trace_id: '', occurred_at: '2026-01-01T00:00:00Z' }]); await tick();
+  assert.deepEqual(
+    partial.node('audit-rows').children[0].children.map(cell => cell.textContent),
+    ['a', 'cualquier.valor', 'j', 'No informado', '2026-01-01T00:00:00Z'],
+    'an action outside the documented enum is shown verbatim and an omitted identifier is labelled, never filled in');
+});
+
+test('logout clears the audit panel, a fenced reply cannot repaint it, and the manual refresh re-reads the same endpoint', async () => {
+  const h = harness(); await h.ready();
+  // The initial read is in flight: the control is disabled until it settles, so
+  // an answer can never land after a newer one.
+  assert.equal(h.node('audit-refresh').disabled, true);
+  h.answer('/v1/audit', [{ actor_id: 'a', action: 'job.requested', job_id: 'j', trace_id: 't', occurred_at: '2026-01-01T00:00:00Z' }]); await tick();
+  assert.equal(h.node('audit-rows').children.length, 1);
+  assert.equal(h.node('audit-refresh').disabled, false, 'a settled register leaves the refresh control available');
+
+  h.node('audit-refresh').listeners.click(); await tick();
+  assert.equal(h.calls.filter(x => x.path === `${GATEWAY_ORIGIN}/v1/audit`).length, 2, 'the refresh re-reads the same parameterless endpoint');
+  assert.equal(h.node('audit-badge').textContent, 'CONSULTANDO');
+  h.answer('/v1/audit', []); await tick();
+  assert.equal(h.node('audit-count').textContent, '0', 'an empty register is a real zero');
+  assert.equal(h.node('audit-rows').children.length, 0);
+
+  // Close the session with a read in flight: the late reply owns nothing.
+  h.node('audit-refresh').listeners.click(); await tick();
+  h.node('logout').listeners.click(); await tick();
+  assert.equal(h.node('audit-refresh').disabled, true, 'a closed session cannot re-read the register');
+  h.answer('/v1/audit', [{ actor_id: 'late', action: 'batch.published', job_id: 'j', trace_id: 't', occurred_at: '2026-01-03T00:00:00Z' }]); await tick();
+  assert.equal(h.node('audit-rows').children.length, 0, 'a fenced reply must not repaint the closed panel');
+  assert.equal(h.node('audit-badge').textContent, 'SIN CONSULTAR');
+  assert.equal(h.node('audit-count').textContent, '\u2014');
+  assert.equal(h.node('audit-table').hasAttribute('hidden'), true);
+  assert.equal(h.node('audit-status').textContent, 'Conecta un token autorizado para consultar el registro de actividad.');
+});
