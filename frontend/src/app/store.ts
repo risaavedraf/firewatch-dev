@@ -62,6 +62,50 @@ export function clearZoneState(): void {
   emit();
 }
 
+// ── History filters ───────────────────────────────────────────────────────
+// The history view's two client-side filters. They narrow rows the API already
+// returned, so they are view state — but they live here because the footer's
+// "Restablecer filtros" control belongs to the shell, and the control and the
+// view have to agree on what a reset means. The snapshot object is cached so
+// `useSyncExternalStore` sees a stable reference between changes.
+let historyQuery = '';
+let historyStatus = '';
+let historyFilters = { query: '', status: '' };
+
+function publishHistoryFilters(): void {
+  historyFilters = { query: historyQuery, status: historyStatus };
+  emit();
+}
+
+export function getHistoryFilters(): { query: string; status: string } {
+  return historyFilters;
+}
+
+export function setHistoryQuery(query: string): void {
+  if (query === historyQuery) return;
+  historyQuery = query;
+  publishHistoryFilters();
+}
+
+export function setHistoryStatus(status: string): void {
+  if (status === historyStatus) return;
+  historyStatus = status;
+  publishHistoryFilters();
+}
+
+// What the footer control does: clear both filters. A no-op when they are already
+// clear, so a reset does not wake every view for nothing.
+export function resetHistoryFilters(): void {
+  if (historyQuery === '' && historyStatus === '') return;
+  historyQuery = '';
+  historyStatus = '';
+  publishHistoryFilters();
+}
+
+export function useHistoryFilters(): { query: string; status: string } {
+  return useSyncExternalStore(subscribeZoneState, getHistoryFilters, getHistoryFilters);
+}
+
 export function useSelectedZone(): string {
   return useSyncExternalStore(subscribeZoneState, getSelectedZone, getSelectedZone);
 }
@@ -82,6 +126,11 @@ export function bindZoneStateToSession(): () => void {
     // Any state other than an established session means the private view is
     // empty: without a token there is no zone the page is describing, and the
     // previous session's colours must not survive on screen.
-    if (getSessionSnapshot().status !== 'signed-in') clearZoneState();
+    if (getSessionSnapshot().status !== 'signed-in') {
+      clearZoneState();
+      // A filter is part of the private view too: a sign-out must not leave a
+      // search term or a status narrowing the next session's rows.
+      resetHistoryFilters();
+    }
   });
 }
