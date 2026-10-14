@@ -292,6 +292,17 @@ td:last-child { overflow-wrap: anywhere; }
    widening the table, and are never truncated for display. */
 #audit-rows td { overflow-wrap: anywhere; }
 
+/* ── Profiles and permissions ──────────────────────────────────────────── */
+/* The role row is a fact read from the token, so it is set apart from the
+   surrounding prose and never rendered as a control. */
+.permissions-panel #session-roles { max-width: 100%; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 10px; letter-spacing: .02em; text-align: left; }
+.permissions-panel #session-roles-badge { font-variant-numeric: tabular-nums; }
+/* The guard column carries `path:line` citations: they wrap inside their own
+   cell so a long path never widens the table. */
+.permissions-panel table { min-width: 520px; }
+.permissions-panel td:last-child { color: var(--muted); font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 8px; overflow-wrap: anywhere; }
+.permissions-panel td:first-child { font-weight: 700; }
+
 /* ── Filters ────────────────────────────────────────────────────────────── */
 .filter-bar { display: flex; align-items: center; flex-wrap: wrap; gap: 13px; padding: 0 0 14px; }
 .search-field { position: relative; display: flex; align-items: center; flex: 1; min-width: 200px; max-width: 340px; }

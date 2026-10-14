@@ -588,6 +588,7 @@
     document.getElementById("session-state").textContent = "Sin conexión";
     document.getElementById("session-detail").textContent = "Token requerido para consultar";
     document.getElementById("logout").hidden = true;
+    renderSessionRole();
     document.getElementById("create-job").disabled = true;
     document.getElementById("refresh-job").disabled = true;
     setText("risk-level", "Sin datos");
@@ -729,6 +730,7 @@
     document.getElementById("logout").hidden = false;
     document.getElementById("create-job").disabled = false;
     document.getElementById("auth-status").textContent = "Consultando endpoints protegidos…";
+    renderSessionRole();
     refreshPipeline();
     const sequence = ++sessionSequence;
     const isCurrent = () => sequence === sessionSequence && accessToken !== "";
@@ -1489,6 +1491,273 @@
     document.getElementById("refresh-job").disabled = false;
   }
 
+  // --- Perfiles y permisos -------------------------------------------------
+  //
+  // Two clearly separated things, and nothing else:
+  //   1. a documentation matrix of which REAL role may do what, documented from
+  //      the actual server-side guards and cited by `path:line`;
+  //   2. the role this session actually presents, decoded from the access token
+  //      payload.
+  //
+  // The retired mockup let the operator PICK a role. That selector is NOT
+  // ported: a page cannot grant a permission, so a selector would be a fake
+  // authorization boundary. The decoded value is a FACT ABOUT THE TOKEN for
+  // display only; the server is the only authority because only the server
+  // verifies the signature.
+  //
+  // The role guards read from the repository, verified line by line:
+  //   backend/services/risk/internal/handler/security.go:42-43  the risk service
+  //     accepts a token whose realm_access.roles contains "viewer" OR "admin".
+  //   backend/services/risk/internal/handler/security.go:48    any other role is
+  //     answered with 403 forbidden (an unverifiable token is 401 instead).
+  //   backend/services/risk/internal/handler/api.go:89          that guard wraps
+  //     the whole risk mux, so it covers every /v1/risk route below.
+  //   backend/services/jobs/internal/handler/security.go:43-44  the jobs service
+  //     accepts ONLY "admin".
+  //   backend/services/jobs/internal/handler/security.go:49    so a verified
+  //     viewer is answered with 403 forbidden there.
+  //   backend/services/jobs/internal/handler/api.go:160          that guard wraps
+  //     the whole jobs mux: jobs status, job creation, job read and /v1/audit.
+  //   backend/services/gateway/internal/handler/gateway.go:39   the gateway only
+  //     proxies /v1/audit to the jobs service; it adds no role of its own.
+  //   backend/services/gateway/internal/handler/gateway.go:74   /health/ready
+  //     answers 204 before any bearer check, so it needs no role at all.
+  //   backend/services/gateway/internal/handler/gateway.go:96-105  the gateway
+  //     does require a verifiable bearer with a subject, but decides no role.
+  // The role-carrying claim is the one the realm mapper emits in ACCESS tokens:
+  // backend/deploy/local/firewatch-realm.json:28 declares `realm_access.roles`,
+  // multivalued, with `access.token.claim: true` and `id.token.claim: false`.
+  const PERMISSION_MATRIX = [
+    {
+      capability: "Disponibilidad del gateway · GET /health/ready",
+      viewer: "Sí: responde 204 sin comprobar token ni rol",
+      admin: "Sí: responde 204 sin comprobar token ni rol",
+      guards: ["backend/services/gateway/internal/handler/gateway.go:74"],
+    },
+    {
+      capability: "Autenticación de cualquier ruta /v1/* · bearer verificado en el gateway",
+      viewer: "Sí: exige un bearer verificable con sujeto; no decide ningún rol",
+      admin: "Sí: exige un bearer verificable con sujeto; no decide ningún rol",
+      guards: ["backend/services/gateway/internal/handler/gateway.go:96", "backend/services/gateway/internal/handler/gateway.go:102"],
+    },
+    {
+      capability: "Consultar el estado del servicio de riesgo · GET /v1/risk/status",
+      viewer: "Sí",
+      admin: "Sí",
+      guards: ["backend/services/risk/internal/handler/api.go:41", "backend/services/risk/internal/handler/security.go:43", "backend/services/risk/internal/handler/api.go:89"],
+    },
+    {
+      capability: "Consultar el último lote de una zona · GET /v1/risk/latest",
+      viewer: "Sí",
+      admin: "Sí",
+      guards: ["backend/services/risk/internal/handler/api.go:80", "backend/services/risk/internal/handler/security.go:43"],
+    },
+    {
+      capability: "Consultar el historial de una zona · GET /v1/risk/history",
+      viewer: "Sí",
+      admin: "Sí",
+      guards: ["backend/services/risk/internal/handler/api.go:81", "backend/services/risk/internal/handler/security.go:43"],
+    },
+    {
+      capability: "Consultar el catálogo de zonas · GET /v1/risk/zones",
+      viewer: "Sí",
+      admin: "Sí",
+      guards: ["backend/services/risk/internal/handler/api.go:82", "backend/services/risk/internal/handler/security.go:43"],
+    },
+    {
+      capability: "Consultar los escenarios sintéticos · GET /v1/risk/synthetic-scenarios",
+      viewer: "Sí",
+      admin: "Sí",
+      guards: ["backend/services/risk/internal/handler/api.go:83", "backend/services/risk/internal/handler/security.go:43"],
+    },
+    {
+      capability: "Consultar la procedencia geográfica · GET /v1/risk/sources",
+      viewer: "Sí",
+      admin: "Sí",
+      guards: ["backend/services/risk/internal/handler/api.go:88", "backend/services/risk/internal/handler/security.go:43"],
+    },
+    {
+      capability: "Solicitar un lote sintético · POST /v1/jobs",
+      viewer: "No: 403 forbidden",
+      admin: "Sí",
+      guards: ["backend/services/jobs/internal/handler/api.go:52", "backend/services/jobs/internal/handler/security.go:44", "backend/services/jobs/internal/handler/api.go:160"],
+    },
+    {
+      capability: "Consultar un trabajo · GET /v1/jobs/{id}",
+      viewer: "No: 403 forbidden",
+      admin: "Sí",
+      guards: ["backend/services/jobs/internal/handler/api.go:135", "backend/services/jobs/internal/handler/security.go:44"],
+    },
+    {
+      capability: "Consultar el estado del servicio de trabajos · GET /v1/jobs/status",
+      viewer: "No: 403 forbidden",
+      admin: "Sí",
+      guards: ["backend/services/jobs/internal/handler/api.go:51", "backend/services/jobs/internal/handler/security.go:44"],
+    },
+    {
+      capability: "Consultar el registro de actividad · GET /v1/audit",
+      viewer: "No: 403 forbidden",
+      admin: "Sí",
+      guards: ["backend/services/jobs/internal/handler/api.go:152", "backend/services/jobs/internal/handler/security.go:44", "backend/services/gateway/internal/handler/gateway.go:39"],
+    },
+    {
+      capability: "Presentar un tercer rol · cualquier valor que no sea viewer ni admin",
+      viewer: "No: 403 forbidden",
+      admin: "No: 403 forbidden",
+      guards: ["backend/services/risk/internal/handler/security.go:48", "backend/services/jobs/internal/handler/security.go:49"],
+    },
+    {
+      capability: "Rol efectivo que el proveedor de identidad entrega en el token",
+      viewer: "No verificado: depende de la configuración del reino y ningún endpoint lo informa",
+      admin: "No verificado: depende de la configuración del reino y ningún endpoint lo informa",
+      guards: [],
+      note: "No verificado · no hay ruta ni guarda del servidor que consultar; la página solo muestra lo que el token declare",
+    },
+  ];
+
+  function renderPermissionMatrix() {
+    const rows = document.getElementById("permissions-rows");
+    rows.replaceChildren();
+    for (const entry of PERMISSION_MATRIX) {
+      const row = document.createElement("tr");
+      // The guard column is a citation, never prose: `path:line` or an explicit
+      // "No verificado" for the row that cannot be read from the server code.
+      const guard = entry.guards.length > 0 ? entry.guards.join(" · ") : entry.note;
+      for (const value of [entry.capability, entry.viewer, entry.admin, guard]) {
+        const cell = document.createElement("td");
+        cell.textContent = value;
+        row.append(cell);
+      }
+      rows.append(row);
+    }
+  }
+
+  // --- Session role decoded from the token ---------------------------------
+  //
+  // The page holds the access token in memory and never decoded it. That payload
+  // is the ONLY real source of the session role: the gateway proxies exactly
+  // /v1/risk, /v1/jobs and /v1/audit, so there is no whoami/me/profile endpoint
+  // to ask. Reading the payload is DISPLAY ONLY: it never gates, blocks, allows,
+  // hides or alters a request, a panel or a decision, and the page behaves
+  // identically whatever the decoded value says. The server stays the only
+  // authority because it verifies the signature and this page does not.
+  //
+  // This environment denies `atob`, `Buffer` and `TextDecoder`, so base64url and
+  // UTF-8 decoding are implemented here in plain JavaScript.
+  const BASE64URL_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+
+  function decodeBase64URL(value) {
+    if (typeof value !== "string") return null;
+    // Trailing padding is tolerated; an interior or non-URL character is not,
+    // because a payload that does not decode must never be guessed at.
+    const text = value.replace(/=+$/, "");
+    const bytes = [];
+    let accumulator = 0;
+    let bits = 0;
+    for (const character of text) {
+      const index = BASE64URL_ALPHABET.indexOf(character);
+      if (index < 0) return null;
+      accumulator = (accumulator << 6) | index;
+      bits += 6;
+      if (bits >= 8) {
+        bits -= 8;
+        bytes.push((accumulator >> bits) & 0xff);
+        accumulator &= (1 << bits) - 1;
+      }
+    }
+    return bytes;
+  }
+
+  // Strict UTF-8: an overlong, truncated or surrogate sequence is rejected
+  // instead of being turned into replacement characters that would misrepresent
+  // what the token actually declares.
+  function decodeUTF8(bytes) {
+    let text = "";
+    for (let index = 0; index < bytes.length; index += 1) {
+      const byte = bytes[index];
+      let code;
+      if (byte < 0x80) code = byte;
+      else if (byte >= 0xc2 && byte <= 0xdf && index + 1 < bytes.length && (bytes[index + 1] & 0xc0) === 0x80) {
+        code = ((byte & 0x1f) << 6) | (bytes[index + 1] & 0x3f);
+        index += 1;
+      } else if (byte >= 0xe0 && byte <= 0xef && index + 2 < bytes.length &&
+        (bytes[index + 1] & 0xc0) === 0x80 && (bytes[index + 2] & 0xc0) === 0x80) {
+        code = ((byte & 0x0f) << 12) | ((bytes[index + 1] & 0x3f) << 6) | (bytes[index + 2] & 0x3f);
+        index += 2;
+      } else if (byte >= 0xf0 && byte <= 0xf4 && index + 3 < bytes.length &&
+        (bytes[index + 1] & 0xc0) === 0x80 && (bytes[index + 2] & 0xc0) === 0x80 && (bytes[index + 3] & 0xc0) === 0x80) {
+        code = ((byte & 0x07) << 18) | ((bytes[index + 1] & 0x3f) << 12) | ((bytes[index + 2] & 0x3f) << 6) | (bytes[index + 3] & 0x3f);
+        index += 3;
+      } else return null;
+      if (code > 0x10ffff || (code >= 0xd800 && code <= 0xdfff)) return null;
+      if (code > 0xffff) {
+        const shifted = code - 0x10000;
+        text += String.fromCharCode(0xd800 + (shifted >> 10), 0xdc00 + (shifted & 0x3ff));
+      } else text += String.fromCharCode(code);
+    }
+    return text;
+  }
+
+  // Returns the parsed payload, or null when the token is not a three-segment
+  // JWT whose middle segment decodes to JSON. The payload is returned as parsed:
+  // an array or a scalar is still "decodable" and is handled by the role reader.
+  function decodeJWTPayload(token) {
+    if (typeof token !== "string") return null;
+    const parts = token.split(".");
+    if (parts.length !== 3) return null;
+    const bytes = decodeBase64URL(parts[1]);
+    if (bytes === null) return null;
+    const json = decodeUTF8(bytes);
+    if (json === null) return null;
+    try {
+      return JSON.parse(json);
+    } catch {
+      return null;
+    }
+  }
+
+  // The roles the token declares, or null when it declares none usable. No
+  // default, no fallback and no inference: an absent, non-array, empty or
+  // non-string list is "no informado", never "viewer".
+  function sessionRolesFromPayload(payload) {
+    if (!record(payload)) return null;
+    const realmAccess = record(payload.realm_access) ? payload.realm_access : null;
+    if (!realmAccess || !Array.isArray(realmAccess.roles)) return null;
+    const roles = [];
+    for (const role of realmAccess.roles) {
+      if (!nonempty(role)) continue;
+      const name = role.trim();
+      if (!roles.includes(name)) roles.push(name);
+    }
+    return roles.length > 0 ? roles : null;
+  }
+
+  function renderSessionRole() {
+    if (accessToken === "") {
+      setText("session-roles-badge", "SIN SESIÓN");
+      setText("session-roles", "No disponible");
+      setText("session-roles-status", "Sin token en memoria: el rol declarado por la sesión no está disponible; conecta una sesión para leerlo.");
+      return;
+    }
+    const payload = decodeJWTPayload(accessToken);
+    if (payload === null) {
+      setText("session-roles-badge", "NO DISPONIBLE");
+      setText("session-roles", "No disponible");
+      setText("session-roles-status", "El token de acceso en memoria no es un JWT cuyo payload pueda decodificarse, así que el rol de la sesión no está disponible. La página no lo deduce del código HTTP ni de ningún otro dato.");
+      return;
+    }
+    const roles = sessionRolesFromPayload(payload);
+    if (roles === null) {
+      setText("session-roles-badge", "NO INFORMADO");
+      setText("session-roles", "No informado");
+      setText("session-roles-status", "El token de acceso no declara realm_access.roles utilizables (el claim falta, no es un arreglo o viene vacío); el rol de la sesión no está informado y la página no supone ninguno.");
+      return;
+    }
+    setText("session-roles-badge", "TOKEN LEÍDO");
+    setText("session-roles", roles.join(", "));
+    setText("session-roles-status", `El payload del token declara los roles ${roles.join(", ")}. La página decodifica el payload sin verificar la firma: es un dato informativo del token, no una autorización, y el servidor, que sí verifica la firma, sigue siendo la única autoridad.`);
+  }
+
   // The pure helpers are exported for offline verification only. `module` is
   // undefined in the browser, so this branch never runs there, and the DOM
   // wiring below is skipped under Node.
@@ -1622,7 +1891,7 @@
   // the user actually opened keeps the mockup's active marker honest: it follows
   // the clicked link and the fragment the browser opened, issues no request and
   // never claims a section nobody chose.
-  const NAV_LINK_IDS = ["nav-overview", "nav-history", "nav-sources", "nav-pipeline", "nav-jobs", "nav-session", "nav-audit"];
+  const NAV_LINK_IDS = ["nav-overview", "nav-history", "nav-sources", "nav-pipeline", "nav-jobs", "nav-session", "nav-audit", "nav-permissions"];
   function markActiveNav(activeID) {
     for (const id of NAV_LINK_IDS) {
       const link = document.getElementById(id);
@@ -1636,6 +1905,8 @@
   const openedSection = `nav-${window.location.hash.slice(1)}`;
   markActiveNav(NAV_LINK_IDS.includes(openedSection) ? openedSection : NAV_LINK_IDS[0]);
 
+  renderPermissionMatrix();
+  renderSessionRole();
   checkReadiness();
   handleLoginCallback();
 })();
