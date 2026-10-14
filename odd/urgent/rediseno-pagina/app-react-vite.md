@@ -57,9 +57,9 @@ Distribución por área de la página retirada y vista nueva:
 
 **\* Retirados a propósito (2):** `nav-pipeline` y `nav-permissions` eran enlaces de navegación de áreas que la decisión D1 del usuario agrupa. Un enlace tiene un solo `id`, así que la fusión retira esos dos y **conserva** todos los identificadores de contenido de ambas áreas (`pipeline-*` y `session-roles-*` siguen existiendo dentro de su vista agrupada). Es una reducción aprobada, no una pérdida silenciosa.
 
-**Añadidos (3):** `nav-pending` (la entrada que el inventario «Aún no implementado» nunca tuvo), `data-status-notice` y `input-scope-badge` (los dos anclajes del aviso técnico discreto de S15).
+**Añadidos (7):** `nav-pending` (la entrada que el inventario «Aún no implementado» nunca tuvo), `data-status-notice` y `input-scope-badge` (los dos anclajes del aviso técnico discreto de S15) y cuatro ids de título que el primitivo `PanelHeading` emite (`overview-title`, `history-title`, `jobs-title`, `session-title`), porque esas cuatro vistas pasan por el primitivo compartido mientras que en la página retirada solo algunas fichas tenían título con id.
 
-**Cuenta esperada al cerrar N9:** 107 conservados + 3 nuevos = **110**, con los 2 retirados nombrados arriba. Cualquier otro identificador ausente es una pérdida y bloquea el cierre.
+**Cuenta esperada al cerrar N9:** 107 conservados + 7 nuevos = **114** (medido por script sobre `frontend/src/**`, contando `id="…"` y `titleId="…"`, más los siete `nav-<viewId>` que genera `routes.ts`), con los 2 retirados nombrados arriba. Cualquier otro identificador ausente es una pérdida y bloquea el cierre.
 
 ## Log
 
