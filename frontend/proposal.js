@@ -1454,6 +1454,24 @@
 
   document.getElementById("zone-select").addEventListener("change", (event) => selectZone(event.target.value));
 
+  // The sidebar mirrors the page sections as in-page anchors. Marking the link
+  // the user actually opened keeps the mockup's active marker honest: it follows
+  // the clicked link and the fragment the browser opened, issues no request and
+  // never claims a section nobody chose.
+  const NAV_LINK_IDS = ["nav-overview", "nav-history", "nav-sources", "nav-pipeline", "nav-jobs", "nav-session"];
+  function markActiveNav(activeID) {
+    for (const id of NAV_LINK_IDS) {
+      const link = document.getElementById(id);
+      const isActive = id === activeID;
+      link.classList.toggle("is-active", isActive);
+      if (isActive) link.setAttribute("aria-current", "true");
+      else link.removeAttribute("aria-current");
+    }
+  }
+  for (const id of NAV_LINK_IDS) document.getElementById(id).addEventListener("click", () => markActiveNav(id));
+  const openedSection = `nav-${window.location.hash.slice(1)}`;
+  markActiveNav(NAV_LINK_IDS.includes(openedSection) ? openedSection : NAV_LINK_IDS[0]);
+
   checkReadiness();
   handleLoginCallback();
 })();
