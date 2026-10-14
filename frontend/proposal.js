@@ -32,6 +32,11 @@
   // Canonical level of the last published batch for the SELECTED zone. Empty
   // means "no level computed for any zone", which is the honest default.
   let activeLevel = "";
+  // Canonical level remembered for every zone whose latest batch this session has
+  // already read, so the regional map keeps its colours when the selection moves
+  // away instead of greying out every comuna but one. It is filled from the reads
+  // the page already performs (no extra requests) and cleared on logout.
+  let zoneLevels = new Map();
   const zoneShapes = new Map();
   // Monotonic sequence for each zone-scoped request kind. A request captures
   // the value it started with and a response is discarded unless that value is
@@ -378,7 +383,11 @@
       const shape = entry[1];
       shape.classList.remove("zone-neutral", "zone-selected", "level-bajo", "level-medio", "level-alto", "level-desconocido");
       const selected = code === selectedZone;
-      if (selected && activeLevel !== "") shape.classList.add(`level-${activeLevel}`);
+      // The selection's own level comes from the panel's freshly read batch;
+      // every other zone keeps the level the regional fan-out found, so a
+      // published batch does not lose its colour when the selection moves.
+      const level = selected ? activeLevel : zoneLevels.get(code) || "";
+      if (level !== "") shape.classList.add(`level-${level}`);
       else shape.classList.add("zone-neutral");
       shape.setAttribute("aria-pressed", String(selected));
       if (selected) shape.classList.add("zone-selected");
@@ -565,6 +574,9 @@
     selectedZone = "";
     zoneCollection = null;
     activeLevel = "";
+    zoneLevels = new Map();
+    // Repaint before the map is hidden: no colour survives a closed session.
+    applyZoneLevels();
     document.getElementById("session-state").textContent = "Sin conexión";
     document.getElementById("session-detail").textContent = "Token requerido para consultar";
     document.getElementById("logout").hidden = true;
@@ -1110,6 +1122,11 @@
     setText("valid-until", batch.valid_until);
     setText("batch-id", batch.id);
     activeLevel = presentation.valid ? canonicalLevel(batch.risk_level) : "";
+    // Recorded for the region too: once the selection moves on, this zone must
+    // still show the batch it has, or lose the colour if the batch is invalid.
+    if (typeof batch.zone_id === "string" && batch.zone_id !== "") {
+      if (activeLevel === "") zoneLevels.delete(batch.zone_id); else zoneLevels.set(batch.zone_id, activeLevel);
+    }
     applyZoneLevels();
     setText("risk-status", batch.demo === true
       ? "Entradas de demostración sintéticas: no representan riesgo real observado. La publicación no acredita frescura de observaciones. Clasificación por regla propia no oficial."

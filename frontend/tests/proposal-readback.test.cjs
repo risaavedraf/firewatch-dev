@@ -720,3 +720,54 @@ test('logout resets the scenario selector to the legacy-only disabled state', as
   assert.deepEqual(select.children.map(option => option.value), ['']);
   assert.equal(select.value, '');
 });
+
+// Collects every drawn zone shape by its data-zone attribute, whatever the
+// nesting inside the SVG, so a colour claim is checked against the real element.
+function shapesByZone(node) {
+  const found = new Map();
+  const walk = current => {
+    if (!current || typeof current !== 'object') return;
+    if (current['data-zone'] && current.classList) found.set(current['data-zone'], current);
+    for (const child of current.children || []) walk(child);
+  };
+  walk(node);
+  return found;
+}
+
+test('a zone with a published batch keeps its colour after the selection moves away', async () => {
+  const h = harness(); await h.ready();
+  const shapes = () => shapesByZone(h.node('map-svg'));
+
+  await h.select('05102');
+  h.answer('/v1/risk/latest?zone_id=05102', { ...h.batch('05102'), risk_level: 'medio' });
+  h.answer('/v1/risk/history?zone_id=05102', []); await tick();
+  assert.ok(shapes().get('05102').classes.has('level-medio'), '05102 is coloured from its published batch');
+
+  await h.select('05101');
+  h.answer('/v1/risk/latest?zone_id=05101', { ...h.batch('05101'), risk_level: 'alto' });
+  h.answer('/v1/risk/history?zone_id=05101', []); await tick();
+  assert.ok(shapes().get('05101').classes.has('level-alto'), '05101 is coloured from its published batch');
+
+  // The whole point: moving the selection back must NOT grey out 05101, which
+  // still has a published batch. Only the outline marks the selection.
+  await h.select('05102');
+  h.answer('/v1/risk/latest?zone_id=05102', { ...h.batch('05102'), risk_level: 'medio' });
+  h.answer('/v1/risk/history?zone_id=05102', []); await tick();
+  assert.ok(shapes().get('05101').classes.has('level-alto'), 'a deselected zone must keep its colour');
+  assert.ok(shapes().get('05102').classes.has('level-medio'));
+  assert.ok(shapes().get('05102').classes.has('zone-selected'), 'the selection is still shown by the outline');
+});
+
+test('a zone with no published batch stays neutral and logout clears every colour', async () => {
+  const h = harness(); await h.ready();
+  // 404 from latest is absence, not low: the comuna stays grey, never invented.
+  assert.ok(shapesByZone(h.node('map-svg')).get('05101').classes.has('zone-neutral'));
+
+  await h.select('05102');
+  h.answer('/v1/risk/latest?zone_id=05102', { ...h.batch('05102'), risk_level: 'alto' });
+  h.answer('/v1/risk/history?zone_id=05102', []); await tick();
+  assert.ok(shapesByZone(h.node('map-svg')).get('05102').classes.has('level-alto'));
+
+  h.node('logout').listeners.click(); await tick();
+  assert.ok(!shapesByZone(h.node('map-svg')).get('05102').classes.has('level-alto'), 'logout must clear the map colours');
+});
