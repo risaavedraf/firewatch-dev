@@ -42,8 +42,9 @@ This slice contributes **partial synthetic-scope evidence**, not full checklist 
 
 - `DAT-I2`, `DAT-I3`, `DAT-V1`–`DAT-V4`: canonical variables, units, finite values, demonstration domains, explicit absence, and incomplete-acquisition rejection are exercised. Production data ranges and source reliability remain pending.
 - `MET-I1`, `MET-V1`: changing only the synthetic request's zone label leaves classification and rationale unchanged. This does not say real zones have identical conditions.
-- `ROB-I1`: missing, stale, and partial-input scenarios are available. Scientific robustness metrics and team-approved tolerances remain pending; `ROB-V1` and `ROB-V2` are not closed.
-- No directional metamorphic test, trained-model benchmark, fairness metric, drift measurement, load/SLA result, security approval, or Go/No-Go signature is claimed.
+- `MET-I2`, `MET-V2`: with the other four inputs held fixed, the `academic-rule-v1` level is non-decreasing in temperature, wind speed, vegetation cover and historical fire count, and non-increasing in relative humidity, exactly as the rule's own `rising`/`falling` semantics and positive fixed weights document. `backend/services/risk/internal/classify/directional_metamorphic_test.go` pins this structural monotonicity of one frozen deterministic rule version; it is not a property of a trained model and is not evidence about real wildfire risk.
+- `ROB-I1`: missing, stale, and partial-input scenarios are available, and extreme out-of-range finite values are pinned to saturate at the documented bounds without abstention by `backend/services/risk/internal/classify/extreme_inputs_test.go`. Scientific robustness metrics and team-approved tolerances remain pending; the tolerance threshold (`ROB-I2`) and measured degradation (`ROB-V1`, `ROB-V2`) remain open.
+- No trained-model benchmark, fairness metric, drift measurement, load/SLA result, security approval, or Go/No-Go signature is claimed.
 
 ## API workflow and compatibility
 

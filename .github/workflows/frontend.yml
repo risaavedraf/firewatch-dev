@@ -1,0 +1,32 @@
+name: Frontend
+on:
+  pull_request:
+    paths:
+      - 'frontend/**'
+      - '.github/workflows/**'
+  push:
+    paths:
+      - 'frontend/**'
+      - '.github/workflows/**'
+permissions:
+  contents: read
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '24'
+      # The page declares no dependencies and ships no lockfile, so there is no
+      # install step; adding one would only fake a supply chain that does not exist.
+      - name: Readback harness (node --test)
+        run: npm test
+      - name: Loopback smoke (allowlist, CSP, traversal, 720px media query)
+        run: npm run smoke

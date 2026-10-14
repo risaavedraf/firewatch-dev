@@ -8,6 +8,7 @@ on:
       - 'backend/go.work.sum'
       - 'backend/.dockerignore'
       - '.github/workflows/**'
+      - '.gitattributes'
   push:
     paths:
       - 'backend/services/jobs/**'
@@ -16,6 +17,7 @@ on:
       - 'backend/go.work.sum'
       - 'backend/.dockerignore'
       - '.github/workflows/**'
+      - '.gitattributes'
 permissions:
   contents: read
 jobs:

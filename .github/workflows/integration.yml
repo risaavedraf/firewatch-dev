@@ -1,9 +1,9 @@
 name: Backend integration
 on:
   pull_request:
-    paths: ['backend/**', '.github/workflows/**']
+    paths: ['backend/**', '.github/workflows/**', '.gitattributes']
   push:
-    paths: ['backend/**', '.github/workflows/**']
+    paths: ['backend/**', '.github/workflows/**', '.gitattributes']
 permissions:
   contents: read
 jobs:
