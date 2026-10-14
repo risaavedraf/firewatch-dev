@@ -1,10 +1,38 @@
-// Placeholder mount for the scaffolding unit (N2). The shell, the router and the
-// seven views replace this in N3–N4; nothing here is a product decision.
+import { useEffect, type ReactElement } from 'react';
+
+import { useHashRoute } from './app/useHashRoute';
+import { Shell } from './components/Shell';
+import type { ViewId } from './app/routes';
+import { AuditView } from './views/AuditView';
+import { HistoryView } from './views/HistoryView';
+import { JobsView } from './views/JobsView';
+import { OverviewView } from './views/OverviewView';
+import { PendingView } from './views/PendingView';
+import { SessionView } from './views/SessionView';
+import { SourcesView } from './views/SourcesView';
+
+const views: Record<ViewId, () => ReactElement> = {
+  overview: OverviewView,
+  history: HistoryView,
+  sources: SourcesView,
+  jobs: JobsView,
+  session: SessionView,
+  pending: PendingView,
+  audit: AuditView,
+};
+
 export function App() {
+  const route = useHashRoute();
+
+  useEffect(() => {
+    document.title = `${route.title} | FireWatch`;
+  }, [route.title]);
+
+  const View = views[route.id];
+
   return (
-    <main id="content">
-      <h1>FireWatch</h1>
-      <p>Andamiaje React + Vite en construcción.</p>
-    </main>
+    <Shell route={route}>
+      <View />
+    </Shell>
   );
 }

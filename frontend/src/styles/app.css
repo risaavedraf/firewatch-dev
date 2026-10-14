@@ -325,6 +325,13 @@ footer .icon { width: 13px; height: 13px; }
 .toast { position: fixed; right: 24px; bottom: 24px; z-index: 30; max-width: min(440px, calc(100vw - 32px)); padding: 15px 20px; border-radius: 9px; background: var(--forest-900); color: var(--paper); box-shadow: 0 8px 30px rgb(16 44 45 / 19%); font-size: 12px; opacity: 0; transform: translateY(15px); pointer-events: none; transition: opacity .2s, transform .2s; }
 .toast.is-visible { opacity: 1; transform: translateY(0); }
 
+/* Discreet scope notice. The demonstration statement used to be the page's
+   headline strip, above everything and impossible to miss. It is now a small,
+   always-visible link in the update bar that opens the data-status view, where
+   the full declaration lives: the statement stays, the shouting stops. */
+.technical-notice { margin-left: auto; padding: 3px 8px; border: 1px dashed #c8bda0; border-radius: 6px; background: #faf7ee; color: #7d6c3f; font-size: 8px; font-weight: 800; letter-spacing: .06em; white-space: nowrap; }
+.technical-notice:hover { background: #f4efe0; }
+
 /* ── Responsive ────────────────────────────────────────────────────────── */
 @media (max-width: 1200px) {
   .sidebar { width: 208px; padding-inline: 12px; }
