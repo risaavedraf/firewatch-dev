@@ -86,10 +86,11 @@ export interface SourceProvenance {
   code?: string;
 }
 
-// A dependency states its own readiness as a word (`ready`, `degraded`, …); it is
-// never inferred from the enclosing `ready` flag.
+// A dependency states its own readiness under `state` (`ready`, `degraded`, …).
+// It is never inferred from the enclosing `ready` flag, and a missing, null or
+// non-object entry is missing evidence rather than agreement.
 export interface DependencyState {
-  ready?: string;
+  state?: string;
   [key: string]: unknown;
 }
 
@@ -105,7 +106,12 @@ export interface ServiceSnapshot {
   dependencies: {
     database?: DependencyState;
     broker?: DependencyState;
-    dead_letter?: DependencyState & { max_age_seconds?: number; depth?: number | null };
+    dead_letter?: DependencyState & {
+      max_age_seconds?: number;
+      age_seconds?: number;
+      depth?: number | null;
+      max_depth?: number | null;
+    };
   };
 }
 
