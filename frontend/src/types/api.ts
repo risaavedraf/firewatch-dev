@@ -31,7 +31,7 @@ export interface RiskBatch {
   factors: Factor[];
   rationale: string;
   policy: RiskPolicy;
-  notice: string;
+  notice?: unknown;
   geometry?: GeoGeometry;
   published_at?: string;
   valid_until?: string;

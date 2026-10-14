@@ -72,17 +72,15 @@ Convención: `#área` = archivo de la suite nueva.
 | 56 | malformed **demo** refuses correlated completion and severity | idem #54 |
 | 57 | malformed **policy** refuses correlated completion and severity | idem #54 |
 | 58 | malformed **risk_level** refuses correlated completion and severity | idem #54 · `#overview`: *an unreadable batch body renders as explicitly unavailable, never as a plausible level* |
-| 59 | demo mandatory warning with **missing** notice | **Cambio de conducta declarado.** El transporte rechaza un `notice` que no sea texto (`src/core/api.ts:291`), así que un lote sin `notice` se muestra **como no disponible**, no con el aviso obligatorio que la página retirada sí mostraba. La variante alcanzable (`notice: ''`) sí se afirma en `#overview` (*synthetic warning independent of notice; unknown factor never displays zero*), pero una cadena vacía no es lo mismo que un campo ausente. |
-| 60 | demo mandatory warning with **malformed** notice | **Cambio de conducta declarado**, y la cita anterior de este registro era incorrecta: citaba pruebas que no examinan `notice`. El cuerpo con `notice` objeto se rechaza en el borde igual que el ausente, y esa conducta queda fijada explícitamente en `#core` (*a shape that fails its guard is malformed and never a partial value*, caso `notice`). |
+| 59 | demo mandatory warning with **missing** notice | `#core`: *latest and history retain a batch with missing notice for the mandatory warning*; `#overview`: *demo mandatory warning with missing notice* comprueba el lote sintético y el aviso de respaldo. |
+| 60 | demo mandatory warning with **malformed** notice | `#core`: *latest and history retain a batch with malformed notice for the mandatory warning*; `#overview`: *demo mandatory warning with malformed notice* comprueba el lote sintético y el aviso de respaldo sin representar el objeto. |
 
 ## Cierre
 
-- **60/60 filas con hogar verde.** Dos filas (#59 y #60) son un **cambio de conducta declarado**,
-  no una pérdida silenciosa: la página retirada toleraba un `notice` ausente o no textual y
-  mostraba el lote con su aviso obligatorio de demostración; la app rechaza ese lote en el borde y
-  lo muestra como no disponible. La dirección es la fail-closed (un lote cuyo aviso no se puede
-  leer no se presenta como una clasificación creíble), y **el usuario debe aceptarla o rechazarla**:
-  recuperar la paridad significa relajar la guarda del borde para ese campo.
+- **60/60 filas con hogar verde.** Las filas #59 y #60 vuelven a conservar el comportamiento
+  de la página retirada, según la decisión del usuario: el campo `notice` ausente o no textual
+  no descarta un lote válido; la vista siempre incluye el aviso obligatorio de demostración y
+  sustituye únicamente ese campo por «ausente o inválido». El resto de la guarda del lote permanece.
 - **Límite declarado (no corregido, heredado de la página retirada):** durante un ciclo de
   refresco, el panel de servicios conserva la presentación verificada anterior hasta que la nueva
   respuesta se asienta, así que la etiqueta en pantalla puede sobrevivir a su propia cota mientras
