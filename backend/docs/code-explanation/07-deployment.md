@@ -43,17 +43,17 @@ Citas: `services/gateway/cmd/server/main.go:29-49` y ambos main jobs/risk:36-90.
 
 | Archivo / rango | Declaraciones y efecto |
 | --- | --- |
-| [go.work](../../go.work):1-8 | Go 1.26.6 y cuatro módulos; contratos + gateway + jobs + risk. No módulo raíz ejecutable |
-| [gateway/go.mod](../../services/gateway/go.mod):1-10 | firewatch.local/gateway, Go1.26.6, OIDC3.17.0; jose4.1.4/oauth2 indirectos |
+| [go.work](../../go.work):1-8 | Go 1.27.2 y cuatro módulos; contratos + gateway + jobs + risk. No módulo raíz ejecutable |
+| [gateway/go.mod](../../services/gateway/go.mod):1-10 | firewatch.local/gateway, Go1.27.2, OIDC3.17.0; jose4.1.4/oauth2 indirectos |
 | [jobs/go.mod](../../services/jobs/go.mod):1-23; [risk/go.mod](../../services/risk/go.mod):1-23 | Módulos propios; contracts0.0.0, OIDC3.17.0, jose4.1.4, uuid1.6.0, pgx5.9.2, amqp1.13.0; bloque indirecto de soporte; replace local ../../contracts/gen |
-| [contracts/gen/go.mod](../../contracts/gen/go.mod):1-3 | firewatch.local/contracts y Go1.26.6, sin dependencias declaradas |
+| [contracts/gen/go.mod](../../contracts/gen/go.mod):1-3 | firewatch.local/contracts y Go1.27.2, sin dependencias declaradas |
 | [.dockerignore](../../.dockerignore):1-8 | Excluye .env, anidados, bin, coverage.out, go.work*, .git, deploy y docs del contexto; no es escáner universal de secretos ni excluye todo archivo llamado .env.example |
 
 Los go.sum inventariados no se analizaron: no se acredita integridad ni disponibilidad de módulos. La selección automática de toolchain está fuera de la ejecución autorizada.
 
 Los [Dockerfile gateway](../../services/gateway/Dockerfile):1-16, [jobs](../../services/jobs/Dockerfile):1-17 y [risk](../../services/risk/Dockerfile):1-17 usan el mismo patrón:
 
-1. Build desde Go1.26.6-bookworm con digest; WORKDIR de módulo; `GOWORK=off`, `CGO_ENABLED=0` (gateway:1-3; jobs/risk:1-3).
+1. Build desde Go1.27.2-bookworm con digest; WORKDIR de módulo; `GOWORK=off`, `CGO_ENABLED=0` (gateway:1-3; jobs/risk:1-3).
 2. Jobs/risk copian contracts/gen antes de go.mod/go.sum para resolver replace (jobs/risk:4-6). Gateway copia solo su módulo (gateway:4-5). `go mod download && go mod verify` es instrucción de build leída, no ejecutada aquí.
 3. Copian código y compilan `/server` con trimpath y `-s -w` (gateway:6-7; jobs/risk:7-8).
 4. Target `test` hereda build y usa ENTRYPOINT `go test -count=1 ./...` (gateway:9-10; jobs/risk:10-11). No implica tests en la imagen runtime ni ejecución automática al leer Dockerfile.

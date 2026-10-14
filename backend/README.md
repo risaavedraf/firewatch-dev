@@ -4,7 +4,7 @@ Run an authenticated asynchronous workflow with three independently built Go ser
 
 ## Quick start
 
-Requirements: Docker Desktop running Linux containers and Python 3. Go 1.26.6+ is needed only for native development; Go's automatic toolchain selection can download it. Run these commands from `backend/`:
+Requirements: Docker Desktop running Linux containers and Python 3. Go 1.27.2+ is needed only for native development; Go's automatic toolchain selection can download it. Run these commands from `backend/`:
 
 ```sh
 python scripts/init_env.py
