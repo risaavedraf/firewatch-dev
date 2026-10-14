@@ -1148,3 +1148,29 @@ test('every capability without a backend is declared as not implemented and offe
   assert.ok(rows.every(row => row.children.every(cell => cell.children.length === 0)), 'each entry is plain text: no action is offered or simulated');
   assert.match(h.node('pending-badge').textContent, /NO IMPLEMENTADO/i, 'the panel states its own status');
 });
+
+// The batch carries a real `contribution` per factor, so the proportion bar is a
+// real proportion: each known factor is drawn against the largest contribution of
+// THIS batch, and a factor the API did not measure gets no bar at all instead of
+// a zero drawn as if it were a measurement.
+test('factor bars use the real contribution and a factor without data draws no bar', async () => {
+  const h = harness(); await h.ready(); await h.select('05102');
+  const batch = {
+    ...h.batch('05102'),
+    factors: [
+      { name: 'temperatura', known: true, value: 30, contribution: 0.5, note: '' },
+      { name: 'humedad', known: true, value: 10, contribution: 0.25, note: '' },
+      { name: 'viento', known: false, value: 0, contribution: 0, note: 'sin dato' },
+    ],
+  };
+  h.answer('/v1/risk/latest?zone_id=05102', batch);
+  h.answer('/v1/risk/history?zone_id=05102', [batch]);
+  await tick();
+  const items = h.node('risk-factors').children;
+  assert.equal(items.length, 3, 'every valid factor is listed in order');
+  const trackOf = (item) => item.children.find(child => child.attributes.get('class') === 'factor-track');
+  const widthOf = (item) => trackOf(item).children[0].attributes.get('style');
+  assert.equal(widthOf(items[0]), 'width:100%', 'the largest contribution fills the bar');
+  assert.equal(widthOf(items[1]), 'width:50%', 'a quarter against a half is half a bar');
+  assert.equal(trackOf(items[2]), undefined, 'a factor without data draws no bar at all');
+});
