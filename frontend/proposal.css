@@ -368,7 +368,7 @@ footer .icon { width: 13px; height: 13px; }
   .sidebar { position: static; width: auto; height: auto; min-height: 0; padding: 14px 15px 10px; }
   .brand { padding: 0 2px 12px; margin-bottom: 0; }
   .sidebar nav { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-  .nav-label, .health-card { display: none; }
+  .nav-label, .nav-group, .health-card { display: none; }
   .nav-link { justify-content: center; padding: 9px 4px; font-size: 9px; }
   .nav-link .icon { display: none; }
   .nav-marker { display: none; }

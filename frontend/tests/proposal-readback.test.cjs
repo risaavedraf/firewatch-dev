@@ -771,3 +771,19 @@ test('a zone with no published batch stays neutral and logout clears every colou
   h.node('logout').listeners.click(); await tick();
   assert.ok(!shapesByZone(h.node('map-svg')).get('05102').classes.has('level-alto'), 'logout must clear the map colours');
 });
+
+// The sidebar mirrors the page sections as in-page anchors. The active marker is
+// presentation: it must follow the section the user actually opened, never claim
+// a selection nobody made, and add no request of its own.
+test('sidebar marks the section actually opened and marks nothing else', async () => {
+  const h = harness();
+  await h.ready();
+  assert.ok(h.node('nav-overview').classes.has('is-active'), 'the opening section is marked');
+  assert.equal(h.node('nav-overview').attributes.get('aria-current'), 'true');
+  const before = h.calls.length;
+  h.node('nav-history').listeners.click();
+  assert.equal(h.calls.length, before, 'marking a section issues no request');
+  assert.ok(h.node('nav-history').classes.has('is-active'), 'the clicked section is marked');
+  assert.ok(!h.node('nav-overview').classes.has('is-active'), 'only one section stays marked');
+  assert.equal(h.node('nav-overview').attributes.get('aria-current'), undefined, 'aria-current does not linger on the old link');
+});

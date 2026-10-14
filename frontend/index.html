@@ -3,22 +3,29 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="theme-color" content="#102f2b">
+  <meta name="theme-color" content="#173c3b">
   <title>FireWatch | Centro de monitoreo</title>
   <meta name="description" content="Panel FireWatch conectado a la API de demostración. Entrada sintética clasificada por una regla académica propia, declarada no oficial.">
   <link rel="stylesheet" href="/proposal.css">
   <script src="/proposal.js" defer></script>
 </head>
 <body>
+  <a class="skip-link" href="#content">Saltar al contenido</a>
   <div class="demo-strip"><strong>ENTORNO DE DEMOSTRACIÓN</strong><span>Entrada sintética · No riesgo real observado · Clasificación por regla propia no oficial · Sin uso operativo</span></div>
   <div class="app-shell">
     <aside class="sidebar">
-      <a class="brand" href="/" aria-label="FireWatch, inicio"><span class="brand-mark" aria-hidden="true">F</span><span><strong>FireWatch</strong><small>Monitoreo territorial</small></span></a>
-      <p class="nav-label">Monitoreo</p>
+      <a class="brand" href="#overview" aria-label="FireWatch, inicio"><span class="brand-mark" aria-hidden="true">F</span><span><strong>FireWatch</strong><small>Prevención territorial</small></span></a>
+      <div class="workspace"><span class="workspace-mark" aria-hidden="true">V</span><div>Valparaíso<small>Ámbito regional</small></div><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m12 3 10 5-10 5L2 8l10-5Zm-10 9 10 5 10-5M2 16l10 5 10-5"/></svg></div>
       <nav aria-label="Navegación principal">
-        <a class="nav-link active" href="#overview">◈ <span>Resumen de zona</span></a>
-        <a class="nav-link" href="#history">◷ <span>Historial de lotes</span></a>
-        <a class="nav-link" href="#jobs">⇄ <span>Procesamiento</span></a>
+        <p class="nav-group">Prevención</p>
+        <a class="nav-link is-active" id="nav-overview" href="#overview" aria-current="true"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m3 5 6-2 6 2 6-2v16l-6 2-6-2-6 2V5Zm6-2v16m6-14v16"/></svg><span>Territorio</span></a>
+        <a class="nav-link" id="nav-history" href="#history"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 11a9 9 0 1 1 2 7M3 4v7h7m2-5v6l4 2"/></svg><span>Historial de lotes</span></a>
+        <p class="nav-group">Información</p>
+        <a class="nav-link" id="nav-sources" href="#sources"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m12 3 10 5-10 5L2 8l10-5Zm-10 9 10 5 10-5M2 16l10 5 10-5"/></svg><span>Fuentes y calidad</span></a>
+        <a class="nav-link" id="nav-pipeline" href="#pipeline"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 12 4 4L19 6"/></svg><span>Servicios dependientes</span></a>
+        <a class="nav-link" id="nav-jobs" href="#jobs"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 12h5l3-8 4 16 3-8h5"/></svg><span>Procesamiento</span></a>
+        <p class="nav-group">Acceso</p>
+        <a class="nav-link" id="nav-session" href="#session"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5" y="10" width="14" height="11" rx="2"/><path d="M8 10V6a4 4 0 0 1 8 0v4m-4 5v2"/></svg><span>Sesión y permisos</span></a>
       </nav>
       <div class="sidebar-bottom">
         <section class="health-card" aria-labelledby="health-title"><div class="health-head"><strong id="health-title">Gateway</strong><span class="health-dot" aria-hidden="true"></span></div><p id="readiness-status" role="status" aria-live="polite">Consultando disponibilidad del gateway…</p><button id="readiness-refresh" class="side-action" type="button">Actualizar estado</button></section>
@@ -28,7 +35,8 @@
 
     <div class="main-area">
       <header class="topbar"><div><span class="breadcrumbs">FireWatch <span>/</span> Monitoreo</span><h1>Centro de monitoreo</h1></div><div class="zone-chip"><span aria-hidden="true">⌖</span><div><small>ZONA</small><strong id="zone-chip-name">Sin zona</strong></div></div></header>
-      <main>
+      <div class="update-bar"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 11a9 9 0 1 1 2 7M3 4v7h7m2-5v6l4 2"/></svg><span>Información revisada: <strong id="update-checked">sin verificar, conecta un token para comprobar los servicios</strong></span></div>
+      <main id="content">
         <section class="intro-row" id="overview"><div><p class="eyebrow">VISTA TERRITORIAL · VALPARAÍSO</p><h2>Estado de la zona</h2><p class="subheading">Consulta de lote y trazabilidad disponible desde el servicio FireWatch.</p></div><span class="dataset-badge"><i aria-hidden="true"></i> DEMO SINTÉTICA</span></section>
         <section class="warning-banner" aria-label="Límite de esta demostración"><span class="warning-icon" aria-hidden="true">!</span><p><strong>Entrada de demostración: todavía no hay ingestión de datos reales.</strong> La API clasifica un lote sintético con una regla académica propia, declarada como no oficial y no calibrada contra incendios observados. Esta vista no predice fecha ni lugar, no emite alertas y no sustituye a CONAF ni a SENAPRED.</p></section>
 
@@ -61,7 +69,7 @@
 
         <section class="lower-grid">
           <article class="panel history-panel" id="history"><div class="panel-heading"><div><p class="eyebrow">TRAZABILIDAD</p><h3>Historial de lotes</h3></div><span class="count-badge" id="history-count">—</span></div><p class="panel-note">Registros devueltos por <code>/v1/risk/history</code>; sin agregar métricas calculadas.</p><div id="history-state" class="empty-state">Conecta un token para consultar el historial.</div><div class="table-wrap"><table><thead><tr><th>Solicitado</th><th>Estado</th><th>Lote</th></tr></thead><tbody id="history-rows"></tbody></table></div></article>
-          <article class="panel auth-panel"><div class="panel-heading"><div><p class="eyebrow">ACCESO A LA API</p><h3>Conectar sesión</h3></div><span class="lock-mark" aria-hidden="true">⌑</span></div><p class="panel-note">Inicia sesión en Keycloak. FireWatch nunca solicita ni recibe tu contraseña; la API valida los permisos.</p>
+          <article class="panel auth-panel" id="session"><div class="panel-heading"><div><p class="eyebrow">ACCESO A LA API</p><h3>Conectar sesión</h3></div><span class="lock-mark" aria-hidden="true">⌑</span></div><p class="panel-note">Inicia sesión en Keycloak. FireWatch nunca solicita ni recibe tu contraseña; la API valida los permisos.</p>
             <button id="login" class="primary-button" type="button">Iniciar sesión con Keycloak</button><p class="panel-note">El token de acceso permanece solo en memoria mientras esta página está abierta. No se guardan tokens ni se envían cookies.</p><p id="auth-status" class="auth-status" role="status" aria-live="polite"></p>
           </article>
         </section>
