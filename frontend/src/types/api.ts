@@ -64,26 +64,49 @@ export interface ZoneCollection {
   features: ZoneFeature[];
 }
 
+// `/v1/risk/sources` does not serve a flat record: it nests the provenance under
+// `geography`, states integrity as an object with a boolean `matches`, and carries
+// its own cutoff semantics. The retired page read exactly this shape and failed
+// closed on any part of it, so the declaration follows the payload rather than a
+// flattened convenience shape.
 export interface SourceProvenance {
-  provider: string;
-  attribution: string;
-  restriction: string;
-  record_count: number;
-  derived_sha256: string;
-  integrity: string;
-  source_cutoff_at: string;
-  geography?: string;
-  risk_input?: string;
+  geography: {
+    provenance: {
+      provider: string;
+      attribution: string;
+      restriction: string;
+      derived_sha256: string;
+      record_count: number;
+    };
+    integrity: { matches: boolean; algorithm?: string };
+    source_cutoff_at?: string | null;
+    cutoff_semantics: string;
+  };
+  risk_input?: { synthetic?: boolean; display_name?: string; id?: string } | null;
+  code?: string;
+}
+
+// A dependency states its own readiness as a word (`ready`, `degraded`, …); it is
+// never inferred from the enclosing `ready` flag.
+export interface DependencyState {
+  ready?: string;
+  [key: string]: unknown;
 }
 
 // `/v1/risk/status` and `/v1/jobs/status` share this snapshot shape. A service is
-// only ever reported as verified when the payload carries a fresh `checked_at`
-// and a ready state with consistent dependencies; anything else is unknown.
+// only ever reported as verified when the payload carries `ready: true`, an empty
+// `reason`, a fresh `checked_at`, a known dead-letter depth inside the payload's
+// own `max_age_seconds` bound and three dependencies that each state `ready`;
+// anything else is unknown.
 export interface ServiceSnapshot {
-  checked_at: string;
   ready: boolean;
-  dependencies: Record<string, string>;
-  dead_letter_depth?: number | null;
+  reason: string;
+  checked_at: string;
+  dependencies: {
+    database?: DependencyState;
+    broker?: DependencyState;
+    dead_letter?: DependencyState & { max_age_seconds?: number; depth?: number | null };
+  };
 }
 
 export interface Job {
