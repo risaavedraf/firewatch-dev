@@ -1,9 +1,21 @@
 name: Gateway
 on:
   pull_request:
-    paths: ['backend/services/gateway/**', 'backend/contracts/**', 'backend/.dockerignore', '.github/workflows/**']
+    paths:
+      - 'backend/services/gateway/**'
+      - 'backend/contracts/**'
+      - 'backend/go.work'
+      - 'backend/go.work.sum'
+      - 'backend/.dockerignore'
+      - '.github/workflows/**'
   push:
-    paths: ['backend/services/gateway/**', 'backend/contracts/**', 'backend/.dockerignore', '.github/workflows/**']
+    paths:
+      - 'backend/services/gateway/**'
+      - 'backend/contracts/**'
+      - 'backend/go.work'
+      - 'backend/go.work.sum'
+      - 'backend/.dockerignore'
+      - '.github/workflows/**'
 permissions:
   contents: read
 jobs:

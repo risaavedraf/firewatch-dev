@@ -1,9 +1,21 @@
 name: Risk
 on:
   pull_request:
-    paths: ['backend/services/risk/**', 'backend/contracts/**', 'backend/.dockerignore', '.github/workflows/**']
+    paths:
+      - 'backend/services/risk/**'
+      - 'backend/contracts/**'
+      - 'backend/go.work'
+      - 'backend/go.work.sum'
+      - 'backend/.dockerignore'
+      - '.github/workflows/**'
   push:
-    paths: ['backend/services/risk/**', 'backend/contracts/**', 'backend/.dockerignore', '.github/workflows/**']
+    paths:
+      - 'backend/services/risk/**'
+      - 'backend/contracts/**'
+      - 'backend/go.work'
+      - 'backend/go.work.sum'
+      - 'backend/.dockerignore'
+      - '.github/workflows/**'
 permissions:
   contents: read
 jobs:
