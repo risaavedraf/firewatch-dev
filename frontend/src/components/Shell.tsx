@@ -1,18 +1,74 @@
-import type { ReactNode } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 
 import { navigationGroups, routes, type RouteDefinition } from '../app/routes';
+import { resetHistoryFilters, useSessionState } from '../app/store';
+import { ready, type Outcome } from '../core/api';
+import { signOut } from '../core/session';
 import { Icon } from './ui';
 
 // The application shell: sidebar, topbar, update bar and footer, ported from the
 // page that was already reviewed. Every element identifier the retired page
-// exposed survives here, because the behaviour that reads them (session state,
-// gateway readiness, zone chip, reset filters) is ported with it.
+// exposed survives here, because the behaviour that reads them is ported with it.
 //
 // One thing deliberately does *not* survive: the demonstration strip is no
-// longer a full-width headline above everything. The honesty statement it
-// carried is still made — as a discreet, always-visible technical notice that
-// leads to the data-status view, where the whole declaration lives (S15).
+// longer a full-width headline above everything. The honesty statement it carried
+// is still made — as a discreet, always-visible technical notice that leads to the
+// data-status view, where the whole declaration lives (S15).
+
+interface Readiness {
+  state: 'checking' | 'ready' | 'down';
+  message: string;
+}
+
+const CHECKING = 'Consultando disponibilidad del gateway…';
+
+// The gateway probe proves gateway availability and nothing else: the page says so
+// in the card itself, because a superficial readiness answer is not pipeline proof
+// and the verifiable pipeline state lives in its own panel.
+function readinessFrom(outcome: Outcome<null>): Readiness {
+  if (outcome.ok) {
+    return {
+      state: 'ready',
+      message: 'Gateway disponible; solo disponibilidad del gateway, no acredita el pipeline.',
+    };
+  }
+  const status = outcome.failure.status;
+  return status === undefined
+    ? {
+        state: 'down',
+        message: 'No fue posible consultar el gateway; su disponibilidad no acredita el pipeline.',
+      }
+    : {
+        state: 'down',
+        message: `Gateway no disponible (HTTP ${status}); solo disponibilidad del gateway.`,
+      };
+}
+
 export function Shell({ route, children }: { route: RouteDefinition; children: ReactNode }) {
+  const session = useSessionState();
+  const signedIn = session.status === 'signed-in';
+  const [readiness, setReadiness] = useState<Readiness>({ state: 'checking', message: CHECKING });
+
+  useEffect(() => {
+    const controller = new AbortController();
+    let active = true;
+    void ready(controller.signal).then((outcome) => {
+      if (!active) return;
+      setReadiness(readinessFrom(outcome));
+    });
+    return () => {
+      active = false;
+      controller.abort();
+    };
+  }, []);
+
+  const checkReadiness = () => {
+    setReadiness({ state: 'checking', message: CHECKING });
+    void ready().then((outcome) => setReadiness(readinessFrom(outcome)));
+  };
+
+  const dotClass = readiness.state === 'ready' ? 'health-dot ready' : readiness.state === 'down' ? 'health-dot down' : 'health-dot';
+
   return (
     <>
       <a className="skip-link" href="#content">
@@ -67,12 +123,18 @@ export function Shell({ route, children }: { route: RouteDefinition; children: R
             <section className="health-card" aria-labelledby="health-title">
               <div className="health-head">
                 <strong id="health-title">Gateway</strong>
-                <span className="health-dot" aria-hidden="true" />
+                <span className={dotClass} aria-hidden="true" />
               </div>
               <p id="readiness-status" role="status" aria-live="polite">
-                Consultando disponibilidad del gateway…
+                {readiness.message}
               </p>
-              <button id="readiness-refresh" className="side-action" type="button">
+              <button
+                id="readiness-refresh"
+                className="side-action"
+                type="button"
+                disabled={readiness.state === 'checking'}
+                onClick={checkReadiness}
+              >
                 Actualizar estado
               </button>
             </section>
@@ -81,10 +143,14 @@ export function Shell({ route, children }: { route: RouteDefinition; children: R
                 ●
               </span>
               <div>
-                <strong id="session-state">Sin conexión</strong>
-                <small id="session-detail">Token requerido para consultar</small>
+                <strong id="session-state">{signedIn ? 'Sesión conectada' : 'Sin conexión'}</strong>
+                <small id="session-detail">
+                  {signedIn ? 'Permisos evaluados por el servidor' : 'Token requerido para consultar'}
+                </small>
               </div>
-              <button id="logout" type="button" hidden>
+              {/* Kept in the document exactly once and hidden while signed out, which
+                  is the contract the retired page had: one control, never a duplicate. */}
+              <button id="logout" type="button" hidden={!signedIn} onClick={signOut}>
                 Cerrar sesión
               </button>
             </div>
@@ -126,7 +192,7 @@ export function Shell({ route, children }: { route: RouteDefinition; children: R
             {children}
             <footer>
               <span>FireWatch · La API no realiza predicciones ni recomendaciones operativas.</span>
-              <button id="reset-filters" type="button">
+              <button id="reset-filters" type="button" onClick={resetHistoryFilters}>
                 <Icon name="refresh" />
                 Restablecer filtros
               </button>
