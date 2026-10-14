@@ -37,6 +37,30 @@ Cada unidad cierra con un commit de unidad de trabajo en `frontend/react-vite`. 
 - **N10 — S17 — inline** — servidor estático sobre `dist/` en `:4173` con la CSP real, `no-store`, `nosniff`, `no-referrer`, sin listado de directorios y con confinamiento de rutas; `scripts/check.mjs` reescrito con las reglas invertidas; `smoke.mjs` adaptado al build. `commit: unitario`.
 - **N11 — S12 — verificación** — suite completa, build, smoke y guion de recorrido en navegador para el usuario (comuna `05109` con lote, `05101` sin lote, historial `05501`, `demo-viewer` con 403). `commit: ninguno`.
 
+## Inventario de identificadores que deben sobrevivir (línea base de N9)
+
+Extraído por esta sesión de `frontend/legacy/index.html` (copia byte a byte de la página retirada). El arnés de VM resolvía **todos** los elementos por `id` y fallaba con `missing DOM <id>`, así que la app React tiene que exponer el mismo conjunto: **109 identificadores únicos**.
+
+Distribución por área de la página retirada y vista nueva:
+
+| Área retirada | Vista nueva | N | Identificadores |
+|---|---|---|---|
+| shell + footer | `Shell` | 18 | `nav-overview` `nav-history` `nav-sources` `nav-jobs` `nav-session` `nav-audit` `health-title` `readiness-status` `readiness-refresh` `session-state` `session-detail` `logout` `zone-chip-name` `update-checked` `content` `reset-filters` `nav-pipeline`\* `nav-permissions`\* |
+| overview | `#overview` | 30 | `overview` `zone-count` `metric-batches` `metric-high` `zone-select` `map-location` `map-coordinates` `map-svg` `map-title` `map-desc` `map-empty` `map-insets` `map-attribution` `map-restriction` `risk-pill` `risk-status` `risk-level` `zone-code` `zone-name` `zone-province` `batch-origin` `batch-notice` `batch-validity` `risk-factors` `risk-rationale` `risk-policy` `data-status` `model-version` `valid-until` `batch-id` |
+| history | `#history` | 7 | `history` `history-count` `history-query` `history-status-filter` `history-visible-count` `history-state` `history-rows` |
+| sources | `#sources` | 12 | `sources` `sources-title` `sources-badge` `sources-status` `sources-provider` `sources-attribution` `sources-restriction` `sources-record-count` `sources-derived-sha256` `sources-integrity` `sources-cutoff` `sources-input` |
+| pipeline | `#sources` (agrupada) | 7 | `pipeline` `pipeline-title` `pipeline-badge` `pipeline-status` `pipeline-risk` `pipeline-jobs` `pipeline-gateway` |
+| jobs | `#jobs` | 9 | `jobs` `scenario-select` `scenario-note` `create-job` `job-status` `job-state` `job-id` `job-requested` `refresh-job` |
+| pending | `#pending` | 5 | `pending` `pending-title` `pending-badge` `pending-status` `pending-rows` |
+| audit | `#audit` | 9 | `audit` `audit-title` `audit-badge` `audit-status` `audit-unimplemented` `audit-table` `audit-rows` `audit-count` `audit-refresh` |
+| session + permissions | `#session` (agrupada) | 12 | `session` `login` `auth-status` `permissions` `permissions-title` `session-roles-badge` `session-roles-status` `session-roles` `session-role-note` `permissions-matrix-note` `permissions-rows` `permissions-unimplemented` |
+
+**\* Retirados a propósito (2):** `nav-pipeline` y `nav-permissions` eran enlaces de navegación de áreas que la decisión D1 del usuario agrupa. Un enlace tiene un solo `id`, así que la fusión retira esos dos y **conserva** todos los identificadores de contenido de ambas áreas (`pipeline-*` y `session-roles-*` siguen existiendo dentro de su vista agrupada). Es una reducción aprobada, no una pérdida silenciosa.
+
+**Añadidos (3):** `nav-pending` (la entrada que el inventario «Aún no implementado» nunca tuvo), `data-status-notice` y `input-scope-badge` (los dos anclajes del aviso técnico discreto de S15).
+
+**Cuenta esperada al cerrar N9:** 107 conservados + 3 nuevos = **110**, con los 2 retirados nombrados arriba. Cualquier otro identificador ausente es una pérdida y bloquea el cierre.
+
 ## Log
 
 - **L1** — Cambio de dirección del usuario, verbatim (los tres mensajes de S12), en respuesta a las decisiones D1–D5 del documento anterior. Decisiones derivadas: D1 = 7 vistas agrupadas; D2 = `#pending` con vista propia; D5 = nombre de rama a criterio de la sesión ejecutora; D4 (reparto de `proposal.css`) queda **obsoleta** al reescribirse la página en React.
