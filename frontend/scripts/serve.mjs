@@ -57,7 +57,16 @@ async function allowlist() {
 export function createServer() {
   return http.createServer(async (request, response) => {
     const send = (status, message, headers = {}) => {
-      response.writeHead(status, { 'Content-Type': 'text/plain; charset=utf-8', 'X-Content-Type-Options': 'nosniff', ...headers });
+      response.writeHead(status, {
+        'Content-Type': 'text/plain; charset=utf-8',
+        'X-Content-Type-Options': 'nosniff',
+        // The policy travels on every answer, not only on served assets: an error
+        // response must not be the one place where it is missing.
+        'Content-Security-Policy': CONTENT_SECURITY_POLICY,
+        'Referrer-Policy': 'no-referrer',
+        'Cache-Control': 'no-store',
+        ...headers,
+      });
       response.end(request.method === 'HEAD' ? undefined : message);
     };
     if (!['GET', 'HEAD'].includes(request.method)) return send(405, 'Method not allowed', { Allow: 'GET, HEAD' });

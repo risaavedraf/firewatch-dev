@@ -72,13 +72,22 @@ Convención: `#área` = archivo de la suite nueva.
 | 56 | malformed **demo** refuses correlated completion and severity | idem #54 |
 | 57 | malformed **policy** refuses correlated completion and severity | idem #54 |
 | 58 | malformed **risk_level** refuses correlated completion and severity | idem #54 · `#overview`: *an unreadable batch body renders as explicitly unavailable, never as a plausible level* |
-| 59 | demo mandatory warning with **missing** notice | `#overview`: *synthetic warning independent of notice; unknown factor never displays zero* (the reachable empty-notice variant) |
-| 60 | demo mandatory warning with **malformed** notice | **Superseded por mecanismo, no perdida:** el transporte congelado rechaza un `notice` no textual en su guarda antes de que la vista lo vea, y ese rechazo fail-closed es exactamente lo que afirman `#core` (*a shape that fails its guard is malformed and never a partial value*) y `#domain` (*names exactly which part of the contract the batch omitted*). El caso «objeto `notice`» dejó de ser alcanzable al mover la validación al borde; la conducta observable —no mostrar un aviso creíble— sigue cubierta. |
+| 59 | demo mandatory warning with **missing** notice | **Cambio de conducta declarado.** El transporte rechaza un `notice` que no sea texto (`src/core/api.ts:291`), así que un lote sin `notice` se muestra **como no disponible**, no con el aviso obligatorio que la página retirada sí mostraba. La variante alcanzable (`notice: ''`) sí se afirma en `#overview` (*synthetic warning independent of notice; unknown factor never displays zero*), pero una cadena vacía no es lo mismo que un campo ausente. |
+| 60 | demo mandatory warning with **malformed** notice | **Cambio de conducta declarado**, y la cita anterior de este registro era incorrecta: citaba pruebas que no examinan `notice`. El cuerpo con `notice` objeto se rechaza en el borde igual que el ausente, y esa conducta queda fijada explícitamente en `#core` (*a shape that fails its guard is malformed and never a partial value*, caso `notice`). |
 
 ## Cierre
 
-- **60/60 filas con hogar verde.** Una fila (#60) es una sustitución de mecanismo declarada, no
-  una pérdida: el mismo efecto observable se afirma en dos pruebas del borde.
+- **60/60 filas con hogar verde.** Dos filas (#59 y #60) son un **cambio de conducta declarado**,
+  no una pérdida silenciosa: la página retirada toleraba un `notice` ausente o no textual y
+  mostraba el lote con su aviso obligatorio de demostración; la app rechaza ese lote en el borde y
+  lo muestra como no disponible. La dirección es la fail-closed (un lote cuyo aviso no se puede
+  leer no se presenta como una clasificación creíble), y **el usuario debe aceptarla o rechazarla**:
+  recuperar la paridad significa relajar la guarda del borde para ese campo.
+- **Límite declarado (no corregido, heredado de la página retirada):** durante un ciclo de
+  refresco, el panel de servicios conserva la presentación verificada anterior hasta que la nueva
+  respuesta se asienta, así que la etiqueta en pantalla puede sobrevivir a su propia cota mientras
+  el refresco está pendiente. La instantánea sí se evalúa con su cota; retirar la afirmación al
+  iniciar cada ciclo sería el cambio que lo cerraría.
 - Las dos filas que los escritores dejaron parciales (#27/#29: el refresco acotado del pipeline)
   se cerraron con una prueba añadida por esta sesión en `#sources`.
 - Retirar `frontend/legacy/` solo fue posible después de esto, y el comando

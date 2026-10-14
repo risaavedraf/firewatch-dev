@@ -101,7 +101,7 @@ try {
   }
 
   // Sources, tooling and directories are not served, and there is no listing.
-  for (const url of ['/package.json', '/vite.config.ts', '/scripts/serve.mjs', '/scripts/smoke.mjs', '/src/main.tsx', '/node_modules/react/index.js', '/assets/', '/assets', '/legacy/proposal.js']) {
+  for (const url of ['/package.json', '/vite.config.ts', '/scripts/serve.mjs', '/scripts/smoke.mjs', '/src/main.tsx', '/node_modules/react/index.js', '/assets/', '/assets']) {
     assert.equal((await request(url)).status, 404, `${url} must be unreachable`);
   }
 

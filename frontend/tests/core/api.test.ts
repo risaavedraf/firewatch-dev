@@ -209,6 +209,17 @@ test('a shape that fails its guard is malformed and never a partial value', asyn
   fetchStub.answer(`${gatewayOrigin}/v1/risk/latest?zone_id=05101`, broken);
   expect(expectFailure(await latestRead).kind).toBe('malformed');
 
+  // A batch whose `notice` is not a string is rejected at this boundary. The
+  // retired page tolerated that field and rendered the batch with its mandatory
+  // demonstration warning instead; the difference is declared in the parity
+  // ledger, and the direction here is the fail-closed one.
+  const noticeRead = latest('05101');
+  await flush();
+  const noNotice = batch();
+  delete (noNotice as { notice?: unknown }).notice;
+  fetchStub.answer(`${gatewayOrigin}/v1/risk/latest?zone_id=05101`, noNotice);
+  expect(expectFailure(await noticeRead).kind).toBe('malformed');
+
   const historyRead = history('05101');
   await flush();
   fetchStub.answer(`${gatewayOrigin}/v1/risk/history?zone_id=05101`, [batch(), { zone_id: '05101' }]);

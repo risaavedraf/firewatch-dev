@@ -50,7 +50,12 @@ export function evaluateServiceStatus(input: ServiceStatusInput, now: number): S
       ? deadLetter.max_age_seconds
       : timing.fallbackStatusMaxAgeSeconds;
   const checkedAt = body !== null ? Date.parse(String(body.checked_at ?? '')) : Number.NaN;
-  const fresh = Number.isFinite(checkedAt) && (now - checkedAt) / 1000 <= maxAge;
+  const ageSeconds = (now - checkedAt) / 1000;
+  // A snapshot dated in the FUTURE is not evidence of freshness: without this
+  // bound a skewed or broken server clock would keep the claim true forever. The
+  // direction is fail-closed on purpose — a slightly fast server clock makes the
+  // snapshot unknown rather than verified.
+  const fresh = Number.isFinite(checkedAt) && ageSeconds <= maxAge && ageSeconds >= 0;
 
   const deadAge = deadLetter !== null && isFiniteNumber(deadLetter.age_seconds) ? deadLetter.age_seconds : null;
   const deadMaxAge =
