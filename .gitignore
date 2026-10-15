@@ -41,3 +41,15 @@ tmp/
 # survives someone deleting that inner file.
 .pytest_cache/
 .ruff_cache/
+
+# Agent-harness scratch that is not repository source. `.playwright-mcp/` holds
+# browser logs and page snapshots written by an MCP review run, and `.opencode/`
+# holds another harness's skills. Both are local to one machine, neither is read
+# at runtime, and neither is a deliverable: browser evidence worth keeping belongs
+# under `tmp/` (already ignored) or in an `odd/` document. Listing them keeps the
+# working tree clean without deleting anyone's tooling.
+# The root `opencode.json` is deliberately NOT listed here. Whether another
+# harness's project configuration belongs in this repository is a separate
+# decision that nobody has taken, and ignoring it would take it silently.
+.playwright-mcp/
+.opencode/
