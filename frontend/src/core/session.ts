@@ -128,6 +128,12 @@ function decodeUTF8(bytes: number[]): string | null {
   return text;
 }
 
+// The decoded payload of a token whose signature has NOT been verified. The return
+// type is deliberately `unknown`, and deliberately not a domain type: asserting a
+// shape here would be a claim this function cannot support. `unknown` forces every
+// caller to narrow, exactly like `JSON.parse` output, which is what `decodeRoles`
+// does with its `record()` guard. A name for it would add no type information, so
+// there is none: the comment is the documentation.
 function decodeJWTPayload(token: string): unknown {
   if (typeof token !== 'string') return null;
   const parts = token.split('.');
