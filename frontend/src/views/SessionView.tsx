@@ -52,15 +52,15 @@ export const PERMISSION_MATRIX: readonly PermissionRow[] = [
     capability: 'Disponibilidad del gateway · GET /health/ready',
     viewer: 'Sí: responde 204 sin comprobar token ni rol',
     admin: 'Sí: responde 204 sin comprobar token ni rol',
-    guards: ['backend/services/gateway/internal/handler/gateway.go:74'],
+    guards: ['backend/services/gateway/internal/handler/gateway.go:80'],
   },
   {
     capability: 'Autenticación de cualquier ruta /v1/* · bearer verificado en el gateway',
     viewer: 'Sí: exige un bearer verificable con sujeto; no decide ningún rol',
     admin: 'Sí: exige un bearer verificable con sujeto; no decide ningún rol',
     guards: [
-      'backend/services/gateway/internal/handler/gateway.go:96',
       'backend/services/gateway/internal/handler/gateway.go:102',
+      'backend/services/gateway/internal/handler/gateway.go:108',
     ],
   },
   {
