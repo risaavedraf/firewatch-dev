@@ -38,7 +38,7 @@ code { font-size: 11px; }
 
 /* ── Shell ──────────────────────────────────────────────────────────────── */
 .app-shell { min-height: calc(100vh - 34px); display: flex; }
-.sidebar { position: sticky; top: 0; width: 234px; height: calc(100vh - 34px); min-height: 560px; display: flex; flex-direction: column; padding: 30px 19px 22px; color: #d5e1db; background: var(--forest-900); }
+.sidebar { position: sticky; top: 0; width: 234px; height: calc(100vh - 34px); min-height: 560px; display: flex; flex-direction: column; padding: 30px 19px 22px; color: #d5e1db; background: var(--forest-900); overflow-y: auto; }
 .brand { display: flex; align-items: center; gap: 10px; padding: 0 8px; margin-bottom: 26px; color: #fffdf4; }
 .brand-mark { width: 36px; height: 36px; display: grid; place-items: center; border-radius: 11px; background: #d7aa73; color: var(--forest-900); font-family: Georgia, serif; font-size: 20px; font-style: italic; }
 .brand strong, .brand small { display: block; }

@@ -107,7 +107,7 @@ npm run verify     # lint → typecheck → tests → source gate → build → 
 | `npm run lint` | ESLint, flat config, TypeScript and React hooks rules |
 | `npm run typecheck` | `tsc --noEmit`, strict |
 | `npm test` | Vitest: domain rules, transport, session, map projection, routing and the views |
-| `npm run check` | The honesty statement is present, no fixture or frozen clock ships, the real endpoints are there, no client-side role guard, no persisted token, no secret, no external asset |
+| `npm run check` | The honesty statement is present, no fixture or frozen clock ships, the real endpoints are there, no client-side role guard, no persisted token, no secret, no external asset, and the sidebar keeps the scroll that makes its controls reachable |
 | `npm run build` | The production bundle |
 | `npm run smoke` | Loopback: the built assets, MIME types, CSP, `HEAD`/`405`/`404`, traversal confinement |
 
@@ -119,6 +119,17 @@ exercise the real login path. The cross-origin round trip — signing in from
 end to end in a browser. Treat that round trip as the real acceptance check, and see
 [`backend/docs/keycloak-realm-setup.md`](../backend/docs/keycloak-realm-setup.md) for the realm
 settings it depends on.
+
+One layout property sits in that category deliberately, and it is the reason the sidebar carries
+its own scrollbar: whether the lower controls of the sidebar — the session card with **Cerrar
+sesión**, and the Gateway card with **Actualizar estado** — are reachable at a given window
+height. Two different things are true about it, and they are worth keeping apart. **Removing the
+declaration that makes the column scroll is caught**: `npm run check` reads the shipped stylesheet
+and fails if `.sidebar` stops declaring its own vertical scroll, if it loses its bounded height,
+or if the 720 px breakpoint stops dropping that height. **The geometry itself is caught by
+nothing**: jsdom has no layout engine, so no suite here can tell whether the controls actually
+fit. That part is measured in a browser. The sign-in control's `disabled` state is the contrast:
+it is ordinary rendered behaviour, and it is asserted in `tests/views/session.test.tsx`.
 
 ## History
 

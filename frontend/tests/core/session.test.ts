@@ -8,7 +8,9 @@ import {
   getAccessToken,
   getSessionSnapshot,
   hasPendingCallback,
+  resetInterruptedLogin,
   resetSession,
+  resumePendingLogin,
   signOut,
   startLogin,
   subscribeSession,
@@ -273,4 +275,74 @@ test('no browser storage or cookie can hold a token', () => {
     return source.includes('localStorage') || source.includes('document.cookie');
   });
   expect(offenders).toEqual([]);
+});
+
+// The callback was implemented but never reached by the application: nothing in
+// `src/` called it, and the bundle proved it by tree-shaking the token exchange
+// out entirely. These two rules are what make the round trip survive in the app
+// rather than only in this suite.
+test('a pending callback is consumed on startup, and nothing happens without one', async () => {
+  setup();
+
+  // No callback in the address bar: no request, and the session stays closed.
+  await resumePendingLogin('');
+  expect(fetchStub.callsFor(TOKEN_URL)).toHaveLength(0);
+  expect(getSessionSnapshot().status).toBe('signed-out');
+
+  // A callback is exchanged exactly once and establishes the session.
+  seedTransaction('s', 'verifier');
+  const token = jwt({ realm_access: { roles: ['viewer'] } });
+  const resumed = resumePendingLogin('?code=code-1&state=s');
+  await flush();
+  fetchStub.answer(TOKEN_URL, { access_token: token, id_token: 'id-token' });
+  await resumed;
+
+  expect(fetchStub.callsFor(TOKEN_URL)).toHaveLength(1);
+  expect(getAccessToken()).toBe(token);
+  expect(getSessionSnapshot().status).toBe('signed-in');
+  expect(storageStub.snapshot().has(pkceTransactionKey)).toBe(false);
+});
+
+test('a refused callback resolves without throwing and leaves the session closed', async () => {
+  setup();
+  seedTransaction('s', 'verifier');
+
+  // The identity provider said no. The operator must land on a usable page, not
+  // on an unhandled rejection, and no transaction may survive the refusal.
+  await expect(resumePendingLogin('?error=access_denied&state=s')).resolves.toBeUndefined();
+
+  expect(getSessionSnapshot().status).toBe('signed-out');
+  expect(getAccessToken()).toBe('');
+  expect(storageStub.snapshot().has(pkceTransactionKey)).toBe(false);
+});
+
+// A page restored from the back/forward cache keeps its in-memory session, so the
+// `signing-in` a click left behind would stay in flight forever: the operator
+// pressed Back at the identity provider, the redirect that would have completed
+// or failed the flow never ran, and the sign-in control is disabled while it is
+// in flight. The restore is the one event that can end that state honestly.
+test('a restored page ends an interrupted sign-in and never a real session', async () => {
+  setup();
+  startLogin();
+  // The authorization challenge is built asynchronously and writes the PKCE
+  // transaction in the process: let it settle before this test hijacks that
+  // transaction, or the two writes race and the state check fails for the wrong
+  // reason.
+  await vi.waitFor(() => {
+    expect(storageStub.writes).toHaveLength(1);
+  });
+  expect(getSessionSnapshot().status).toBe('signing-in');
+
+  resetInterruptedLogin();
+  expect(getSessionSnapshot().status).toBe('signed-out');
+
+  // The dangerous half: a restored page that already had a session must keep it.
+  // Signing the operator out here would be a worse defect than the latch.
+  await connect(jwt({ realm_access: { roles: ['viewer'] } }));
+  const established = getAccessToken();
+  expect(getSessionSnapshot().status).toBe('signed-in');
+
+  resetInterruptedLogin();
+  expect(getSessionSnapshot().status).toBe('signed-in');
+  expect(getAccessToken()).toBe(established);
 });

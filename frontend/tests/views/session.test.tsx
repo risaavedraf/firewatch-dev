@@ -323,3 +323,30 @@ test('no role selector, switcher or picker is ported anywhere in the view', () =
   expect(matrixNote).toMatch(/risk\/internal\/handler\/security\.go:43/);
   expect(matrixNote).toMatch(/jobs\/internal\/handler\/security\.go:44/);
 });
+
+// F3 — the sign-in control must answer to the session it starts. `Shell.tsx:153`
+// already makes the logout control state-aware (`hidden={!signedIn}`), but the
+// sign-in button carried no state at all: an authenticated operator still saw an
+// enabled "Iniciar sesión con Keycloak" whose only effect was to restart the whole
+// OAuth flow. Both controls now read the same `session.status`, so the pair can
+// never disagree about whether a session exists.
+//
+// "The session ended" is asserted through `resetSession()` because `signOut()`
+// funnels through it (`src/core/session.ts`) before it redirects; that the
+// redirect itself happens is already covered by `tests/core/session.test.ts`.
+test('the sign-in control is disabled while a session is established and enabled again once it ends', async () => {
+  render(<SessionView />);
+  const before = document.getElementById('login') as HTMLButtonElement | null;
+  expect(before).not.toBeNull();
+  expect(before?.disabled).toBe(false);
+
+  await connect(jwt({ realm_access: { roles: ['viewer'] } }));
+  expect(getSessionSnapshot().status).toBe('signed-in');
+  expect((document.getElementById('login') as HTMLButtonElement).disabled).toBe(true);
+
+  await act(async () => {
+    resetSession();
+  });
+  expect(getSessionSnapshot().status).toBe('signed-out');
+  expect((document.getElementById('login') as HTMLButtonElement).disabled).toBe(false);
+});
