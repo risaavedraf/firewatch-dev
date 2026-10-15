@@ -5,6 +5,15 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="theme-color" content="#173c3b" />
     <title>FireWatch | Centro de monitoreo</title>
+    <!-- The icon is a `data:` URI on purpose. The development server derives its
+         allowlist from the `/`-prefixed references in the built entry document, so
+         a separate icon file would either be unreachable or force a second,
+         hand-maintained allowlist. `img-src 'self' data:` already admits it, and
+         nothing is fetched from another origin. -->
+    <link
+      rel="icon"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%23173c3b'/%3E%3Ctext x='16' y='23' font-family='Georgia,serif' font-size='19' font-style='italic' fill='%23d7aa73' text-anchor='middle'%3EF%3C/text%3E%3C/svg%3E"
+    />
     <meta
       name="description"
       content="Centro de monitoreo FireWatch: estado del riesgo por comuna, historial de lotes, procedencia de fuentes y registro de actividad de la API FireWatch."
