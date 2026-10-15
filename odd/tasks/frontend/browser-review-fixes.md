@@ -112,15 +112,19 @@ En este documento, «observado» significa que **esta sesión ejecutó la compro
 
 ## Tasks
 
-- **B1 — S3 — F2 sidebar inalcanzable** — ruta: inline (CSS de una línea) — verificación: medición en navegador a 1280×720, 1366×768, 1440×900 y 1024×768 con clic real en `#logout` — commit: `b5c689c`
+- **B1 — S3 — F2 sidebar inalcanzable** — ruta: inline (CSS de una línea) — verificación: medición en navegador con A/B a cinco viewports y clic real — commit: `b5c689c`
 - **B2 — S4 — F3 estado del control de login** — ruta: inline, test-first con vitest (RED → GREEN) — commit: `dc1cbe4`
-- **B3 — S5 — F4 favicon con `data:` URI** — ruta: inline — commit: `08bdf65`
-- **B4 — S11 — deriva de documentación y `.gitignore`** — ruta: inline — commits: `5f23f54` (higiene), `400ea42` (documentación)
-- **B5 — S6 — diagnóstico read-only de la cola muerta** — ruta: delegada a `gentle-ai-explore` (fuente) + lectura propia de la pila — bloqueada: la pila está detenida
-- **B6 — S2, S10 — pasos del realm y re-verificación** — ruta: acción del usuario + sonda sin credenciales de esta sesión
-- **B7 — S9 — PR de configuración (etiquetas, plantilla, convenciones)** — ruta: inline + `gh` — commit: `chore(repo)`
-- **B8 — S9 — issue aprobado y PR de los arreglos** — ruta: `gh` — requiere B7
-- **B9 — S12 — verificación independiente del candidato** — ruta: `gentle-ai-verify` (solo lectura)
+- **B3 — S5 — F4 favicon con `data:` URI** — ruta: inline — commits: `08bdf65`, `962a663` (codificación estricta tras el FAIL 1 del verificador)
+- **B4 — S11 — deriva de documentación y `.gitignore`** — ruta: inline — commits: `5f23f54` (higiene), `400ea42` (documentación), `4775e25` (corrección de la afirmación sobre lo verificable)
+- **B5 — S6 — diagnóstico read-only de la cola muerta** — ruta: delegada a `gentle-ai-explore` para la fuente + lectura propia de la pila viva — **hecho**, ver L11
+- **B6 — S2, S10 — pasos del realm y re-verificación** — ruta: acción del usuario + sonda sin credenciales de esta sesión — **bloqueada**: el realm sigue en 400 hasta que se aplique el URI de post-logout
+- **B7 — S9 — PR de configuración (etiquetas, plantilla, convenciones)** — ruta: inline + `gh` — commit: `5b5...`; PR #16
+- **B8 — S9 — issue aprobado y PR de los arreglos** — ruta: `gh` — issue #17 con `status:approved`, PR #18
+- **B9 — S12 — verificación independiente del candidato** — ruta: `gentle-ai-verify` (solo lectura) — **hecha**: 4 PASS y 3 FAIL sobre mi propio parche, ver L10
+- **B10 — hallazgo nuevo, grave — el callback OAuth nunca se consumía** — ruta: inline, test-first — commit: `742ed34`, ver L10
+- **B11 — regresión propia — bloqueo del control por bfcache** — ruta: inline, test-first — commit: `742ed34`, ver L10
+- **B12 — guardia estática del scroll del sidebar** — ruta: inline — commit: `b9db43f`
+- **B13 — medición en navegador del sidebar** — ruta: Playwright sobre el build servido — **hecha**, ver L11
 
 ## Log
 
@@ -180,3 +184,24 @@ En este documento, «observado» significa que **esta sesión ejecutó la compro
   - **La afirmación sobre el gate se sostiene en su regla, no solo en su salida:** `scripts/check.mjs` §6 prohíbe `(?:src|href)` seguido de comilla y `https?:` o `//` en `.html`/`.css`. Un `data:` URI no coincide, y la corrida lo confirma.
   - **Commits:** `b5c689c` (F2), `dc1cbe4` (F3 con su prueba), `08bdf65` (F4), `5f23f54` (`.gitignore`), `400ea42` (`frontend/README.md`). Ninguno toca `main`.
   - **Pendiente y no declarado como hecho:** la medición en navegador de B1 (la pila está detenida), la aplicación del URI de post-logout en el realm (B6, acción del usuario), el diagnóstico en vivo de la cola muerta (B5) y la verificación independiente (B9).
+- **L10 — Verificación independiente (`gentle-ai-verify`, `mv9wxrxp-2-slx0`) y qué se hizo con cada hallazgo.** Confirmó por su cuenta los seis gates en exit 0 sobre el candidato (24 archivos, 232 pruebas), que el parche solo **añade** una prueba y que esa prueba fallaría pre-parche, y que el `.gitignore` es estrecho (0 archivos versionados ignorados). Encontró tres defectos reales en mi propio parche:
+  - **Codificación del `data:` URI (FAIL 1):** decodificó el URI con `HTMLParser`/`unquote`/`ElementTree`, confirmó que el SVG es válido, y encontró **espacios literales** que debían ser `%20` para una URI estrictamente válida. **Corregido** (`962a663`).
+  - **Riesgo de bloqueo permanente del control (FAIL 2):** encontró un caso que yo no había visto — una página restaurada desde el *back/forward cache* conserva el `signing-in` en memoria, no se ejecuta ningún reset, y el `disabled` que yo agregué deja el control bloqueado sin forma de reintentar. Y confirmó **de forma independiente** el hallazgo del callback con `git grep`, señalando que es anterior a este parche y que las pruebas lo ocultaban al llamar a `completeLogin` directamente. **Corregido** (`742ed34`): cableado del callback más `resetInterruptedLogin`, con prueba propia que además exige que una sesión real **no** se cierre al restaurar la página.
+  - **«Ninguna suite puede detectarlo» era demasiado fuerte (FAIL 5):** correcto: `check.mjs` ya lee la hoja de estilos servida, así que la guardia barata **faltaba, no era imposible**. **Agregada** (`b9db43f`), y la afirmación del README **corregida** (`4775e25`).
+  - **FAIL 6 (documentación):** su objeción sobre `odd/PR-CONVENTIONS.md` es un **artefacto de alcance** — esa actualización vive en la rama del PR de configuración #16, no en este candidato, y el verificador no podía verla. Su objeción sobre el README sí era real y se corrigió.
+  - **Observación sobre `decodeJWTPayload`:** es código **pre-existente** (idéntico en `a6b1cb2`, 0 menciones en mi diff) y **no se toca**; ver L12.
+- **L11 — Medición en navegador y diagnóstico de la cola muerta.**
+  - **Medición del sidebar (B1).** Playwright sobre el build servido en `:4173`, con un A/B en el mismo navegador: la página servida, y la misma página con **solo** la declaración de scroll eliminada. Resultado a cinco viewports (scroll disponible / fondo del sidebar dentro del viewport / clic real en el control del fondo):
+
+    | Viewport | Servida | Sin la declaración de scroll |
+    | --- | --- | --- |
+    | 1280×720 | scroll 180 px, fondo y tarjeta de sesión visibles, **clic OK** | scroll 0, fondo fuera del viewport, **clic FALLA** (timeout) |
+    | 1366×768 | scroll 147 px, visibles, **clic OK** | scroll 0, fuera, **clic FALLA** |
+    | 1440×900 | scroll 15 px, visibles, **clic OK** | sin desborde real, **clic OK** |
+    | 1024×768 | scroll 159 px, visibles, **clic OK** | scroll 0, fuera, **clic FALLA** |
+    | 1920×1080 | sin desborde, **clic OK** | sin desborde, **clic OK** |
+
+    El A/B reproduce el defecto reportado y demuestra que es la declaración la que lo resuelve. Además: **0 respuestas ≥ 400** (el 404 del favicon desapareció) y **0 errores de consola**. Evidencia: `tmp/review/sidebar-measurement.json` y `tmp/review/measure-sidebar.mjs`.
+    **Límite declarado:** el control sobre el que se hizo el clic es el del fondo del sidebar que **siempre** está visible (`#readiness-refresh`), porque `#logout` está oculto sin sesión y esta sesión no usó credenciales del realm. La afirmación es por contención medida: la tarjeta de sesión, que contiene `#logout`, queda dentro del viewport tras el scroll. El clic con sesión real queda pendiente.
+  - **Cola muerta (B5).** Leída en vivo, sin consumir nada (`ackmode=ack_requeue_true`): **6 mensajes**, 3 por cola. En `risk.jobs.v1.dead` son tres payloads de 8 bytes literalmente `{invalid`, rechazados por el consumidor de `risk` desde la cola `risk.jobs.v1` — inyecciones de entrada malformada. En `jobs.results.v1.dead` son tres eventos `risk.batch.published.v1` válidos, con `occurred_at` del **2026-10-06**, rechazados por el consumidor de `jobs`. Los seis tienen `x-first-death-reason: rejected`, son de hace nueve días y **no son fallos del código actual**. Con `DLQ_READY_MAX_DEPTH` en `0`, cualquier mensaje conocido mantiene la disponibilidad en falso, así que el `503` es el residuo de pruebas antiguas. **No se purgó ni se recargó nada**: eso es una decisión del usuario (L12).
+- **L12 — Pendientes que requieren decisión del usuario.** (1) El URI de post-logout en el realm: la sonda sigue devolviendo **400** para `:4173` y **302** para `:8080`. (2) Las seis entradas de la cola muerta: purgar (irreversible, pero son residuos de prueba) o subir `DLQ_READY_MAX_DEPTH` (no limpia nada) o dejarlas. (3) `decodeJWTPayload(token: string): unknown` en `src/core/session.ts:131` es **pre-existente** y **no se tocó**: devolver `unknown` para un payload decodificado de un token no verificado es el tipo más seguro, y el lente que lo objeta propone estrecharlo a un tipo con nombre sin validarlo. Es una decisión de diseño sobre código compartido, no un defecto de este parche. (4) Los dos PRs: mergear es del usuario; el PR #16 (configuración) debe entrar antes que el #18 para que la política que este estrena exista en `main`.
