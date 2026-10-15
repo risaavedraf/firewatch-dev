@@ -120,6 +120,15 @@ end to end in a browser. Treat that round trip as the real acceptance check, and
 [`backend/docs/keycloak-realm-setup.md`](../backend/docs/keycloak-realm-setup.md) for the realm
 settings it depends on.
 
+One layout property sits in that category deliberately, and it is the reason the sidebar carries
+its own scrollbar: whether the lower controls of the sidebar — the session card with **Cerrar
+sesión**, and the Gateway card with **Actualizar estado** — are reachable at a given window
+height. `.sidebar` is a fixed-height sticky column, and a regression in that declaration is
+invisible to every suite here, because jsdom has no layout engine and `check.mjs` reads source
+text rather than geometry. It is measured in a browser; it is not asserted in a suite. The
+committed value of the sign-in control's `disabled` state, by contrast, *is* ordinary rendered
+behaviour and is asserted in `tests/views/session.test.tsx`.
+
 ## History
 
 This directory used to hold one self-contained page (`index.html`, `proposal.css`,
