@@ -3,10 +3,18 @@ on:
   pull_request:
     paths:
       - 'frontend/**'
+      # The frontend suite re-reads backend file:line citations: the permissions
+      # matrix in src/views/SessionView.tsx is checked against the real guard
+      # lines by tests/views/session.test.tsx. A backend edit can therefore fail
+      # this job, and nothing else would catch it — PR #20 shifted three cited
+      # lines and this job never ran for it, leaving main red. Issue #24.
+      - 'backend/**'
       - '.github/workflows/**'
   push:
+    # Same reason: the drift detector must run when the backend moves.
     paths:
       - 'frontend/**'
+      - 'backend/**'
       - '.github/workflows/**'
 permissions:
   contents: read
