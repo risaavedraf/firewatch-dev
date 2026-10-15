@@ -157,6 +157,28 @@ for (const [name, source] of sources) {
   assert.doesNotMatch(source, /@import\s+(?:url\()?["']?(?:https?:|\/\/)/i, `no remote stylesheet import: ${name}`);
 }
 
+// ── 7. The sidebar must keep the scroll that makes it usable ─────────────────
+// This is the one layout property a static gate can honestly protect. The column
+// is a fixed-height sticky box, so without a vertical scroll declaration
+// everything past the fold — including the session card with the only sign-out
+// control — is unreachable rather than merely off screen. Geometry still needs a
+// browser: this rule cannot tell whether the controls fit, only that the
+// declaration which lets the reader reach them is still there.
+const styles = sources.get(path.join('src', 'styles', 'app.css'));
+assert.ok(styles, 'src/styles/app.css must exist');
+const sidebarRule = styles.match(/^\s*\.sidebar\s*\{[^}]*\}/m);
+assert.ok(sidebarRule, 'the .sidebar rule must exist');
+assert.match(sidebarRule[0], /position:\s*sticky/, 'the sticky column this rule protects is gone');
+assert.match(sidebarRule[0], /overflow-y:\s*(?:auto|scroll)/, 'the sidebar must declare its own vertical scroll');
+assert.match(sidebarRule[0], /height:\s*calc\(/, 'the sidebar must keep its bounded height, which is what the scroll is for');
+// The mobile breakpoint must keep dropping the fixed height: that is what makes
+// the scroll declaration harmless at small widths.
+assert.match(
+  styles,
+  /@media\s*\(max-width:\s*720px\)[\s\S]*?\.sidebar\s*\{[^}]*height:\s*auto/,
+  'the 720px breakpoint must keep the sidebar height automatic',
+);
+
 console.log(
-  `PASS: ${sources.size} shipped source files checked. The honesty statement is present (${required.length} required statements), no fixture, frozen clock, invented identity or alias ships, all nine consumed routes and both external origins are present, no client-side role guard exists, tokens are never persisted, no secret is bundled and no external asset or inline handler is served.`,
+  `PASS: ${sources.size} shipped source files checked. The honesty statement is present (${required.length} required statements), no fixture, frozen clock, invented identity or alias ships, all nine consumed routes and both external origins are present, no client-side role guard exists, tokens are never persisted, no secret is bundled, the sidebar still declares its own vertical scroll, and no external asset or inline handler is served.`,
 );
