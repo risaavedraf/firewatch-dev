@@ -1,4 +1,5 @@
 import { PanelHeading, StatusCopy } from '../components/ui';
+import { rejectedSessionCopy } from '../app/sessionCopy';
 import { useSessionState } from '../app/store';
 import { startLogin, type SessionState } from '../core/session';
 
@@ -188,8 +189,12 @@ function roleDisplay(session: SessionState): RoleDisplay {
     return {
       badge: 'SIN SESIÓN',
       value: 'No disponible',
+      // The panel whose subject is the session names why there is none. A refused
+      // token is not a first visit, so it says so and keeps the way back (S2).
       status:
-        'Sin token en memoria: el rol declarado por la sesión no está disponible; conecta una sesión para leerlo.',
+        session.reason === 'rejected'
+          ? `${rejectedSessionCopy()} El rol declarado por la sesión no está disponible hasta que haya una sesión establecida.`
+          : 'Sin token en memoria: el rol declarado por la sesión no está disponible; conecta una sesión para leerlo.',
     };
   }
   if (session.roles === null) {

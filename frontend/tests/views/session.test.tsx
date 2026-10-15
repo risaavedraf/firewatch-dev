@@ -155,6 +155,27 @@ test('an absent token shows an explicit unavailable state without guessing a rol
   expect(text).not.toMatch(/\bviewer\b|\badmin\b/);
 });
 
+// S2 — the panel whose whole subject is the session must explain a refused token.
+// It may keep stating the current fact, but it may not present the closure as a
+// first visit, and it must still say how to get the role back.
+test('the role panel names a rejected token instead of the plain first-visit state (S2)', async () => {
+  await connect(jwt({ realm_access: { roles: ['viewer'] } }));
+  // The transport is the only writer of the reason; this is the state a
+  // token-bearing 401 publishes.
+  act(() => {
+    resetSession('rejected');
+  });
+
+  render(<SessionView />);
+
+  expect(document.getElementById('session-roles-badge')).toHaveTextContent('SIN SESIÓN');
+  expect(document.getElementById('session-roles')).toHaveTextContent('No disponible');
+  const text = document.getElementById('session-roles-status')?.textContent ?? '';
+  expect(text).toMatch(/rechazó el token/i);
+  expect(text).toMatch(/conecta nuevamente/i);
+  expect(text).not.toMatch(/\bviewer\b|\badmin\b/);
+});
+
 test('unreadable or role-less tokens show an explicit unavailable state and never a guessed role', async () => {
   const cases: ReadonlyArray<[string, string]> = [
     ['not a JWT at all', 'test'],
