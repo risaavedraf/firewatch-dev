@@ -62,7 +62,7 @@ Se sigue `odd/PR-CONVENTIONS.md` **vigente** (adoptado por PR #16): un issue con
 
 **Regla que este error fija, y que es el motivo de esta enmienda:** un conteo se **mide**, nunca se estima ni se recuerda. La primera versión de S7 y de `L39` afirmaba «2 líneas» y **era falsa**: se declaró sin medirla, teniendo el `6 ++` del `git diff --stat` delante. El verificador independiente la falsificó y el coordinador la reprodujo. Es la misma regla que S14 ya enunciaba para su propio caso —«un conteo de errores nunca se declara desde una salida truncada»—, extendida a un conteo que no se declaró desde ninguna salida. Mismo tipo de fallo, misma corrección: declarar el número con su medición y su herramienta.
 - **`frontend/**`:** sin cambios. El defecto es del servidor (S2).
-- **La skill ignorada:** no versionable (S5).
+- **La skill de S5:** no versionable, y la precisión importa — en `main` está **sin trackear pero no ignorada**; la regla que la excluye llega con el PR #18, y es la política que ese PR declara la que la vuelve no entregable.
 - **Keycloak / realm:** nada. El URI de post-logout es acción del usuario en la consola; no se reinicia ni se reimporta el realm.
 
 ## Tasks
@@ -82,7 +82,9 @@ Se sigue `odd/PR-CONVENTIONS.md` **vigente** (adoptado por PR #16): un issue con
 
 **L2** — El informe que especifica este trabajo está en **`odd/tasks/reviews/playwright-signed-in-round-trip.md`** (T3). Citado verbatim en S2, S3, S4 y S5. Su brief de origen es `odd/urgent/rediseno-pagina/handoff-playwright-signed-in.md`, que vive en **PR #18** (abierto) y que este trabajo **no toca**.
 
-**L7** — Orden de entrega, declarado porque un verificador lo midió y su medición es correcta: en la rama **`fix/gateway-expose-request-id`** el archivo del informe de L2 **todavía no existe**, y la entrada **L8** del ledger tampoco. Ambos llegan con el **PR #22**. Quien verifique solo la rama de A reportará —con razón— que no los encuentra; esta nota existe para que eso se lea como el orden declarado y no como un enlace roto. Es un acoplamiento real entre dos PRs y se declara en vez de esconderse: si #22 no se fusionara, el informe no estaría en el repositorio.
+**L7** — Orden de entrega, declarado porque un verificador lo midió y su medición es correcta: en la rama **`fix/gateway-expose-request-id`** el archivo del informe de L2 **todavía no existe** y el ledger —que sí existe— **todavía no tiene la entrada L8**. Ambos llegan con el **PR #22**. Quien verifique solo la rama de A reportará —con razón— que no los encuentra; esta nota existe para que eso se lea como el orden declarado y no como un enlace roto. Es un acoplamiento real entre dos PRs y se declara en vez de esconderse: si #22 no se fusionara, el informe no estaría en el repositorio.
+
+**L8** — Atribución de las afirmaciones de este documento, para que ninguna se lea como medida cuando no lo es: los conteos de RED/GREEN, el crecimiento de líneas del snapshot y el estado de las ramas y los PRs **los midió el coordinador** con la herramienta que cita cada caso; las mediciones de navegador son **del informe** (L2) y no se reprodujeron aquí; y el **estado remoto histórico** (PR #18 abierto y `MERGEABLE`, un solo merge a `main`) es lo que el coordinador observó en su momento, no algo que una re-verificación documental pueda reconfirmar. Declararlo es preferible a que una de esas tres clases se lea como si fuera de otra.
 
 **L3** — Estado medido antes de escribir: `main` = `41b9514` tras fusionar PR #16 (MERGED `2026-10-15T20:20:02Z`); PR #18 abierto, `MERGEABLE`, intacto. Suite base del gateway **en verde** antes del cambio: `go test ./...` → `ok firewatch.local/gateway/internal/handler 0.977s`, exit 0.
 
