@@ -235,7 +235,18 @@ export function SessionView() {
           <p className="panel-note">
             Inicia sesión en Keycloak. FireWatch nunca solicita ni recibe tu contraseña; la API valida los permisos.
           </p>
-          <button id="login" className="primary-button" type="button" onClick={() => startLogin()}>
+          {/* F3 — one control, one state. `Shell.tsx` hides the logout control while
+              signed out; this one is disabled while a session is established or still
+              being established, so an authenticated operator can no longer see an
+              enabled "Iniciar sesión" whose only effect would be to restart the OAuth
+              flow. The status line below states which of the two situations it is. */}
+          <button
+            id="login"
+            className="primary-button"
+            type="button"
+            disabled={session.status !== 'signed-out'}
+            onClick={() => startLogin()}
+          >
             Iniciar sesión con Keycloak
           </button>
           <p className="panel-note">
