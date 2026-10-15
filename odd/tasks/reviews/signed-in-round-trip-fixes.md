@@ -58,7 +58,9 @@ Se sigue `odd/PR-CONVENTIONS.md` **vigente** (adoptado por PR #16): un issue con
 
 ### S7 — Lo que NO se toca, y por qué
 
-- **`backend/docs/code-explanation/**`:** es una **instantánea fechada** (`backend/docs/code-explanation/README.md:7`) y su re-baseline «exige autorización explícita»; está declarada como deuda abierta. `01-gateway.md` documenta rangos de `gateway.go` que **ya** estaban obsoletos antes de este cambio. Este PR **agranda esa deuda declarada en 2 líneas** y lo dice en su Test Plan en vez de regenerar el manifiesto sin releer las citas.
+- **`backend/docs/code-explanation/**`:** es una **instantánea fechada** (`backend/docs/code-explanation/README.md:7`) y su re-baseline «exige autorización explícita»; está declarada como deuda abierta. `01-gateway.md` documenta rangos de `gateway.go` que **ya** estaban obsoletos antes de este cambio. Este PR **agranda esa deuda declarada en 6 líneas medidas** —`gateway.go` pasa de **124 a 130** líneas— y lo dice en su Test Plan en vez de regenerar el manifiesto sin releer las citas.
+
+**Regla que este error fija, y que es el motivo de esta enmienda:** un conteo se **mide**, nunca se estima ni se recuerda. La primera versión de S7 y de `L39` afirmaba «2 líneas» y **era falsa**: se declaró sin medirla, teniendo el `6 ++` del `git diff --stat` delante. El verificador independiente la falsificó y el coordinador la reprodujo. Es la misma regla que S14 ya enunciaba para su propio caso —«un conteo de errores nunca se declara desde una salida truncada»—, extendida a un conteo que no se declaró desde ninguna salida. Mismo tipo de fallo, misma corrección: declarar el número con su medición y su herramienta.
 - **`frontend/**`:** sin cambios. El defecto es del servidor (S2).
 - **La skill ignorada:** no versionable (S5).
 - **Keycloak / realm:** nada. El URI de post-logout es acción del usuario en la consola; no se reinicia ni se reimporta el realm.
@@ -79,6 +81,8 @@ Se sigue `odd/PR-CONVENTIONS.md` **vigente** (adoptado por PR #16): un issue con
 > prepara los fixes de todo porfa, si hay que hacer algun push a main hazlo y luego continua con estos fixes en una nueva rama, mismo sistema para pushear, issue y pr de la skill
 
 **L2** — El informe que especifica este trabajo está en **`odd/tasks/reviews/playwright-signed-in-round-trip.md`** (T3). Citado verbatim en S2, S3, S4 y S5. Su brief de origen es `odd/urgent/rediseno-pagina/handoff-playwright-signed-in.md`, que vive en **PR #18** (abierto) y que este trabajo **no toca**.
+
+**L7** — Orden de entrega, declarado porque un verificador lo midió y su medición es correcta: en la rama **`fix/gateway-expose-request-id`** el archivo del informe de L2 **todavía no existe**, y la entrada **L8** del ledger tampoco. Ambos llegan con el **PR #22**. Quien verifique solo la rama de A reportará —con razón— que no los encuentra; esta nota existe para que eso se lea como el orden declarado y no como un enlace roto. Es un acoplamiento real entre dos PRs y se declara en vez de esconderse: si #22 no se fusionara, el informe no estaría en el repositorio.
 
 **L3** — Estado medido antes de escribir: `main` = `41b9514` tras fusionar PR #16 (MERGED `2026-10-15T20:20:02Z`); PR #18 abierto, `MERGEABLE`, intacto. Suite base del gateway **en verde** antes del cambio: `go test ./...` → `ok firewatch.local/gateway/internal/handler 0.977s`, exit 0.
 
