@@ -117,6 +117,14 @@ Verificación de atribución, no afirmación: tras corregir lo propio, filtrar l
 
 Regla permanente, **reforzada tras violarla dos veces**: quien borra o cambia un archivo inventariado actualiza el inventario, regenera el snapshot **y vuelve a ejecutar el verificador al cerrar esa tarea**. No basta con haberlo ejecutado tras la tarea anterior: cada tarea que toca un archivo inventariado invalida la medición previa. Un conteo de errores nunca se declara desde una salida truncada.
 
+### S15 — La página debe poder leer el identificador de correlación
+
+`X-Request-ID` **no** es una cabecera de respuesta *safelisted* de CORS. En una respuesta cross-origin el navegador solo la entrega al JavaScript de la página si el servidor la nombra en `Access-Control-Expose-Headers`. El gateway ya devolvía el identificador, pero hasta esta spec **no lo exponía**, así que `response.headers.get('X-Request-ID')` devolvía `null` en la página y el 403 de `#audit` perdía su `request_id` **aunque el servidor lo hubiera enviado**. La causa estaba enteramente en el servidor: el cliente lee bien (`frontend/src/core/api.ts:174`) y `X-Request-ID` es la única cabecera de respuesta no safelisted que la página lee.
+
+La obligación **se suma a S10**, no la reemplaza: toda respuesta cross-origin del origen configurado declara `Access-Control-Expose-Headers: X-Request-ID`, incluidas las de error (`401`, `403`, `404`, `429`, `502`), y **un origen no configurado sigue sin recibir ninguna cabecera CORS**, esta incluida. Como todo valor CORS de este gateway, se nombra explícitamente: nunca comodín.
+
+Hallazgo y medición: `odd/tasks/reviews/playwright-signed-in-round-trip.md`. RED→GREEN propio en `TestGatewayExposesRequestIDToThePageFromConfiguredOrigin`, con el fail-closed extendido en `TestGatewayRejectsPreflightFromUnconfiguredOrigin` y `TestGatewayFailsClosedWithoutConfiguredOrigin`.
+
 ---
 
 ## Tasks
@@ -423,3 +431,6 @@ Limitación declarada por el verificador, y es correcta: la preservación byte a
 Se evaluó explícitamente y se decidió no re-verificar una vez más. Motivo, no comodidad: las tres correcciones de T12 son **exclusivamente documentales**, ninguna toca un archivo del inventario —comprobado ejecutando el verificador, no asumido—, y por tanto no alteran ningún artefacto sobre el que T11 haya dictaminado. Las tres afirmaciones corregidas se comprobaron una a una contra el artefacto real por observación directa. Una tercera ronda repetiría las mismas comprobaciones de CORS, manifiesto y suites, cuyo estado no cambió.
 
 Queda anotado como decisión del coordinador, reversible: si se prefiere una tercera verificación independiente, la única superficie nueva a cubrir son esas tres frases.
+
+**L39** (hallazgo posterior, del recorrido con sesión real; arreglado después de esta feature):
+El recorrido con sesión en navegador midió que el 403 de `#audit` no mostraba su `request_id`. La causa **no** estaba en el cliente —`frontend/src/core/api.ts:174` lee la cabecera correctamente— sino aquí: el bloque CORS de este gateway nunca declaró `Access-Control-Expose-Headers`, y `X-Request-ID` no es safelisted, así que el navegador la ocultaba a la página. Se fija como **S15** y se corrige en la rama `fix/gateway-expose-request-id`, con RED→GREEN propio y el fail-closed cubierto por prueba. Consecuencia declarada: las afirmaciones de `guion-recorrido.md:38` y `README.md:104` que el informe del recorrido marcó como falsas **vuelven a ser ciertas por el arreglo del servidor**, no por corregir el texto. Deuda que este cambio agranda y declara: `backend/docs/code-explanation/01-gateway.md` ancla rangos de líneas de `gateway.go` que ya estaban obsoletos antes de tocar el archivo, y este arreglo les suma **6 líneas medidas**: `gateway.go` pasa de **124 a 130** líneas, con `randomID` en 113 → 119 y `failure` en 120 → 126, de modo que las citas posteriores a la inserción se desplazan 6 y las anteriores no se mueven. **Corrección de un error propio.** La primera versión de este párrafo decía «**2 líneas**» y era **falso**: la cifra se declaró sin medirla, con el `6 ++` del `git diff --stat` a la vista. La midió el verificador independiente (`git show` + conteo de líneas) y el coordinador la reprodujo antes de escribir esta frase. No se re-baseliniza porque exige autorización explícita (S14).

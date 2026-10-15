@@ -57,6 +57,12 @@ func New(verifier Verifier, jobs, risk *url.URL, webOrigin string) http.Handler 
 		crossOrigin := webOrigin != "" && r.Header.Get("Origin") == webOrigin
 		if crossOrigin {
 			w.Header().Set("Access-Control-Allow-Origin", webOrigin)
+			// The page renders the correlation id of an error, and X-Request-ID is
+			// not a CORS-safelisted response header: without this declaration the
+			// browser hides it from page JavaScript and the id the gateway sent is
+			// lost before the message is built. It is named explicitly rather than
+			// wildcarded, like every other CORS value here.
+			w.Header().Set("Access-Control-Expose-Headers", "X-Request-ID")
 			w.Header().Add("Vary", "Origin")
 		}
 		// A preflight is answered before the rate limiter and before the bearer
