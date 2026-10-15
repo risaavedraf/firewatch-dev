@@ -160,7 +160,7 @@ func TestGatewayRejectsPreflightFromUnconfiguredOrigin(t *testing.T) {
 	response := httptest.NewRecorder()
 	app.ServeHTTP(response, request)
 
-	for _, header := range []string{"Access-Control-Allow-Origin", "Access-Control-Allow-Methods", "Access-Control-Allow-Headers", "Access-Control-Max-Age", "Vary"} {
+	for _, header := range []string{"Access-Control-Allow-Origin", "Access-Control-Allow-Methods", "Access-Control-Allow-Headers", "Access-Control-Max-Age", "Access-Control-Expose-Headers", "Vary"} {
 		if got := response.Header().Get(header); got != "" {
 			t.Errorf("disallowed origin preflight must not carry %s, got %q", header, got)
 		}
@@ -184,8 +184,13 @@ func TestGatewayFailsClosedWithoutConfiguredOrigin(t *testing.T) {
 	actual.Header.Set("Authorization", "Bearer valid")
 	actualResponse := httptest.NewRecorder()
 	app.ServeHTTP(actualResponse, actual)
-	if got := actualResponse.Header().Get("Access-Control-Allow-Origin"); got != "" {
-		t.Fatalf("unconfigured gateway must not emit Access-Control-Allow-Origin, got %q", got)
+	for header, got := range map[string]string{
+		"Access-Control-Allow-Origin":   actualResponse.Header().Get("Access-Control-Allow-Origin"),
+		"Access-Control-Expose-Headers": actualResponse.Header().Get("Access-Control-Expose-Headers"),
+	} {
+		if got != "" {
+			t.Fatalf("unconfigured gateway must not emit %s, got %q", header, got)
+		}
 	}
 }
 
@@ -325,6 +330,56 @@ func TestGatewayKeepsBearerRequiredAndHealthReady(t *testing.T) {
 
 	ready := httptest.NewRecorder()
 	app.ServeHTTP(ready, httptest.NewRequest(http.MethodGet, "/health/ready", nil))
+	if ready.Code != http.StatusNoContent {
+		t.Fatalf("/health/ready got %d want %d", ready.Code, http.StatusNoContent)
+	}
+}
+
+// S15: the page renders the correlation id of an error, and X-Request-ID is
+// not a CORS-safelisted response header. Without an explicit
+// Access-Control-Expose-Headers the browser hides it from the page, so the
+// audit 403 loses its request_id even though the gateway sent it. The header
+// is therefore part of the response contract, not decoration.
+func TestGatewayExposesRequestIDToThePageFromConfiguredOrigin(t *testing.T) {
+	app := newTestGateway(t, allowedOrigin)
+
+	// The preflight must expose it too, so the two CORS paths do not diverge.
+	preflight := httptest.NewRequest(http.MethodOptions, "/v1/audit", nil)
+	preflight.Header.Set("Origin", allowedOrigin)
+	preflight.Header.Set("Access-Control-Request-Method", http.MethodGet)
+	preflightResponse := httptest.NewRecorder()
+	app.ServeHTTP(preflightResponse, preflight)
+	if preflightResponse.Code != http.StatusNoContent {
+		t.Fatalf("preflight got %d want %d", preflightResponse.Code, http.StatusNoContent)
+	}
+	if exposed := preflightResponse.Header().Get("Access-Control-Expose-Headers"); !headerAllowed(exposed, "X-Request-ID") {
+		t.Errorf("preflight Access-Control-Expose-Headers got %q want it to expose X-Request-ID", exposed)
+	}
+
+	// An error response is the case the page actually renders. The block that
+	// sets it runs before every failure() branch, so asserting here covers the
+	// 403 the jobs service returns as much as the 401 asserted below.
+	unauthorized := httptest.NewRecorder()
+	unauthorizedRequest := httptest.NewRequest(http.MethodGet, "/v1/audit", nil)
+	unauthorizedRequest.Header.Set("Origin", allowedOrigin)
+	app.ServeHTTP(unauthorized, unauthorizedRequest)
+	if unauthorized.Code != http.StatusUnauthorized {
+		t.Fatalf("unauthenticated /v1/audit got %d want %d", unauthorized.Code, http.StatusUnauthorized)
+	}
+	if exposed := unauthorized.Header().Get("Access-Control-Expose-Headers"); !headerAllowed(exposed, "X-Request-ID") {
+		t.Errorf("401 response Access-Control-Expose-Headers got %q want it to expose X-Request-ID", exposed)
+	}
+	if got := unauthorized.Header().Get("X-Request-ID"); got == "" {
+		t.Error("401 response must carry the correlation id it exposes")
+	}
+
+	// The health endpoint is outside /v1/ and answers before any CORS decision
+	// of interest here; asserting it keeps the header from being added to
+	// responses the page never reads.
+	ready := httptest.NewRecorder()
+	readyRequest := httptest.NewRequest(http.MethodGet, "/health/ready", nil)
+	readyRequest.Header.Set("Origin", allowedOrigin)
+	app.ServeHTTP(ready, readyRequest)
 	if ready.Code != http.StatusNoContent {
 		t.Fatalf("/health/ready got %d want %d", ready.Code, http.StatusNoContent)
 	}
