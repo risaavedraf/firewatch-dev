@@ -169,7 +169,7 @@ test('unreadable or role-less tokens show an explicit unavailable state and neve
   for (const [label, token] of cases) {
     resetSession();
     await connect(token);
-    expect(getSessionSnapshot(), label).toEqual({ status: 'signed-in', roles: null });
+    expect(getSessionSnapshot(), label).toEqual({ status: 'signed-in', roles: null, reason: null });
 
     const { unmount } = render(<SessionView />);
     expect(document.getElementById('session-roles')?.textContent, label).toBe('No informado');

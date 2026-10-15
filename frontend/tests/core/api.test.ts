@@ -282,8 +282,20 @@ test('401 resets the session and reports unauthorized', async () => {
   fetchStub.answer(`${gatewayOrigin}/v1/risk/zones`, { code: 'unauthorized' }, 401, 'req-401');
   const failure = expectFailure(await outcome);
   expect(failure).toEqual({ kind: 'unauthorized', reason: 'unauthorized', status: 401, requestId: 'req-401' });
-  expect(getSessionSnapshot().status).toBe('signed-out');
+  expect(getSessionSnapshot()).toEqual({ status: 'signed-out', roles: null, reason: 'rejected' });
   expect(getAccessToken()).toBe('');
+});
+
+test('a 401 on a request that carried no token lowers the session without a reason', async () => {
+  const { fetchStub } = prepare();
+  const outcome = ready();
+  await flush();
+  fetchStub.answer(`${gatewayOrigin}/health/ready`, { code: 'unauthorized' }, 401);
+  const failure = expectFailure(await outcome);
+  expect(failure.kind).toBe('unauthorized');
+  // No bearer travelled, so the server did not reject a token: the first-visit
+  // copy is the honest one and the reason stays `null`.
+  expect(getSessionSnapshot()).toEqual({ status: 'signed-out', roles: null, reason: null });
 });
 
 test('403 is a permission denial, never unavailable, and keeps the session', async () => {

@@ -514,7 +514,9 @@ test('superseded /v1/risk/zones after a 401 reset cannot repopulate map, count, 
   expect(getSessionSnapshot().status).toBe('signed-out');
   expect(textOf('zone-count')).toBe('No informado');
   const clearedRisk = textOf('risk-status');
-  expect(clearedRisk).toMatch(/Conecta un token autorizado/);
+  // The catalogue read carried the bearer, so this is a rejected token, not a
+  // first visit: the panel must name the rejection (S2).
+  expect(clearedRisk).toMatch(/rechazó el token/i);
   expect(mapIsHidden()).toBe(true);
   expect(selector().disabled).toBe(true);
 
@@ -540,4 +542,33 @@ test('superseded /v1/risk/zones after logout cannot repopulate state nor chain l
   expect(textOf('risk-status')).toBe(clearedRisk);
   expect(latestCallCount()).toBe(0);
   expect(historyCallCount()).toBe(0);
+});
+
+// S2 — a rejected token is the visible consequence of the model change: the
+// map's empty message and the risk panel name the rejection instead of telling
+// the operator they never connected.
+test('a token-bearing 401 names the rejection in the map and the risk panel (S2)', async () => {
+  await openSignedIn();
+  fetchStub.answer(ZONES_URL, { code: 'unauthorized' }, 401);
+  await settle();
+
+  expect(getSessionSnapshot()).toEqual({ status: 'signed-out', roles: null, reason: 'rejected' });
+  expect(textOf('map-empty')).not.toBe('Conecta un token autorizado para cargar las zonas analizadas.');
+  expect(textOf('map-empty')).toMatch(/rechazó el token/i);
+  expect(textOf('risk-status')).toMatch(/rechazó el token/i);
+});
+
+// S6 — the reason belongs to the rejected session only: once the session is
+// closed (the state `signOut` publishes) the anonymous copy is the correct one.
+test('closing a rejected session returns to the anonymous copy (S6)', async () => {
+  await openSignedIn();
+  fetchStub.answer(ZONES_URL, { code: 'unauthorized' }, 401);
+  await settle();
+  expect(getSessionSnapshot().reason).toBe('rejected');
+
+  await logOut();
+
+  expect(getSessionSnapshot()).toEqual({ status: 'signed-out', roles: null, reason: null });
+  expect(textOf('map-empty')).toBe('Conecta un token autorizado para cargar las zonas analizadas.');
+  expect(textOf('risk-status')).toBe('Conecta un token autorizado para consultar la API.');
 });

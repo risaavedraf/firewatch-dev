@@ -27,9 +27,11 @@ import {
   useSessionState,
   useZoneLevels,
 } from '../app/store';
+import { idleCopy } from '../app/sessionCopy';
 import { MapPanel, type MapLoadState, type ZoneLevelLookup } from '../components/map/MapPanel';
 import { DataList, Metric, PanelHeading, StatusCopy, UnimplementedNote } from '../components/ui';
 import { history, latest, zones, type Failure, type Outcome } from '../core/api';
+import type { SessionState } from '../core/session';
 import {
   computeFactorBars,
   evaluateValidity,
@@ -49,7 +51,6 @@ const SYNTHETIC_NOTICE = 'Entorno sintético: no riesgo real observado.';
 const MISSING_NOTICE = 'Aviso de la API ausente o inválido.';
 const WRONG_ZONE_STATUS = 'La API devolvió un lote de otra zona; se descartó.';
 const NO_BATCH_STATUS = 'La API no informa lotes publicados para esta zona.';
-const IDLE_STATUS_SIGNED_OUT = 'Conecta un token autorizado para consultar la API.';
 const IDLE_STATUS_NO_ZONE = 'Selecciona una zona para consultar el último lote.';
 const LOADING_STATUS = 'Consultando el último lote…';
 const DEMO_BATCH_STATUS =
@@ -120,13 +121,13 @@ interface RiskCopy {
   status: string;
 }
 
-function riskCopy(batch: BatchState, signedIn: boolean): RiskCopy {
+function riskCopy(batch: BatchState, session: SessionState): RiskCopy {
   switch (batch.kind) {
     case 'idle':
       return {
         pill: 'SIN CONSULTAR',
         level: 'Sin datos',
-        status: signedIn ? IDLE_STATUS_NO_ZONE : IDLE_STATUS_SIGNED_OUT,
+        status: session.status === 'signed-in' ? IDLE_STATUS_NO_ZONE : idleCopy(session, 'consultar la API'),
       };
     case 'loading':
       return { pill: 'SIN CONSULTAR', level: 'Sin consultar', status: LOADING_STATUS };
@@ -342,7 +343,7 @@ export function OverviewView() {
         ? { kind: 'loading' }
         : currentRead.history;
 
-  const risk = riskCopy(currentBatch, signedIn);
+  const risk = riskCopy(currentBatch, session);
   const historyText = currentHistory.kind === 'ready' ? String(currentHistory.count) : '—';
   const validityText = currentRead === null ? 'Sin consultar' : currentRead.validity.text;
 
@@ -425,6 +426,7 @@ export function OverviewView() {
           selectedCode={selectedZone}
           zoneLevels={zoneLevelLookup}
           onSelect={selectZone}
+          sessionReason={session.reason}
         />
 
         <article className="panel risk-panel">

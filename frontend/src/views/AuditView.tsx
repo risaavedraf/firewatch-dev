@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useState } from 'react';
 
+import { idleCopy } from '../app/sessionCopy';
 import { PanelHeading } from '../components/ui';
 import { useSessionState } from '../app/store';
 import { audit, type Outcome } from '../core/api';
+import type { SessionState } from '../core/session';
 import type { AuditEntry } from '../types/api';
 
 // N8b — the activity register (S13/S17). `/v1/audit` is admin-only and accepts no
@@ -29,10 +31,13 @@ interface RegisterState {
   showTable: boolean;
 }
 
+// The view's own action phrase; the reason branch lives in `sessionCopy`.
+const AUDIT_IDLE_ACTION = 'consultar el registro de actividad';
+
 const IDLE_STATE: RegisterState = {
   phase: 'idle',
   badge: 'SIN CONSULTAR',
-  message: 'Conecta un token autorizado para consultar el registro de actividad.',
+  message: idleCopy({ reason: null }, AUDIT_IDLE_ACTION),
   entries: [],
   showTable: false,
 };
@@ -100,7 +105,8 @@ function registerFromOutcome(outcome: Outcome<AuditEntry[]>): RegisterState {
   };
 }
 
-function AuditRegister({ signedIn }: { signedIn: boolean }) {
+function AuditRegister({ session }: { session: SessionState }) {
+  const signedIn = session.status === 'signed-in';
   const [state, setState] = useState<RegisterState>(signedIn ? LOADING_STATE : IDLE_STATE);
   const [revision, setRevision] = useState(0);
 
@@ -126,6 +132,9 @@ function AuditRegister({ signedIn }: { signedIn: boolean }) {
 
   const count = state.phase === 'read' ? String(state.entries.length) : '—';
   const disabled = !signedIn || state.phase === 'loading';
+  // The idle sentence is recomputed from the session, so a reason that changes
+  // while no register is open is named instead of showing a stale first-visit copy.
+  const message = state.phase === 'idle' ? idleCopy(session, AUDIT_IDLE_ACTION) : state.message;
 
   return (
     <section className="view" id="audit" data-view="audit" aria-labelledby="audit-title">
@@ -145,7 +154,7 @@ function AuditRegister({ signedIn }: { signedIn: boolean }) {
         role="status"
         aria-live="polite"
       >
-        {state.message}
+        {message}
       </p>
       <p className="panel-note">
         Endpoint de solo administradores. No acepta parámetros: el servicio acota la respuesta por sí mismo (hasta 100
@@ -202,5 +211,5 @@ export function AuditView() {
   const signedIn = session.status === 'signed-in';
   // The register is keyed to the session phase so a closed session remounts it
   // empty instead of painting the previous session's rows for a frame.
-  return <AuditRegister key={signedIn ? 'open' : 'closed'} signedIn={signedIn} />;
+  return <AuditRegister key={signedIn ? 'open' : 'closed'} session={session} />;
 }

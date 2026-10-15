@@ -173,7 +173,11 @@ async function requestJson(
     }
     const requestId = response.headers.get('X-Request-ID') ?? '';
     if (response.status === 401) {
-      resetSession();
+      // The 401 still lowers the token (S6). The reason is `'rejected'` only
+      // when this request actually carried a non-empty bearer: a tokenless 401
+      // is not evidence that a token was refused (S3).
+      const sentBearer = request.authenticated !== false && token !== '';
+      resetSession(sentBearer ? 'rejected' : null);
       return { state: 'failed', failure: failureSpec('unauthorized', 'unauthorized', 401, requestId) };
     }
     if (response.status === 403) {

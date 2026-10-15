@@ -1,6 +1,7 @@
 import { useEffect, useState, type ReactNode } from 'react';
 
 import { navigationGroups, routes, type RouteDefinition } from '../app/routes';
+import { sessionDetailCopy } from '../app/sessionCopy';
 import { resetHistoryFilters, useSessionState } from '../app/store';
 import { ready, type Outcome } from '../core/api';
 import { signOut } from '../core/session';
@@ -21,6 +22,30 @@ interface Readiness {
 }
 
 const CHECKING = 'Consultando disponibilidad del gateway…';
+
+// The last probe that actually settled, or `null` before the first one. It is
+// the only fact `#update-checked` may state: a failed re-check leaves the
+// previous settled answer on screen until the new one lands, so the bar never
+// claims a review that did not happen and never contradicts the availability
+// card (S5).
+interface SettledReview {
+  ok: boolean;
+  at: string;
+}
+
+function nowLabel(): string {
+  return new Date().toLocaleTimeString('es-CL', { hour: '2-digit', minute: '2-digit' });
+}
+
+// `#update-checked` used to be a fixed literal that contradicted the card next
+// to it. It now reports only what the page knows: no settled review yet, or the
+// outcome of the last one that settled.
+function updateCheckedText(lastSettled: SettledReview | null): string {
+  if (lastSettled === null) return 'sin verificar todavía; la barra informa solo disponibilidad del gateway';
+  return lastSettled.ok
+    ? `el gateway respondió en la última revisión (${lastSettled.at})`
+    : `el gateway no respondió en la última revisión (${lastSettled.at})`;
+}
 
 // The gateway probe proves gateway availability and nothing else: the page says so
 // in the card itself, because a superficial readiness answer is not pipeline proof
@@ -48,6 +73,7 @@ export function Shell({ route, children }: { route: RouteDefinition; children: R
   const session = useSessionState();
   const signedIn = session.status === 'signed-in';
   const [readiness, setReadiness] = useState<Readiness>({ state: 'checking', message: CHECKING });
+  const [lastSettled, setLastSettled] = useState<SettledReview | null>(null);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -55,6 +81,7 @@ export function Shell({ route, children }: { route: RouteDefinition; children: R
     void ready(controller.signal).then((outcome) => {
       if (!active) return;
       setReadiness(readinessFrom(outcome));
+      setLastSettled({ ok: outcome.ok, at: nowLabel() });
     });
     return () => {
       active = false;
@@ -64,7 +91,10 @@ export function Shell({ route, children }: { route: RouteDefinition; children: R
 
   const checkReadiness = () => {
     setReadiness({ state: 'checking', message: CHECKING });
-    void ready().then((outcome) => setReadiness(readinessFrom(outcome)));
+    void ready().then((outcome) => {
+      setReadiness(readinessFrom(outcome));
+      setLastSettled({ ok: outcome.ok, at: nowLabel() });
+    });
   };
 
   const dotClass = readiness.state === 'ready' ? 'health-dot ready' : readiness.state === 'down' ? 'health-dot down' : 'health-dot';
@@ -145,7 +175,7 @@ export function Shell({ route, children }: { route: RouteDefinition; children: R
               <div>
                 <strong id="session-state">{signedIn ? 'Sesión conectada' : 'Sin conexión'}</strong>
                 <small id="session-detail">
-                  {signedIn ? 'Permisos evaluados por el servidor' : 'Token requerido para consultar'}
+                  {signedIn ? 'Permisos evaluados por el servidor' : sessionDetailCopy(session)}
                 </small>
               </div>
               {/* Kept in the document exactly once and hidden while signed out, which
@@ -177,7 +207,7 @@ export function Shell({ route, children }: { route: RouteDefinition; children: R
             <Icon name="refresh" />
             <span>
               Información revisada:{' '}
-              <strong id="update-checked">sin verificar, conecta un token para comprobar los servicios</strong>
+              <strong id="update-checked">{updateCheckedText(lastSettled)}</strong>
             </span>
             <a
               className="technical-notice"
