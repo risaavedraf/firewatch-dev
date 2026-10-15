@@ -99,6 +99,7 @@ Los estados BH corresponden al plan registrado; no se infiere que cambios de otr
 | --- | --- | --- | --- |
 | [Judgment Day backend — ronda 1](reviews/judgment-day-backend-round1.md) | **Listo — revisión acotada** | Veredicto APPROVED registrado para su lote | No cierra PostGIS/RabbitMQ/Keycloak live ni riesgos fuera del lote; Docker limitó evidencia |
 | [Judgment Day frontend — ronda 2](reviews/judgment-day-frontend-round2.md) | **Listo — revisión acotada** | APPROVED y 40/40 registrados | Mobile 390 px, login/logout browser y accesibilidad no demostrados por ese resultado |
+| [Arreglos de la segunda ronda de navegador](reviews/browser-round2-fixes.md) | **Parcial — arreglos entregados y verificados por el padre** | Los tres defectos corregidos en tres commits (`69791c1`, `ba95f7b`, `f9eb60e`): el 401 expresa el rechazo, el id de correlación es único y canónico, y `#update-checked` ya no contradice la tarjeta. Escalera del frontend 245/245 y `go test` + `vet` en verde; ROJO del gateway re-observado por el padre | Verificación independiente en curso, obligada por `assess` (que no pudo producir nivel); issue y PR bloqueados hasta autorización explícita de publicación; el id duplicado no se verifica en navegador contra la pila viva (S9) |
 
 ## Presentación
 
