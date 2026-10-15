@@ -266,6 +266,26 @@ export async function completeLogin(search: string): Promise<void> {
   }
 }
 
+// What the application calls once, at startup. A return from the identity provider
+// is an ordinary page load whose query carries the callback, and this exchange is
+// the only thing that can turn that query into a session; without a caller the
+// round trip could never complete, which is exactly what happened: the token
+// exchange was tree-shaken out of the bundle because nothing reached it.
+//
+// It never rejects. `completeLogin` has already closed the session and cleared the
+// query on every failure path, so there is nothing left for the page to repair and
+// an unhandled rejection would only reach the console.
+export async function resumePendingLogin(search: string): Promise<void> {
+  if (!hasPendingCallback(search)) return;
+  try {
+    await completeLogin(search);
+  } catch {
+    // Intentionally empty: the signed-out state is already published and the
+    // callback query is already gone. Refusing loudly here would strand the
+    // operator on an error they cannot act on.
+  }
+}
+
 function connectSession(token: string, returnedIDToken: string): void {
   accessToken = token;
   idToken = returnedIDToken;
@@ -295,4 +315,16 @@ export function resetSession(): void {
   accessToken = '';
   idToken = '';
   publish({ status: 'signed-out', roles: null });
+}
+
+// A page restored from the back/forward cache keeps the session it had in memory.
+// A `signing-in` left behind by a redirect the operator abandoned — pressing Back
+// at the identity provider — would otherwise stay in flight forever, and the
+// sign-in control is disabled while it is in flight: the operator could not retry
+// without reloading. This is the one event that can end that state honestly, and
+// it deliberately clears only that state: a restored page holding a real session
+// keeps it, because signing the operator out here would be a worse defect than the
+// latch it prevents.
+export function resetInterruptedLogin(): void {
+  if (snapshot.status === 'signing-in') resetSession();
 }
