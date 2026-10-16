@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 
+import { idleCopy } from '../app/sessionCopy';
 import { getSelectedZone, subscribeZoneState, useSelectedZone, useSessionState } from '../app/store';
 import { StatusCopy, UnimplementedNote } from '../components/ui';
 import { timing } from '../config';
@@ -34,7 +35,6 @@ import type { Job, Scenario } from '../types/api';
 // exactly when the zone or the session changes, which is what makes a late
 // answer from another zone impossible to display.
 
-const NO_SESSION_STATUS = 'Disponible al conectar un token. El servidor determina si tienes permiso.';
 const NO_JOB_STATUS = 'Sin trabajo para la zona seleccionada.';
 const DEFAULT_SCENARIO_NOTE =
   'El escenario se elige en esta página. El servidor asigna su instante de evaluación en UTC, una sola vez por trabajo; son perfiles de prueba, no condiciones observadas.';
@@ -66,7 +66,8 @@ function scenarioFallback(failure: Failure): string {
 }
 
 // `null` means "leave the panel as it is": an unauthorized answer already reset
-// the session, and the session callback owns the copy in that case.
+// the session, and the session callback owns the copy in that case. The reason
+// branch that copy needs now lives in `sessionCopy` (S2).
 function failureCopy(failure: Failure, action: string): string | null {
   if (failure.kind === 'unauthorized') return null;
   if (failure.kind === 'forbidden') return PERMISSION_DENIED;
@@ -379,7 +380,7 @@ export function JobsView() {
     ? job.status
     : signedIn
       ? NO_JOB_STATUS
-      : NO_SESSION_STATUS;
+      : idleCopy(session, 'solicitar el lote de la zona');
   const selectorDisabled = !signedIn || catalogue === null;
   const createDisabled = !signedIn || selectedZone === '' || requesting;
 

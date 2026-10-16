@@ -99,6 +99,7 @@ Los estados BH corresponden al plan registrado; no se infiere que cambios de otr
 | --- | --- | --- | --- |
 | [Judgment Day backend — ronda 1](reviews/judgment-day-backend-round1.md) | **Listo — revisión acotada** | Veredicto APPROVED registrado para su lote | No cierra PostGIS/RabbitMQ/Keycloak live ni riesgos fuera del lote; Docker limitó evidencia |
 | [Judgment Day frontend — ronda 2](reviews/judgment-day-frontend-round2.md) | **Listo — revisión acotada** | APPROVED y 40/40 registrados | Mobile 390 px, login/logout browser y accesibilidad no demostrados por ese resultado |
+| [Arreglos de la segunda ronda de navegador](reviews/browser-round2-fixes.md) | **Parcial — arreglos entregados, verificados, con veredicto independiente y PR abierto** | Los tres defectos corregidos en seis commits (último `d7b2d4b`): el 401 expresa el rechazo, el id de correlación es único y canónico, y `#update-checked` ya no contradice la tarjeta. Veredicto independiente **5 PASS / 0 FAIL** sobre `main..f9eb60e`, con refutación intentada y fallida en S4; escalera del frontend **246/246** y `go test` + `vet` en verde; issue **#27** y PR **#28** | El merge es del usuario. La revisión nativa está **armada y no corrida**: lineage `review-8e28018d0a11714d` con sus cuatro slots intactos, esperando un reinicio de Pi porque el relevo no relee el enrutamiento de modelos en caliente; sin corridas de modelo gastadas. La nota del mapa queda declarada como residual y el id duplicado no se verifica en navegador contra la pila viva (S9) |
 
 ## Presentación
 

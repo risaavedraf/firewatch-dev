@@ -112,7 +112,7 @@ test('without a session the panel asks to connect and issues no read', () => {
   render(<HistoryView />);
 
   expect(fetchStub.callsFor(HISTORY_URL)).toHaveLength(0);
-  expect(state()).toHaveTextContent('Conecta un token para consultar el historial.');
+  expect(state()).toHaveTextContent('Conecta un token autorizado para consultar el historial.');
 });
 
 test('signed in without a selected zone the panel asks for one and issues no read', async () => {
@@ -249,7 +249,7 @@ test('logout clears the rows and returns the panel to the connect state', async 
   await waitFor(() => expect(count()).toBe('1'));
 
   resetSession();
-  await waitFor(() => expect(state()).toHaveTextContent('Conecta un token para consultar el historial.'));
+  await waitFor(() => expect(state()).toHaveTextContent('Conecta un token autorizado para consultar el historial.'));
   expect(tbody().children).toHaveLength(0);
   expect(count()).toBe('—');
 });

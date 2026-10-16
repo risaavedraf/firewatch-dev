@@ -155,6 +155,27 @@ test('an absent token shows an explicit unavailable state without guessing a rol
   expect(text).not.toMatch(/\bviewer\b|\badmin\b/);
 });
 
+// S2 — the panel whose whole subject is the session must explain a refused token.
+// It may keep stating the current fact, but it may not present the closure as a
+// first visit, and it must still say how to get the role back.
+test('the role panel names a rejected token instead of the plain first-visit state (S2)', async () => {
+  await connect(jwt({ realm_access: { roles: ['viewer'] } }));
+  // The transport is the only writer of the reason; this is the state a
+  // token-bearing 401 publishes.
+  act(() => {
+    resetSession('rejected');
+  });
+
+  render(<SessionView />);
+
+  expect(document.getElementById('session-roles-badge')).toHaveTextContent('SIN SESIÓN');
+  expect(document.getElementById('session-roles')).toHaveTextContent('No disponible');
+  const text = document.getElementById('session-roles-status')?.textContent ?? '';
+  expect(text).toMatch(/rechazó el token/i);
+  expect(text).toMatch(/conecta nuevamente/i);
+  expect(text).not.toMatch(/\bviewer\b|\badmin\b/);
+});
+
 test('unreadable or role-less tokens show an explicit unavailable state and never a guessed role', async () => {
   const cases: ReadonlyArray<[string, string]> = [
     ['not a JWT at all', 'test'],
@@ -169,7 +190,7 @@ test('unreadable or role-less tokens show an explicit unavailable state and neve
   for (const [label, token] of cases) {
     resetSession();
     await connect(token);
-    expect(getSessionSnapshot(), label).toEqual({ status: 'signed-in', roles: null });
+    expect(getSessionSnapshot(), label).toEqual({ status: 'signed-in', roles: null, reason: null });
 
     const { unmount } = render(<SessionView />);
     expect(document.getElementById('session-roles')?.textContent, label).toBe('No informado');
@@ -229,10 +250,10 @@ test('logout returns the role panel to the explicit unavailable state', async ()
 // port of the legacy assertion
 // `the permissions matrix documents the real server guards and marks what it cannot verify`.
 const GUARD_LINES: Record<string, RegExp> = {
-  'backend/services/gateway/internal/handler/gateway.go:39': /mux\.Handle\("\/v1\/audit"/,
-  'backend/services/gateway/internal/handler/gateway.go:80': /health\/ready/,
-  'backend/services/gateway/internal/handler/gateway.go:102': /auth := strings\.Fields/,
-  'backend/services/gateway/internal/handler/gateway.go:108': /verifier\.Verify\(ctx, auth\[1\]\)/,
+  'backend/services/gateway/internal/handler/gateway.go:50': /mux\.Handle\("\/v1\/audit"/,
+  'backend/services/gateway/internal/handler/gateway.go:98': /health\/ready/,
+  'backend/services/gateway/internal/handler/gateway.go:120': /auth := strings\.Fields/,
+  'backend/services/gateway/internal/handler/gateway.go:126': /verifier\.Verify\(ctx, auth\[1\]\)/,
   'backend/services/risk/internal/handler/security.go:43': /role == "viewer" \|\| role == "admin"/,
   'backend/services/risk/internal/handler/security.go:48': /fail\(w, 403, "forbidden"\)/,
   'backend/services/risk/internal/handler/api.go:41': /"GET \/v1\/risk\/status"/,

@@ -48,7 +48,7 @@ Las rutas `/v1/jobs`, `/v1/jobs/` y `/v1/audit` usan `jobs`; `/v1/risk/` usa `ri
 | 77-81: Authorization | `strings.Fields`, dos piezas, esquema Bearer sin distinguir mayúsculas | 401 si falta o está mal formado |
 | 82-88: verificación | Timeout 5 s; cancela tras `Verify`; error o subject vacío | 401; no lee `realm_access`, `typ` ni `nbf` de forma local |
 | 89-91: envío | Token aceptado | Envuelve body con límite 8192 bytes y llama mux; el límite se hace efectivo al leer body, no es rechazo anticipado por longitud |
-| 94-100: entropía | 16 bytes desde `rand.Read` | Devuelve bytes, luego formato hexadecimal de 32 caracteres; fallo provoca `panic` |
+| 94-100: entropía | 16 bytes desde `rand.Read`, con los bits de versión 4 y de variante de RFC 9562 | Devuelve bytes; el emisor los formatea como UUID canónico con guiones; fallo provoca `panic` |
 | 101-105: error | Status y código | JSON con ID de respuesta; error del encoder ignorado |
 
 El log diferido no incluye status HTTP ni path. El límite no es por usuario/IP ni distribuido; dos réplicas tienen buckets distintos. Una ruta `/v1/` sin registro puede llegar al comportamiento por defecto del mux después de autenticar, por lo que no todos los 404 son producidos por `failure`.
@@ -73,7 +73,7 @@ Supuestos: bucket con 40 tokens, Bearer aceptado por OIDC, `jobs` responde 202. 
 | 4 | `services/gateway/internal/handler/gateway.go:25-40,89-91` | Ruta jobs | Proxy elimina identidad declarada, conserva token y envía al upstream |
 | 5 | `services/jobs/internal/handler/api.go:45-57` | Upstream recibe correlación | Normaliza UUID y devuelve 202/Location; [continuación](02-jobs.md) |
 
-El ID `G` de 32 dígitos hexadecimales es tratado como entrada a `uuid.Parse` por el servicio; el comportamiento preciso del parseador externo no se ejecutó aquí. Si no lo acepta, el servicio genera un UUID nuevo. No se garantiza conservación byte a byte del formato entre capas.
+El ID `G` es un UUID canónico con guiones (versión 4, variante de RFC 9562) y es el **mismo literal** en las tres capas: jobs y risk lo reciben, lo pasan por `uuid.Parse` y lo reescriben con `String()`, y el gateway descarta el valor del upstream para que la cabecera expuesta tenga **un solo** valor. La conservación byte a byte **sí** se garantiza desde ese arreglo: `encodeHex` de `google/uuid` v1.6.0 formatea los 16 bytes sin re-enmascarar versión ni variante (leído en el fuente del módulo, no ejecutado contra los servicios en marcha), así que el eco del servicio es idéntico. Antes del arreglo la conservación no se garantizaba y la cabecera llegaba al navegador con los dos formatos unidos por `", "`.
 
 **Alternativa:** con `tokens<1`, el paso 2 termina en 429 sin upstream; con token inválido termina en 401; con upstream inaccesible tras verificación, `ErrorHandler` devuelve 502 (`services/gateway/internal/handler/gateway.go:34,68-88`). El log diferido corre en esas salidas normales; un fallo de entropía ocurre antes de instalarlo.
 

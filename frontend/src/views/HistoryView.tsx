@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 
+import { idleCopy, rejectedSessionCopy } from '../app/sessionCopy';
 import {
   getHistoryFilters,
   setHistoryQuery,
@@ -46,7 +47,7 @@ function failureMessage(failure: Failure): string {
   }
   switch (failure.kind) {
     case 'unauthorized':
-      return 'La API rechazó el token (401). La sesión se cerró; conecta nuevamente.';
+      return rejectedSessionCopy();
     case 'forbidden':
       return 'La API denegó el permiso para consultar el historial (403). Solicita acceso a un administrador.';
     case 'malformed':
@@ -60,10 +61,10 @@ function failureMessage(failure: Failure): string {
   }
 }
 
-function stateMessage(status: HistoryStatus): string {
+function stateMessage(status: HistoryStatus, signedOutMessage: string): string {
   switch (status.kind) {
     case 'signed-out':
-      return 'Conecta un token para consultar el historial.';
+      return signedOutMessage;
     case 'no-zone':
       return 'Selecciona una zona para consultar el historial.';
     case 'loading':
@@ -192,7 +193,7 @@ export function HistoryView() {
         </span>
       </div>
       <div id="history-state" className={status.kind === 'failure' ? 'empty-state risk-error' : 'empty-state'}>
-        {stateMessage(status)}
+        {stateMessage(status, idleCopy(session, 'consultar el historial'))}
       </div>
       <div className="table-wrap">
         <table>

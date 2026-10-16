@@ -101,7 +101,7 @@ test('completeLogin validates the state, keeps the hash and clears the query', a
   const token = jwt({ realm_access: { roles: ['viewer'] } });
   await connect(token);
 
-  expect(getSessionSnapshot()).toEqual({ status: 'signed-in', roles: ['viewer'] });
+  expect(getSessionSnapshot()).toEqual({ status: 'signed-in', roles: ['viewer'], reason: null });
   expect(getAccessToken()).toBe(token);
   expect(windowStub.replaceState).toHaveBeenCalledWith(null, '', '/#overview');
   expect(storageStub.removals).toContain(pkceTransactionKey);
@@ -129,7 +129,7 @@ test('completeLogin rejects and resets the session when the returned state does 
   await expect(completeLogin('?code=code-1&state=other')).rejects.toThrow();
 
   expect(fetchStub.calls).toHaveLength(0);
-  expect(getSessionSnapshot()).toEqual({ status: 'signed-out', roles: null });
+  expect(getSessionSnapshot()).toEqual({ status: 'signed-out', roles: null, reason: null });
   expect(getAccessToken()).toBe('');
   expect(storageStub.removals).toContain(pkceTransactionKey);
   expect(windowStub.replaceState).toHaveBeenCalled();
@@ -217,7 +217,7 @@ test('signOut removes the PKCE transaction, resets the session and redirects to 
   signOut();
 
   expect(storageStub.removals).toContain(pkceTransactionKey);
-  expect(getSessionSnapshot()).toEqual({ status: 'signed-out', roles: null });
+  expect(getSessionSnapshot()).toEqual({ status: 'signed-out', roles: null, reason: null });
   expect(getAccessToken()).toBe('');
   const target = new URL(windowStub.assign.mock.calls[0][0] as string);
   expect(target.href.startsWith(issuer)).toBe(true);
@@ -232,7 +232,7 @@ test('resetSession clears the in-memory tokens and states an unavailable session
 
   resetSession();
 
-  expect(getSessionSnapshot()).toEqual({ status: 'signed-out', roles: null });
+  expect(getSessionSnapshot()).toEqual({ status: 'signed-out', roles: null, reason: null });
   expect(getAccessToken()).toBe('');
 });
 
@@ -345,4 +345,52 @@ test('a restored page ends an interrupted sign-in and never a real session', asy
   resetInterruptedLogin();
   expect(getSessionSnapshot().status).toBe('signed-in');
   expect(getAccessToken()).toBe(established);
+});
+
+// S3 — the rejection reason travels with the session and every legitimate
+// transition clears it. `'rejected'` is set by the transport alone, on a 401
+// for a request that carried a non-empty bearer; these tests pin the
+// transitions the session unit owns: clearing on a new login and notifying a
+// reason-only change with the same status.
+test('startLogin clears a rejection reason before the round trip begins (S3)', async () => {
+  setup();
+  resetSession('rejected');
+  expect(getSessionSnapshot()).toEqual({ status: 'signed-out', roles: null, reason: 'rejected' });
+
+  const listener = vi.fn();
+  const unsubscribe = subscribeSession(listener);
+  startLogin();
+
+  expect(listener).toHaveBeenCalledTimes(1);
+  expect(getSessionSnapshot()).toEqual({ status: 'signing-in', roles: null, reason: null });
+  unsubscribe();
+  // Let the PKCE flow reach the (stubbed) redirect while the URL is still
+  // stubbed, so no navigation escapes after the test double is removed.
+  await vi.waitFor(() => expect(windowStub.assign).toHaveBeenCalledTimes(1));
+});
+
+test('a completed login clears a rejection reason (S3)', async () => {
+  setup();
+  resetSession('rejected');
+
+  await connect(jwt({ realm_access: { roles: ['viewer'] } }));
+
+  expect(getSessionSnapshot()).toEqual({ status: 'signed-in', roles: ['viewer'], reason: null });
+});
+
+test('a reason-only change with the same status notifies subscribers (S3)', () => {
+  setup();
+  const listener = vi.fn();
+  const unsubscribe = subscribeSession(listener);
+
+  resetSession('rejected');
+  expect(listener).toHaveBeenCalledTimes(1);
+
+  resetSession();
+  expect(listener).toHaveBeenCalledTimes(2);
+
+  // No change at all: publish stays silent.
+  resetSession();
+  expect(listener).toHaveBeenCalledTimes(2);
+  unsubscribe();
 });

@@ -19,6 +19,7 @@
 import { useMemo } from 'react';
 
 import { PanelHeading } from '../ui';
+import { idleCopy } from '../../app/sessionCopy';
 import type { RiskLevel, ZoneCollection } from '../../types/api';
 import { buildMapLayout, countVertices, DETACHED_LONGITUDE, geometryBounds, zoneLabel, type MapFrame, type ProjectedZone } from './projection';
 import { zoneShapeClasses } from './zone-classes';
@@ -42,6 +43,10 @@ export interface MapPanelProps {
   selectedCode: string;
   zoneLevels: ZoneLevelLookup;
   onSelect: (code: string) => void;
+  // The session's rejection reason, so the idle panel can name a refused token
+  // instead of the first-visit copy. The panel does not read the session store:
+  // the caller hands it the fact (S2).
+  sessionReason: 'rejected' | null;
 }
 
 const MAINLAND_SVG_LABEL = 'Comunas seleccionables: clic, Enter o Espacio';
@@ -72,14 +77,18 @@ function isActivationKey(key: string): boolean {
   return key === 'Enter' || key === ' ';
 }
 
-function emptyMessageFor(loadState: MapLoadState, hasZones: boolean): string {
+// The view's own action phrase; the reason branch lives in `sessionCopy`, so
+// this panel never re-implements it.
+const IDLE_ACTION = 'cargar las zonas analizadas';
+
+function emptyMessageFor(loadState: MapLoadState, hasZones: boolean, idleMessage: string): string {
   if (loadState === 'loading') return 'Consultando el catálogo de zonas analizadas…';
   if (loadState === 'error') return 'No fue posible cargar el catálogo de zonas analizadas.';
   if (loadState === 'ready' || hasZones) return 'El catálogo de zonas no informa geometrías: no hay nada que dibujar.';
-  return 'Conecta un token autorizado para cargar las zonas analizadas.';
+  return idleMessage;
 }
 
-export function MapPanel({ collection, loadState, selectedCode, zoneLevels, onSelect }: MapPanelProps) {
+export function MapPanel({ collection, loadState, selectedCode, zoneLevels, onSelect, sessionReason }: MapPanelProps) {
   const layout = useMemo(() => buildMapLayout(collection), [collection]);
   const features = collection?.features ?? [];
   const hasZones = features.length > 0;
@@ -122,7 +131,7 @@ export function MapPanel({ collection, loadState, selectedCode, zoneLevels, onSe
     ? ''
     : layout.insetCount > 0
       ? 'El catálogo no informa geometrías continentales; se muestran solo los territorios insulares.'
-      : emptyMessageFor(loadState, hasZones);
+      : emptyMessageFor(loadState, hasZones, idleCopy({ reason: sessionReason }, IDLE_ACTION));
 
   const renderShape = (shape: ProjectedZone, key: string) => {
     const selected = shape.code !== '' && shape.code === selectedCode;
