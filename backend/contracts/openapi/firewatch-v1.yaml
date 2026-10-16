@@ -436,9 +436,13 @@ components:
           schema: {$ref: '#/components/schemas/ErrorResponse'}
     RateLimited:
       description: >-
-        Gateway quota exhausted; the request is answered before routing. The
-        bound is a single global limiter, not per caller, so it applies to every
-        operation in this document.
+        Gateway quota exhausted; the request is answered before routing. Three
+        layers answer this status: an aggregate bound charged before
+        authentication, a bound charged per verified token subject, and one
+        deliberately shared bound charged for unauthenticated requests. Identity
+        is the verified token subject only, never a forwarded address. The
+        response shape is identical for all three layers, so this status applies
+        to every operation in this document.
       headers:
         X-Request-ID: {$ref: '#/components/headers/RequestID'}
         Retry-After:
@@ -635,9 +639,10 @@ components:
           minimum: 0
           description: >-
             Delivery attempts this consumer spent before the job reached a
-            terminal outcome; 0 while queued or published. Persisted on the row
-            so the budget survives a consumer restart instead of living only in
-            process memory.
+            terminal outcome; 0 while queued or published. Recorded durably on
+            the row as terminal evidence, so it is still readable after a
+            consumer restart. An interrupted retry budget is NOT resumed from
+            this value: each delivery starts its own count.
         failure_reason:
           type: string
           nullable: true
