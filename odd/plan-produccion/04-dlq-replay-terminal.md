@@ -15,8 +15,8 @@
 
 ## Specs
 
-- **S1** — Se acuerdan fallos transitorios/permanentes, presupuesto de reintentos, backoff y estados terminales visibles.
-- **S2** — Existe recuperación durable, reconciliación y **replay sin duplicar efectos**.
+- **S1** — **Acordado (2026-10-16).** Transitorio = error que no implementa `Permanent() bool`; presupuesto de **5 intentos** con backoff `{1,2,4,8}` s en línea, sin cambios respecto del `retryBackoff` vigente. Permanente = implementa `Permanent() bool` y salta todo reintento. Estado terminal visible: el job pasa a **`failed`**, con `failure_reason` y `attempts` persistidos, expuesto en `GET /v1/jobs/{id}`.
+- **S2** — **Acordado.** `failed` se asigna **solo con evidencia real**: (i) el consumidor de `jobs` falla de forma permanente sobre su propia fila, o (ii) existe una entrega en la DLQ ligada a ese `job_id`. **Nunca por vencimiento de plazo** — un job sin respuesta se queda `queued`, con métrica de edad de cola y alerta. El replay es una acción **explícita de operador autenticado**, idempotente por `job_id` sobre el `inbox` único existente.
 - **S3** — Se cubren reinicios y entregas duplicadas o reordenadas en los límites de persistencia/ACK.
 - **S4** — Hay alertas y *runbook* para reintentos agotados, DLQ y trabajos atascados.
 
@@ -43,3 +43,4 @@ Ruta por defecto: **inline**. Delegar escritura solo por disparador.
 ## Log
 
 - **L1 (2026-10-16)** — Creación del desglose por spec a partir de [`README.md`](README.md) §1 (frente 4). Documento de planificación; sin implementación.
+- **L2 (2026-10-16)** — Política de recuperación acordada en la sesión grill y escrita en S1/S2. Queda desbloqueada la implementación (T2–T4). La verificación end-to-end del criterio de cierre sigue **diferida**: exige PostgreSQL y broker, y el daemon de Docker no está disponible.

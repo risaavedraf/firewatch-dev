@@ -88,3 +88,16 @@ Terminar los frentes **4** (recuperación de fallos terminales y replay de DLQ),
 ## Recordatorio de evidencia
 
 No marcar una casilla sin resultado observado. `pasa` cubre solo los comandos y paquetes ejecutados; distinguir siempre *limpio* de *no ejecutado*. Verificación independiente obligatoria para cambios que toquen un ítem de riesgo alto (el contrato, BH-08, lo es: ítem 3).
+
+## Decisiones resueltas (2026-10-16, sesión grill)
+
+Las cuatro decisiones humanas de arriba quedaron resueltas. La política acordada vive en el documento de cada unidad: [`03-gateway-rate-limits.md`](../tasks/security/backend-hardening/03-gateway-rate-limits.md), [`07-job-recovery.md`](../tasks/security/backend-hardening/07-job-recovery.md) y [`09-authentication-tests.md`](../tasks/security/backend-hardening/09-authentication-tests.md).
+
+- **D1 — Alcance de A2 en dos niveles.** Nivel 1, cerrable sin entorno: BH-03, BH-07 (política + implementación + tests unitarios), BH-08 (re-verificación independiente) y BH-09 (ratificación escrita). Nivel 2, **diferido con razón registrada y sin marcar hecho**: BH-02 (scan de imágenes), verificación end-to-end de BH-07, BH-10, BH-04/05/06/11 y BH-12. Docker sigue caído: `docker version` falla contra `npipe:////./pipe/dockerDesktopLinuxEngine`.
+- **D2/D3 — Recuperación.** Estado terminal explícito `failed` con `failure_reason` y `attempts` persistidos, más replay idempotente de operador. `failed` **solo con evidencia real** (fallo permanente, o entrega en la DLQ ligada al `job_id`), nunca por vencimiento de plazo. Reintentos sin cambios: 5 intentos, `{1,2,4,8}` s.
+- **D4 — Cuotas del gateway.** Agregado sin cambios (refill 20/s, burst 40 por réplica); autenticado por `sub` 5/s con burst 10; anónimo compartido 1/s con burst 5; estado acotado con evicción. Sin `X-Forwarded-For` ni proxy confiable declarado.
+- **D5 — Tokens.** Se ratifica la asimetría tal cual: `jobs` solo `admin` (incluidas las lecturas), `risk` `viewer` o `admin`.
+- **D6 — Rama.** El trabajo vive en **`fix/backend-hardening-bh`**, nacida en `main`. `fix/session-copy-and-correlation-id` volvió a `origin` (`cbb92ec`), así que PR #28 conserva su alcance de navegador.
+- **D7 — Archivos.** `.agents/` quedó en `.gitignore`; la doc se commiteó completa; los artefactos de los frentes 5/6 (sesión B) se commitearon junto a `backend/docs/operations.md` para que la documentación y el código que describe lleguen en el mismo commit.
+
+**Los commits de la sesión A cambiaron de SHA** al reaplicarse sobre `main`: `ee215b4`→`02911d5`, `b91714b`→`750cd80`, `aed5e09`→`702aff6`, `678a13a`→`03baa09`. La tabla de la sección «Estado al cierre de la sesión A» apunta a los SHA viejos, que ya no existen en la rama de trabajo.
