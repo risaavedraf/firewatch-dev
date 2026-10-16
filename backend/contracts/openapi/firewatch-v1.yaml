@@ -102,8 +102,11 @@ paths:
     get:
       operationId: getJob
       description: >-
-        Admin only. State is queued or published; dead-lettered jobs require
-        operator inspection in this slice.
+        Admin only. queued means no answer has been received yet and stays so
+        until one arrives; published is completed. failed is terminal and is
+        recorded only from real evidence - a permanent consumer failure or an
+        exhausted retry budget - with its failure_reason and the attempts spent,
+        never from a clock.
       parameters:
         - in: path
           name: id
@@ -615,7 +618,7 @@ components:
         description: {type: string}
     Job:
       type: object
-      required: [id, zone_id, state, requested_at]
+      required: [id, zone_id, state, requested_at, attempts]
       properties:
         id: {type: string, format: uuid}
         zone_id:
@@ -624,9 +627,33 @@ components:
           description: >-
             Valid values are the zone catalogue (zones); the accepted set is
             served by the zones endpoint.
-        state: {type: string, enum: [queued, published]}
+        state: {type: string, enum: [queued, published, failed]}
         batch_id: {type: string, format: uuid, nullable: true}
         requested_at: {type: string, format: date-time}
+        attempts:
+          type: integer
+          minimum: 0
+          description: >-
+            Delivery attempts this consumer spent before the job reached a
+            terminal outcome; 0 while queued or published. Persisted on the row
+            so the budget survives a consumer restart instead of living only in
+            process memory.
+        failure_reason:
+          type: string
+          nullable: true
+          description: >-
+            Stable machine-readable code recorded only when state is failed:
+            permanent_error (the handler can never succeed) or
+            retries_exhausted (the bounded retry budget was spent). Null
+            otherwise. The raw error is not stored here.
+        failed_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: >-
+            Server instant the terminal failed state was recorded; null unless
+            state is failed. It is evidence, not a deadline: a job with no
+            answer stays queued and is never failed by the passing of time.
         scenario_id:
           type: string
           nullable: true

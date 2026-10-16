@@ -11,6 +11,7 @@ import (
 
 	v1 "firewatch.local/contracts/events/v1"
 	"github.com/google/uuid"
+	amqp "github.com/rabbitmq/amqp091-go"
 )
 
 func TestValidSeparatesShapeFromOrigin(t *testing.T) {
@@ -396,6 +397,116 @@ func TestSessionEarlyFailures(t *testing.T) {
 				t.Fatalf("snapshot=%+v", s)
 			}
 		})
+	}
+}
+
+// TestFailureReasonClassifiesTerminalCause pins the stable code an operator
+// alerts on: only a genuinely permanent error is permanent_error, everything
+// else that reaches the end of the budget is retries_exhausted. It runs without
+// a broker and without a database.
+func TestFailureReasonClassifiesTerminalCause(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		err  error
+		want string
+	}{
+		{"permanent error", testPermanentError{}, failureReasonPermanent},
+		{"wrapped permanent error", fmt.Errorf("wrapped: %w", testPermanentError{}), failureReasonPermanent},
+		{"exhausted transient error", errors.New("transient"), failureReasonExhausted},
+		{"unrecognized error is exhausted, never permanent", errors.New("unrecognized"), failureReasonExhausted},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := failureReason(tc.err); got != tc.want {
+				t.Fatalf("failureReason(%v)=%q want %q", tc.err, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestGivenUpDeliveryRecordsTheTerminalOutcomeOnTheJobRow is the retry-to-
+// terminal transition: what the consumer spent to give up is written to the
+// job's own row, classified by why it gave up. It exercises the real
+// handleWithRetries schedule with an injected sleeper (the clock) and a fake
+// writer, so it needs neither a broker nor a database.
+func TestGivenUpDeliveryRecordsTheTerminalOutcomeOnTheJobRow(t *testing.T) {
+	for _, tc := range []struct {
+		name          string
+		workErr       error
+		wantAttempts  int
+		wantReason    string
+		wantRejected  uint64
+		wantProcessed uint64
+		wantRecorded  bool
+	}{
+		{"permanent failure gives up on the first attempt", testPermanentError{}, 1, failureReasonPermanent, 1, 0, true},
+		{"exhausted retry budget gives up after five", errors.New("transient"), 5, failureReasonExhausted, 1, 0, true},
+		{"success records no failure", nil, 1, "", 0, 1, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			attempts, err := handleWithRetries(context.Background(),
+				func(context.Context, v1.Event) error { return tc.workErr },
+				func(context.Context, time.Duration) bool { return true },
+				v1.Event{JobID: "job-1"})
+			if attempts != tc.wantAttempts {
+				t.Fatalf("attempts=%d want %d", attempts, tc.wantAttempts)
+			}
+			recorded := struct {
+				called   bool
+				jobID    string
+				reason   string
+				attempts int
+			}{}
+			b := &Broker{}
+			b.Fail = func(_ context.Context, jobID, reason string, attemptCount int) error {
+				recorded.called, recorded.jobID, recorded.reason, recorded.attempts = true, jobID, reason, attemptCount
+				return nil
+			}
+			b.settleDelivery(context.Background(), v1.Event{JobID: "job-1"}, attempts, err)
+			if b.Rejected.Load() != tc.wantRejected || b.Processed.Load() != tc.wantProcessed {
+				t.Fatalf("rejected=%d processed=%d want %d/%d", b.Rejected.Load(), b.Processed.Load(), tc.wantRejected, tc.wantProcessed)
+			}
+			if recorded.called != tc.wantRecorded {
+				t.Fatalf("failure recorded=%v want %v", recorded.called, tc.wantRecorded)
+			}
+			if tc.wantRecorded && (recorded.jobID != "job-1" || recorded.reason != tc.wantReason || recorded.attempts != tc.wantAttempts) {
+				t.Fatalf("recorded=%+v want job-1/%s/%d", recorded, tc.wantReason, tc.wantAttempts)
+			}
+		})
+	}
+}
+
+// TestSettleDeliveryWithoutAFailureWriterStillDeadLetters proves a broker built
+// without a writer (as a unit test does) keeps its previous behaviour: it counts
+// the rejection and returns instead of panicking on a nil call.
+func TestSettleDeliveryWithoutAFailureWriterStillDeadLetters(t *testing.T) {
+	b := &Broker{}
+	b.settleDelivery(context.Background(), v1.Event{JobID: "job-1"}, 5, errors.New("transient"))
+	if b.Rejected.Load() != 1 || b.Processed.Load() != 0 {
+		t.Fatalf("rejected=%d processed=%d want 1/0", b.Rejected.Load(), b.Processed.Load())
+	}
+}
+
+// TestJobWithoutADeliveryNeverBecomesTerminal pins the decision, not an
+// omission: this consumer marks a job failed only when it actually holds a
+// delivery and gives up on it. With no delivery it waits on the channel, so a
+// healthy but slow backlog is never converted into a terminal failure by a
+// clock. The test cannot prove the absence of a long deadline; it proves the
+// idle path performs no write and has no timer that fires one.
+func TestJobWithoutADeliveryNeverBecomesTerminal(t *testing.T) {
+	b := &Broker{}
+	recorded := 0
+	b.Fail = func(context.Context, string, string, int) error { recorded++; return nil }
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- b.consume(ctx, make(chan amqp.Delivery)) }()
+	// The consumer idles on the channel; no timer may write a terminal state.
+	time.Sleep(50 * time.Millisecond)
+	cancel()
+	if err := <-done; !errors.Is(err, context.Canceled) {
+		t.Fatalf("consume returned %v want context.Canceled", err)
+	}
+	if recorded != 0 {
+		t.Fatalf("a job with no delivery was marked failed %d times", recorded)
 	}
 }
 

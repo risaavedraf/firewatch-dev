@@ -24,10 +24,10 @@
 
 | ID | Spec | Ruta | Descripción | Commit |
 | --- | --- | --- | --- | --- |
-| T1 | S1 | inline | Acordar y documentar la política de reintentos/backoff/estado terminal. | — |
-| T2 | S2 | inline | Implementar replay idempotente de la DLQ y reconciliación. | — |
-| T3 | S3 | inline | Probar reinicios y entregas duplicadas/reordenadas. | — |
-| T4 | S4 | inline | Alertas y runbook para reintentos agotados, DLQ y trabajos atascados. | — |
+| T1 | S1 | inline | Acordar y documentar la política de reintentos/backoff/estado terminal. | Hecho — política en S1/S2 (`29811ef`) |
+| T2 | S2 | inline | Implementar replay idempotente de la DLQ y reconciliación. | **Unidad 1 hecha**: estado terminal en la fila propia del job (migración 004, `attempts`/`failure_reason`/`failed_at`, `Fail` solo desde `queued`). **Pendiente**: reporte de fallo `risk`→`jobs` y replay de operador. |
+| T3 | S3 | inline | Probar reinicios y entregas duplicadas/reordenadas. | Pendiente — exige DB y broker; Docker caído |
+| T4 | S4 | inline | Alertas y runbook para reintentos agotados, DLQ y trabajos atascados. | Pendiente |
 
 Ruta por defecto: **inline**. Delegar escritura solo por disparador.
 

@@ -27,6 +27,10 @@ type fakeStore struct {
 	// scenarios records the optional scenario each Create received, so a test can
 	// prove the transport forwarded (or withheld) the selection.
 	scenarios []string
+	// job and getErr let a test drive GET /v1/jobs/{id} through the Repository
+	// interface without a database.
+	job    repository.Job
+	getErr error
 }
 
 func (s *fakeStore) Create(_ context.Context, actor, key, zone, trace string, scenarioID ...string) (repository.Job, error) {
@@ -39,7 +43,7 @@ func (s *fakeStore) Create(_ context.Context, actor, key, zone, trace string, sc
 	return repository.Job{ID: uuid.NewString(), ZoneID: zone, State: "queued"}, nil
 }
 func (s *fakeStore) Get(context.Context, string) (repository.Job, error) {
-	return repository.Job{}, nil
+	return s.job, s.getErr
 }
 func (s *fakeStore) Audit(context.Context) ([]repository.Audit, error) { return nil, nil }
 
@@ -114,6 +118,99 @@ func TestStatusAuthorization(t *testing.T) {
 				if w.Code != 503 || s.Reason != "status_unavailable" || s.Dependencies.Database.State != "unknown" || s.Dependencies.DeadLetter.MaxDepth != nil || s.CheckedAt.IsZero() || w.Header().Get("Cache-Control") != "no-store" || w.Header().Get("Content-Type") != "application/json" {
 					t.Fatalf("unavailable: %s", w.Body)
 				}
+			}
+		})
+	}
+}
+
+// TestGetJobExposesStateAndPersistedFailure drives GET /v1/jobs/{id} through the
+// Repository interface. It proves the terminal 'failed' state and its persisted
+// failure_reason/attempts/failed_at reach the wire, and that the two pre-existing
+// states still answer unchanged (the nullable fields stay absent).
+func TestGetJobExposesStateAndPersistedFailure(t *testing.T) {
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatal(err)
+	}
+	signer, err := jose.NewSigner(jose.SigningKey{Algorithm: jose.RS256, Key: key}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	verifier := oidc.NewVerifier("https://issuer.test", &oidc.StaticKeySet{PublicKeys: []crypto.PublicKey{&key.PublicKey}}, &oidc.Config{ClientID: "firewatch-api", SupportedSigningAlgs: []string{"RS256"}})
+	instant := time.Date(2030, 1, 2, 3, 4, 5, 0, time.UTC)
+	reason := "permanent_error"
+	id := uuid.NewString()
+	cases := []struct {
+		name              string
+		job               repository.Job
+		wantState         string
+		wantAttempts      int
+		wantFailureReason *string
+		wantFailedAt      *time.Time
+		wantFieldsAbsent  bool
+	}{
+		{
+			name:         "queued legacy job keeps its previous shape",
+			job:          repository.Job{ID: id, ZoneID: "valparaiso-demo", State: "queued", RequestedAt: instant},
+			wantState:    "queued",
+			wantAttempts: 0, wantFieldsAbsent: true,
+		},
+		{
+			name:         "published job keeps its previous shape",
+			job:          repository.Job{ID: id, ZoneID: "valparaiso-demo", State: "published", RequestedAt: instant},
+			wantState:    "published",
+			wantAttempts: 0, wantFieldsAbsent: true,
+		},
+		{
+			name:              "failed job exposes its reason, attempts and instant",
+			job:               repository.Job{ID: id, ZoneID: "valparaiso-demo", State: "failed", RequestedAt: instant, Attempts: 5, FailureReason: &reason, FailedAt: &instant},
+			wantState:         "failed",
+			wantAttempts:      5,
+			wantFailureReason: &reason,
+			wantFailedAt:      &instant,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			payload, _ := json.Marshal(map[string]any{"iss": "https://issuer.test", "aud": "firewatch-api", "sub": "admin-subject", "exp": time.Now().Add(time.Hour).Unix(), "typ": "Bearer", "realm_access": map[string]any{"roles": []string{"admin"}}})
+			signed, err := signer.Sign(payload)
+			if err != nil {
+				t.Fatal(err)
+			}
+			token, err := signed.CompactSerialize()
+			if err != nil {
+				t.Fatal(err)
+			}
+			r := httptest.NewRequest(http.MethodGet, "/v1/jobs/"+id, nil)
+			r.Header.Set("Authorization", "Bearer "+token)
+			w := httptest.NewRecorder()
+			New(&fakeStore{job: tc.job}, verifier).ServeHTTP(w, r)
+			if w.Code != http.StatusOK {
+				t.Fatalf("code=%d body=%s", w.Code, w.Body)
+			}
+			var got struct {
+				State         string     `json:"state"`
+				Attempts      int        `json:"attempts"`
+				FailureReason *string    `json:"failure_reason"`
+				FailedAt      *time.Time `json:"failed_at"`
+			}
+			if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
+				t.Fatal(err)
+			}
+			if got.State != tc.wantState || got.Attempts != tc.wantAttempts {
+				t.Fatalf("state=%q attempts=%d want %q/%d: %s", got.State, got.Attempts, tc.wantState, tc.wantAttempts, w.Body)
+			}
+			if (got.FailureReason == nil) != (tc.wantFailureReason == nil) || (got.FailedAt == nil) != (tc.wantFailedAt == nil) {
+				t.Fatalf("nullable fields mismatch: %s", w.Body)
+			}
+			if tc.wantFailureReason != nil && *got.FailureReason != *tc.wantFailureReason {
+				t.Fatalf("failure_reason=%q want %q", *got.FailureReason, *tc.wantFailureReason)
+			}
+			if tc.wantFailedAt != nil && !got.FailedAt.Equal(*tc.wantFailedAt) {
+				t.Fatalf("failed_at=%v want %v", got.FailedAt, tc.wantFailedAt)
+			}
+			if tc.wantFieldsAbsent && (strings.Contains(w.Body.String(), `"failure_reason"`) || strings.Contains(w.Body.String(), `"failed_at"`)) {
+				t.Fatalf("non-failed job must omit the terminal fields: %s", w.Body)
 			}
 		})
 	}

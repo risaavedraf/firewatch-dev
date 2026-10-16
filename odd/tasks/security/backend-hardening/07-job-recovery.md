@@ -29,14 +29,16 @@ A job that simply never receives an answer stays `queued`. It stops being invisi
 
 ## Acceptance checklist
 
-- [ ] Agree retry budgets, backoff, permanent-failure handling, and product-visible terminal/recovery states.
-- [ ] Implement durable recovery/reconciliation and replay without duplicate effects.
-- [ ] Handle restart and duplicate/reordered delivery safely across persistence and acknowledgment boundaries.
-- [ ] Provide alerts and an operator runbook for exhausted retries, dead letters, and stuck jobs.
+- [~] Agree retry budgets, backoff, permanent-failure handling, and product-visible terminal/recovery states — the budget, backoff and permanent-failure handling are agreed and implemented, and the terminal state is persisted and visible. The **recovery** half (replay) is still pending, so this stays partial.
+- [ ] Implement durable recovery/reconciliation and replay without duplicate effects — the durable terminal transition exists, but the cross-service failure report and the operator replay are later units.
+- [~] Handle restart and duplicate/reordered delivery safely across persistence and acknowledgment boundaries — the terminal write only transitions a `queued` row, so a duplicate or reordered delivery cannot rewrite a terminal job, and `attempts` is durable on the row instead of living in process memory. Resuming an interrupted retry budget across a restart is deliberately **not** implemented: the policy keeps the in-line budget unchanged.
+- [ ] Provide alerts and an operator runbook for exhausted retries, dead letters, and stuck jobs — later unit; the DLQ action is still manual, as `05-observabilidad` recorded.
 
 ## Verification — future, not run
 
 **Checks status:** pending. Use isolated infrastructure to interrupt PostgreSQL during valid event consumption, exhaust retries, restore it, and restart consumers. Verify eventual completion for recoverable jobs without duplication; permanent failures reach the agreed observable state.
+
+**Observed in this session (2026-10-16):** unit 1 only. The classification of a give-up as `permanent_error` or `retries_exhausted`, the terminal write on the job's own row with the persisted attempt count, a job with no delivery staying `queued`, and the exposed `failed` shape are covered by passing tests, with the RED captured first. `gofmt` and `go vet` are clean and the OpenAPI document validates. **Not verified:** the migration executing against PostgreSQL, the store SQL, the live AMQP path, and everything the scenario above needs — a database and a broker are required and the Docker daemon is not available.
 
 ## Execution route and next action
 

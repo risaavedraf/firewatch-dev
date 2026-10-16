@@ -41,6 +41,12 @@ type Broker struct {
 	Rejected      atomic.Uint64
 	depthSnapshot atomic.Pointer[DeadLetterSnapshot]
 	Handle        func(context.Context, v1.Event) error
+	// Fail records the terminal outcome on the job's own row when this consumer
+	// gives up on a delivery. jobs owns the row, so the transition is written
+	// directly instead of reported across services. A nil writer is safe and
+	// leaves the rejection counter and the dead letter as the only evidence,
+	// which is the behaviour before the terminal state existed.
+	Fail func(context.Context, string, string, int) error
 }
 
 // ReadyReason is the single readiness decision for this service, factored out
@@ -180,18 +186,15 @@ func (b *Broker) consume(ctx context.Context, deliveries <-chan amqp.Delivery) e
 			if ctx.Err() != nil {
 				return ctx.Err()
 			}
+			b.settleDelivery(ctx, event, attempts, workErr)
 			if workErr != nil {
-				b.Rejected.Add(1)
-				slog.Error("event_dead_lettered", "event_id", event.ID, "job_id", event.JobID, "trace_id", event.TraceID, "attempts", attempts, "permanent", isPermanent(workErr))
 				if err := delivery.Reject(false); err != nil {
 					return err
 				}
-			} else {
-				b.Processed.Add(1)
-				slog.Info("event_processed", "event_id", event.ID, "job_id", event.JobID, "trace_id", event.TraceID)
-				if err := delivery.Ack(false); err != nil {
-					return err
-				}
+				continue
+			}
+			if err := delivery.Ack(false); err != nil {
+				return err
 			}
 		}
 	}
@@ -240,6 +243,52 @@ type permanentError interface{ Permanent() bool }
 func isPermanent(err error) bool {
 	var typed permanentError
 	return errors.As(err, &typed) && typed.Permanent()
+}
+
+// The stable codes recorded in jobs.failure_reason. A code, not the raw error
+// text, is stored: it is bounded, safe to alert on, and cannot leak an arbitrary
+// error string into the job row. The raw error travels in the log instead.
+const (
+	failureReasonPermanent = "permanent_error"
+	failureReasonExhausted = "retries_exhausted"
+)
+
+// failureReason classifies why this consumer gave up on a delivery. Only an
+// error that explicitly declares itself permanent is permanent; anything else
+// reached the end of the bounded retry budget.
+func failureReason(err error) string {
+	if isPermanent(err) {
+		return failureReasonPermanent
+	}
+	return failureReasonExhausted
+}
+
+// settleDelivery records the outcome of one delivery after its retries. A
+// success counts a processed event; a give-up counts a rejection and writes the
+// terminal failure to the job's own row. It is factored out of consume so the
+// retry-to-terminal transition is testable without an AMQP connection.
+func (b *Broker) settleDelivery(ctx context.Context, event v1.Event, attempts int, workErr error) {
+	if workErr == nil {
+		b.Processed.Add(1)
+		slog.Info("event_processed", "event_id", event.ID, "job_id", event.JobID, "trace_id", event.TraceID)
+		return
+	}
+	b.Rejected.Add(1)
+	slog.Error("event_dead_lettered", "event_id", event.ID, "job_id", event.JobID, "trace_id", event.TraceID, "attempts", attempts, "permanent", isPermanent(workErr))
+	b.failJob(ctx, event.JobID, failureReason(workErr), attempts)
+}
+
+// failJob writes the terminal failure to the job's own row. This service owns
+// that row, so the transition is applied directly. A missing writer is safe: the
+// rejection and its dead letter remain the evidence, which is the behaviour
+// before the terminal state existed.
+func (b *Broker) failJob(ctx context.Context, jobID, reason string, attempts int) {
+	if b.Fail == nil {
+		return
+	}
+	if err := b.Fail(ctx, jobID, reason, attempts); err != nil {
+		slog.Error("job_failure_record_failed", "job_id", jobID, "error", err)
+	}
 }
 
 // retryBackoff is the bounded schedule of one delivery: five attempts separated

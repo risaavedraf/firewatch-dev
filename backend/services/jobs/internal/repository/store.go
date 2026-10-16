@@ -28,7 +28,7 @@ func canonicalEvaluatedAt(t *time.Time) *time.Time {
 
 // jobColumns is the single projection shared by Create and Get so the stored
 // metadata can never be read in one place and forgotten in the other.
-const jobColumns = `id::text,zone_id,state,batch_id::text,requested_at,scenario_id,evaluated_at`
+const jobColumns = `id::text,zone_id,state,batch_id::text,requested_at,scenario_id,evaluated_at,attempts,failure_reason,failed_at`
 
 type Job struct {
 	ID          string    `json:"id"`
@@ -40,6 +40,13 @@ type Job struct {
 	// omitted from the wire so a legacy job keeps exactly its previous shape.
 	ScenarioID  *string    `json:"scenario_id,omitempty"`
 	EvaluatedAt *time.Time `json:"evaluated_at,omitempty"`
+	// Durable terminal evidence. Attempts is the delivery budget the consumer
+	// spent and is always present (0 while queued or published), so it survives a
+	// consumer restart instead of living only in process memory. The failure
+	// fields are present only on a failed job.
+	Attempts      int        `json:"attempts"`
+	FailureReason *string    `json:"failure_reason,omitempty"`
+	FailedAt      *time.Time `json:"failed_at,omitempty"`
 }
 type Audit struct {
 	ActorID    string    `json:"actor_id"`
@@ -91,9 +98,9 @@ func (s Store) Create(ctx context.Context, actor, key, zone, trace string, scena
 	}
 	err = tx.QueryRow(ctx, `INSERT INTO jobs(id, actor_id, idempotency_key, zone_id, state, scenario_id, evaluated_at)
 		VALUES($1,$2,$3,$4,'queued',$5,$6) ON CONFLICT(actor_id,idempotency_key) DO NOTHING
-		RETURNING `+jobColumns, id, actor, key, zone, scenarioArg, evaluatedArg).Scan(&job.ID, &job.ZoneID, &job.State, &job.BatchID, &job.RequestedAt, &job.ScenarioID, &job.EvaluatedAt)
+		RETURNING `+jobColumns, id, actor, key, zone, scenarioArg, evaluatedArg).Scan(&job.ID, &job.ZoneID, &job.State, &job.BatchID, &job.RequestedAt, &job.ScenarioID, &job.EvaluatedAt, &job.Attempts, &job.FailureReason, &job.FailedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
-		err = tx.QueryRow(ctx, `SELECT `+jobColumns+` FROM jobs WHERE actor_id=$1 AND idempotency_key=$2`, actor, key).Scan(&job.ID, &job.ZoneID, &job.State, &job.BatchID, &job.RequestedAt, &job.ScenarioID, &job.EvaluatedAt)
+		err = tx.QueryRow(ctx, `SELECT `+jobColumns+` FROM jobs WHERE actor_id=$1 AND idempotency_key=$2`, actor, key).Scan(&job.ID, &job.ZoneID, &job.State, &job.BatchID, &job.RequestedAt, &job.ScenarioID, &job.EvaluatedAt, &job.Attempts, &job.FailureReason, &job.FailedAt)
 		if err != nil {
 			return Job{}, err
 		}
@@ -120,7 +127,7 @@ func (s Store) Create(ctx context.Context, actor, key, zone, trace string, scena
 
 func (s Store) Get(ctx context.Context, id string) (Job, error) {
 	var job Job
-	err := s.DB.QueryRow(ctx, `SELECT `+jobColumns+` FROM jobs WHERE id=$1`, id).Scan(&job.ID, &job.ZoneID, &job.State, &job.BatchID, &job.RequestedAt, &job.ScenarioID, &job.EvaluatedAt)
+	err := s.DB.QueryRow(ctx, `SELECT `+jobColumns+` FROM jobs WHERE id=$1`, id).Scan(&job.ID, &job.ZoneID, &job.State, &job.BatchID, &job.RequestedAt, &job.ScenarioID, &job.EvaluatedAt, &job.Attempts, &job.FailureReason, &job.FailedAt)
 	if err != nil {
 		return job, err
 	}
@@ -189,4 +196,14 @@ func (s Store) Complete(ctx context.Context, event v1.Event) error {
 		}
 	}
 	return tx.Commit(ctx)
+}
+
+// Fail records the terminal outcome of the job's own delivery: the state moves
+// to 'failed' with the persisted reason and the attempt count the consumer
+// spent, both durable on the row. Only a queued row transitions, so a duplicate
+// or reordered delivery can never rewrite a job that already reached a terminal
+// state. An unknown job id matches no row and is a no-op, not an error.
+func (s Store) Fail(ctx context.Context, id, reason string, attempts int) error {
+	_, err := s.DB.Exec(ctx, `UPDATE jobs SET state='failed',failure_reason=$2,failed_at=now(),attempts=$3 WHERE id=$1 AND state='queued'`, id, reason, attempts)
+	return err
 }

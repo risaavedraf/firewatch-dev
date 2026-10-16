@@ -68,6 +68,7 @@ func run() error {
 			{version: 1, sql: migrations.Initial},
 			{version: 2, sql: migrations.Zones},
 			{version: 3, sql: migrations.SyntheticScenario},
+			{version: 4, sql: migrations.JobFailureState},
 		} {
 			var exists bool
 			if err = tx.QueryRow(migrationCtx, `SELECT EXISTS(SELECT 1 FROM schema_migrations WHERE version=$1)`, migration.version).Scan(&exists); err != nil {
@@ -124,7 +125,7 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	broker := &messaging.Broker{DB: db, URL: os.Getenv("AMQP_URL"), Handle: store.Complete}
+	broker := &messaging.Broker{DB: db, URL: os.Getenv("AMQP_URL"), Handle: store.Complete, Fail: store.Fail}
 	workerDone := make(chan struct{})
 	go func() { defer close(workerDone); broker.Run(ctx) }()
 	defer func() { stop(); <-workerDone }()
