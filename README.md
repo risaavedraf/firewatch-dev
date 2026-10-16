@@ -14,10 +14,13 @@ docker compose up -d --build
 python scripts/smoke.py
 ```
 
-That starts the API on `http://localhost:8080`. It does **not** open a web page: the gateway is API only and answers `404` on `/`. Start the page separately, from the repository root, and open `http://localhost:4173`:
+That starts the API on `http://localhost:8080`. It does **not** open a web page: the gateway is API only and answers `404` on `/`. Start the page separately — it is a Vite build, so it must be built before it is served — and open `http://localhost:4173`:
 
 ```sh
-node frontend/scripts/serve.mjs
+cd frontend
+npm install
+npm run build   # serve.mjs serves dist/, so build first
+npm run serve
 ```
 
 Open it as `localhost`, never as `127.0.0.1`. The identity provider and the gateway both have the `localhost:4173` origin registered, and a browser treats the two spellings as different origins.
