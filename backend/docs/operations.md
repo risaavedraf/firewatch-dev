@@ -184,9 +184,14 @@ operator surface.
   slowly. The job is deliberately **not** failed by a clock, so a legitimate
   backlog is never converted into a false terminal state.
 - **Act.** Check `firewatch_broker_ready`, `up` and both dead queues. Search the
-  dead-letter payloads for the job's `job_id`. Re-drive a recoverable delivery; if
-  none exists, reclaim the job with the admin replay action. Do not delete the job
-  or force it terminal.
+  dead-letter payloads for the job's `job_id`, and re-drive a delivery you find.
+- **When no delivery can be found, there is no repair available today.** The admin
+  replay accepts only a job already marked `failed`, and this one is still
+  `queued`, so replay answers `409 job_not_replayable`. That guard is deliberate: a
+  queued job may still be in flight, and re-enqueueing it blindly would risk
+  duplicate processing. Record the observation and escalate; do not delete the job
+  and do not force it terminal. This is the accountable-recovery gap listed in
+  section 10: the alert detects the case, it does not repair it.
 
 ## 10. What is explicitly not done
 
@@ -195,3 +200,7 @@ operator surface.
 - No Alertmanager routing.
 - Latency/error/runtime signals exist only for the `risk` service.
 - No drift evaluation, because there is no ground truth yet.
+- **A `queued` job whose delivery cannot be traced has no replay path.** The replay
+  accepts only a `failed` job, because a queued one may still be in flight.
+  Extending replay to `queued` needs an explicit guard against re-enqueueing work
+  that is still running, and that decision has not been taken.

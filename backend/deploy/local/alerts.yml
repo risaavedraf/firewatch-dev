@@ -54,7 +54,7 @@ groups:
           severity: warning
         annotations:
           summary: "Oldest queued job has waited {{ $value }}s on {{ $labels.job }}"
-          action: "Check the jobs consumer and both dead-letter queues for a delivery tied to the job. Re-drive a recoverable delivery; if none exists, reclaim the job with the admin replay action. Do not delete the job or force it terminal."
+          action: "Check the jobs consumer and both dead-letter queues for a delivery tied to the job, and re-drive one you find. The admin replay accepts only a job already marked failed, so a job that is still queued with no traceable delivery has no replay path today: record it and escalate. Do not delete the job or force it terminal."
 
       - alert: FireWatchBrokerUnavailable
         expr: firewatch_broker_ready == 0
