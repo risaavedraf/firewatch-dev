@@ -26,14 +26,16 @@ Decided before implementation, so these numbers are a specification rather than 
 
 ## Acceptance checklist
 
-- [ ] Specify aggregate, authenticated, and anonymous limits, trusted proxy handling, and bounded quota-state lifecycle.
-- [ ] Prevent one authenticated actor from consuming another actor's dedicated quota.
-- [ ] Preserve emergency protection and define health-route behavior explicitly.
-- [ ] Keep rejection responses consistent with BH-08 and avoid races under concurrency.
+- [x] Specify aggregate, authenticated, and anonymous limits, trusted proxy handling, and bounded quota-state lifecycle — the agreed policy table names the three layers and their numbers, and the bound is proven by tests over the idle eviction and the hard cap of the subject map.
+- [x] Prevent one authenticated actor from consuming another actor's dedicated quota — proven by a test where one subject exhausts its burst and a second subject still gets its full quota.
+- [x] Preserve emergency protection and define health-route behavior explicitly — the aggregate layer is unchanged and still the only pre-authentication bound; `/health/live`, `/health/ready` and the allowed-origin preflight stay exempt and consume no token, proven by test.
+- [~] Keep rejection responses consistent with BH-08 and avoid races under concurrency — the `429` shape (`Retry-After: 1`, `rate_limited`) keeps passing the contract test, and the limiter is mutex-guarded with a repeated concurrency stress run passing. **`-race` was not run:** this host has `CGO_ENABLED=0` and no C compiler, so the race detector cannot build here. CI runs it and is the authoritative check for this half.
 
 ## Verification — future, not run
 
 **Checks status:** pending. Test abuse versus legitimate traffic, actor isolation, anonymous bursts, spoofed forwarded headers, health routes, and concurrent requests using deterministic clocks where feasible.
+
+**Observed in this session (2026-10-16):** actor isolation, the shared anonymous bucket, a spoofed `X-Forwarded-For` changing nothing, the health and preflight exemptions, and the `429` shape are all covered by passing tests, with the RED captured before the implementation existed. Eviction and the hard cap are proven through an injected clock. `gofmt` and `go vet` are clean. The race detector could not run on this host.
 
 ## Execution route and next action
 
