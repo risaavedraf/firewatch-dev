@@ -41,6 +41,14 @@ type Broker struct {
 	Rejected      atomic.Uint64
 	depthSnapshot atomic.Pointer[DeadLetterSnapshot]
 	Handle        func(context.Context, v1.Event) error
+	// ReportFailure records the terminal failure in this service's outbox as a
+	// risk.job.failed.v1 event. risk does not own the job row, so it reports the
+	// failure across services instead of writing it, and only through its own
+	// outbox, never from the consumer hot path; the existing relay publishes it
+	// like every other event. A nil writer is safe and leaves the rejection and
+	// its dead letter as the only evidence, which is the behaviour before the
+	// cross-service report existed.
+	ReportFailure func(context.Context, v1.Event, string, int) error
 }
 
 // ReadyReason is the single readiness decision for this service, factored out
@@ -181,8 +189,7 @@ func (b *Broker) consume(ctx context.Context, deliveries <-chan amqp.Delivery) e
 				return ctx.Err()
 			}
 			if workErr != nil {
-				b.Rejected.Add(1)
-				slog.Error("event_dead_lettered", "event_id", event.ID, "job_id", event.JobID, "trace_id", event.TraceID, "attempts", attempts, "permanent", isPermanent(workErr), "error", workErr)
+				b.settleDeadLetter(ctx, event, attempts, workErr)
 				if err := delivery.Reject(false); err != nil {
 					return err
 				}
@@ -194,6 +201,33 @@ func (b *Broker) consume(ctx context.Context, deliveries <-chan amqp.Delivery) e
 				}
 			}
 		}
+	}
+}
+
+// settleDeadLetter records a give-up: it counts the rejection, logs it with the
+// classified reason, and reports the terminal failure to the service that owns
+// the job row. It is factored out of consume so the reason classification and the
+// cross-service report are testable without a broker connection, exactly like the
+// jobs consumer's settleDelivery.
+func (b *Broker) settleDeadLetter(ctx context.Context, event v1.Event, attempts int, workErr error) {
+	b.Rejected.Add(1)
+	reason := failureReason(workErr)
+	slog.Error("event_dead_lettered", "event_id", event.ID, "job_id", event.JobID, "trace_id", event.TraceID, "attempts", attempts, "permanent", isPermanent(workErr), "reason", reason, "error", workErr)
+	b.reportFailure(ctx, event, reason, attempts)
+}
+
+// reportFailure writes the terminal failure into this service's outbox so the
+// jobs consumer can apply it to the job's own row, which risk does not own. A
+// missing writer is safe: the rejection and its dead letter remain the only
+// evidence, which is the behaviour before the cross-service report existed. A
+// write failure is logged and never changes the delivery's outcome: the dead
+// letter stays the record and no evidence is invented.
+func (b *Broker) reportFailure(ctx context.Context, event v1.Event, reason string, attempts int) {
+	if b.ReportFailure == nil {
+		return
+	}
+	if err := b.ReportFailure(ctx, event, reason, attempts); err != nil {
+		slog.Error("job_failure_report_failed", "job_id", event.JobID, "trace_id", event.TraceID, "reason", reason, "attempts", attempts, "error", err)
 	}
 }
 
@@ -212,6 +246,27 @@ type permanentError interface{ Permanent() bool }
 func isPermanent(err error) bool {
 	var typed permanentError
 	return errors.As(err, &typed) && typed.Permanent()
+}
+
+// The stable codes carried in the cross-service report's failure_reason. A
+// bounded code, not the raw error text, travels: it is safe to alert on and it
+// cannot leak an arbitrary error string into the job row. The vocabulary is
+// duplicated from services/jobs/internal/messaging/broker.go on purpose: the
+// messaging adapters are local, not a shared SDK, so a change to this rule must
+// be made and tested in BOTH consumers.
+const (
+	failureReasonPermanent = "permanent_error"
+	failureReasonExhausted = "retries_exhausted"
+)
+
+// failureReason classifies why this consumer gave up on a delivery. Only an error
+// that explicitly declares itself permanent is permanent; anything else reached
+// the end of the bounded retry budget.
+func failureReason(err error) string {
+	if isPermanent(err) {
+		return failureReasonPermanent
+	}
+	return failureReasonExhausted
 }
 
 // retryBackoff is the bounded schedule of one delivery: five attempts separated
@@ -355,6 +410,22 @@ func (b *Broker) runSession(parent context.Context, query func() (int64, error),
 	return consume(ctx)
 }
 
+// queueTopology is the routing topology declared by BOTH consumers. It is a
+// slice of queues with their routing keys, not the map it used to be: a queue can
+// carry more than one key, and a map cannot express that. jobs.results.v1
+// accepts both the batch result and the cross-service failure report. The order
+// is fixed so the declaration is deterministic, and every other declaration
+// (exchange, quorum queue type, delivery limit, dead-letter companion) is
+// unchanged. Both services must declare the same topology or the broker refuses
+// one at declaration time.
+var queueTopology = []struct {
+	queue string
+	keys  []string
+}{
+	{queue: v1.RiskQueue, keys: []string{v1.JobRequestedType}},
+	{queue: v1.JobsQueue, keys: []string{v1.BatchPublishedType, v1.JobFailedType}},
+}
+
 func topology(ch *amqp.Channel) error {
 	if err := ch.ExchangeDeclare(v1.Exchange, "topic", true, false, false, false, nil); err != nil {
 		return err
@@ -362,18 +433,20 @@ func topology(ch *amqp.Channel) error {
 	if err := ch.ExchangeDeclare("firewatch.dead", "direct", true, false, false, false, nil); err != nil {
 		return err
 	}
-	for queue, key := range map[string]string{v1.RiskQueue: v1.JobRequestedType, v1.JobsQueue: v1.BatchPublishedType} {
-		if _, err := ch.QueueDeclare(queue+".dead", true, false, false, false, amqp.Table{"x-queue-type": "quorum"}); err != nil {
+	for _, entry := range queueTopology {
+		if _, err := ch.QueueDeclare(entry.queue+".dead", true, false, false, false, amqp.Table{"x-queue-type": "quorum"}); err != nil {
 			return err
 		}
-		if err := ch.QueueBind(queue+".dead", queue, "firewatch.dead", false, nil); err != nil {
+		if err := ch.QueueBind(entry.queue+".dead", entry.queue, "firewatch.dead", false, nil); err != nil {
 			return err
 		}
-		if _, err := ch.QueueDeclare(queue, true, false, false, false, amqp.Table{"x-queue-type": "quorum", "x-delivery-limit": int32(5), "x-dead-letter-exchange": "firewatch.dead", "x-dead-letter-routing-key": queue, "x-overflow": "reject-publish", "x-dead-letter-strategy": "at-least-once"}); err != nil {
+		if _, err := ch.QueueDeclare(entry.queue, true, false, false, false, amqp.Table{"x-queue-type": "quorum", "x-delivery-limit": int32(5), "x-dead-letter-exchange": "firewatch.dead", "x-dead-letter-routing-key": entry.queue, "x-overflow": "reject-publish", "x-dead-letter-strategy": "at-least-once"}); err != nil {
 			return err
 		}
-		if err := ch.QueueBind(queue, key, v1.Exchange, false, nil); err != nil {
-			return err
+		for _, key := range entry.keys {
+			if err := ch.QueueBind(entry.queue, key, v1.Exchange, false, nil); err != nil {
+				return err
+			}
 		}
 	}
 	return nil

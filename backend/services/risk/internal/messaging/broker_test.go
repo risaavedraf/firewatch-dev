@@ -413,6 +413,92 @@ type refusalError struct{ reason string }
 func (e refusalError) Error() string   { return e.reason }
 func (e refusalError) Permanent() bool { return true }
 
+// TestFailureReasonClassifiesTerminalCause pins the stable code the cross-service
+// report carries: only a genuinely permanent error is permanent_error; anything
+// else that reaches the end of the budget is retries_exhausted. It runs without a
+// broker and without a database.
+func TestFailureReasonClassifiesTerminalCause(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		err  error
+		want string
+	}{
+		{"permanent error", testPermanentError{}, failureReasonPermanent},
+		{"wrapped permanent error", fmt.Errorf("wrapped: %w", testPermanentError{}), failureReasonPermanent},
+		{"exhausted transient error", errors.New("transient"), failureReasonExhausted},
+		{"unrecognized error is exhausted, never permanent", errors.New("unrecognized"), failureReasonExhausted},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := failureReason(tc.err); got != tc.want {
+				t.Fatalf("failureReason(%v)=%q want %q", tc.err, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestGiveUpReportsTheTerminalFailure pins what a give-up sends across services:
+// the job id, the trace id, the classified reason and the attempt count, recorded
+// through the injected writer. A report that fails is logged and still counts the
+// rejection, so the dead letter stays the record and no evidence is invented. It
+// exercises the settleDeadLetter seam directly, so it needs neither a broker nor
+// a database and does not spend the retry budget's sleeps.
+func TestGiveUpReportsTheTerminalFailure(t *testing.T) {
+	for _, tc := range []struct {
+		name         string
+		workErr      error
+		attempts     int
+		wantReason   string
+		reportErr    error
+		wantReported bool
+	}{
+		{"permanent failure reports its own code", testPermanentError{}, 1, failureReasonPermanent, nil, true},
+		{"exhausted budget reports the attempt count", errors.New("transient"), 5, failureReasonExhausted, nil, true},
+		{"a failed report still counts the rejection", errors.New("transient"), 5, failureReasonExhausted, errors.New("outbox unavailable"), true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			event := v1.Event{JobID: uuid.NewString(), TraceID: uuid.NewString()}
+			recorded := struct {
+				called   bool
+				jobID    string
+				traceID  string
+				reason   string
+				attempts int
+			}{}
+			b := &Broker{ReportFailure: func(_ context.Context, e v1.Event, reason string, attempts int) error {
+				recorded.called, recorded.jobID, recorded.traceID, recorded.reason, recorded.attempts = true, e.JobID, e.TraceID, reason, attempts
+				return tc.reportErr
+			}}
+			b.settleDeadLetter(context.Background(), event, tc.attempts, tc.workErr)
+			if b.Rejected.Load() != 1 {
+				t.Fatalf("rejected counter=%d want 1", b.Rejected.Load())
+			}
+			if recorded.called != tc.wantReported {
+				t.Fatalf("report called=%v want %v", recorded.called, tc.wantReported)
+			}
+			if recorded.jobID != event.JobID || recorded.traceID != event.TraceID || recorded.reason != tc.wantReason || recorded.attempts != tc.attempts {
+				t.Fatalf("reported=%+v want %s/%s/%s/%d", recorded, event.JobID, event.TraceID, tc.wantReason, tc.attempts)
+			}
+		})
+	}
+}
+
+// TestTopologyBindsTheJobsQueueToBothKeys protects the additive routing contract
+// on the risk side as well: both services must declare the same topology, so
+// risk's queue keeps its single key and jobs' queue accepts both the batch result
+// and the cross-service failure report.
+func TestTopologyBindsTheJobsQueueToBothKeys(t *testing.T) {
+	want := []struct {
+		queue string
+		keys  []string
+	}{
+		{queue: v1.RiskQueue, keys: []string{v1.JobRequestedType}},
+		{queue: v1.JobsQueue, keys: []string{v1.BatchPublishedType, v1.JobFailedType}},
+	}
+	if !reflect.DeepEqual(queueTopology, want) {
+		t.Fatalf("queueTopology=%v want=%v", queueTopology, want)
+	}
+}
+
 // TestDeadLetterLogCarriesTheFailureReason protects the operator-facing record
 // of a dead-lettered delivery: the log entry must name the underlying failure,
 // because the batch's guards now refuse work for an incomplete retrieval or an

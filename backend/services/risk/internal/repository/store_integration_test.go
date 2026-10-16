@@ -151,6 +151,70 @@ func TestPublishRefusesAMissingReferencePermanently(t *testing.T) {
 	}
 }
 
+// TestJobFailureEventBuildsTheOutboxRecord pins the cross-service
+// terminal-failure report a give-up produces: the new wire type, the job and
+// trace ids, the classified reason and the attempt count. The generated id is the
+// event id, exactly as the batch publication event does it. The test is pure, so
+// it runs without a database.
+func TestJobFailureEventBuildsTheOutboxRecord(t *testing.T) {
+	delivery := v1.Event{JobID: uuid.NewString(), TraceID: uuid.NewString()}
+	report := jobFailureEvent(delivery, "retries_exhausted", 5)
+	if report.Type != v1.JobFailedType || report.JobID != delivery.JobID || report.TraceID != delivery.TraceID || report.FailureReason != "retries_exhausted" || report.Attempts != 5 {
+		t.Fatalf("report=%+v", report)
+	}
+	if id, err := uuid.Parse(report.ID); err != nil || id == uuid.Nil {
+		t.Fatalf("report id %q is not a UUID: %v", report.ID, err)
+	}
+	payload, err := json.Marshal(report)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(payload, &fields); err != nil {
+		t.Fatal(err)
+	}
+	if string(fields["type"]) != `"risk.job.failed.v1"` || string(fields["failure_reason"]) != `"retries_exhausted"` || string(fields["attempts"]) != `5` {
+		t.Fatalf("report wire shape: %s", payload)
+	}
+}
+
+// TestRecordJobFailureWritesTheReportIntoTheOutbox protects the durable half of a
+// give-up: the report is inserted into this service's own outbox and picked up by
+// the existing relay, never published from the consumer hot path. It needs a
+// migrated disposable risk database.
+func TestRecordJobFailureWritesTheReportIntoTheOutbox(t *testing.T) {
+	if testing.Short() || os.Getenv("TEST_DATABASE_URL") == "" {
+		t.Skip("requires migrated disposable risk database")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	db, err := pgxpool.New(ctx, os.Getenv("TEST_DATABASE_URL"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	s := Store{DB: db}
+	delivery := v1.Event{JobID: uuid.NewString(), TraceID: uuid.NewString()}
+	if err := s.RecordJobFailure(ctx, delivery, "permanent_error", 1); err != nil {
+		t.Fatal(err)
+	}
+	var routingKey string
+	var payload []byte
+	if err := db.QueryRow(ctx, `SELECT routing_key,payload FROM outbox WHERE payload->>'job_id'=$1`, delivery.JobID).Scan(&routingKey, &payload); err != nil {
+		t.Fatal(err)
+	}
+	if routingKey != v1.JobFailedType {
+		t.Fatalf("routing_key=%q want %q", routingKey, v1.JobFailedType)
+	}
+	var report v1.Event
+	if err := json.Unmarshal(payload, &report); err != nil {
+		t.Fatal(err)
+	}
+	if report.Type != v1.JobFailedType || report.JobID != delivery.JobID || report.TraceID != delivery.TraceID || report.FailureReason != "permanent_error" || report.Attempts != 1 {
+		t.Fatalf("report=%+v", report)
+	}
+}
+
 func TestListZonesCatalogueAndBBox(t *testing.T) {
 	if testing.Short() || os.Getenv("TEST_DATABASE_URL") == "" {
 		t.Skip("requires migrated disposable risk database")

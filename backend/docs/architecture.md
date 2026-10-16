@@ -43,7 +43,7 @@ The gateway does not serve the browser application. The page is a separate front
 4. A complete synthetic batch and its publication event commit atomically. Queries sort by request time, so an older slow job cannot replace a newer requested batch merely by finishing later.
 5. Broker loss leaves reads available and new jobs safely queued in PostgreSQL. Broker reconnect backs off to 30 seconds. PostgreSQL failure rejects writes with `503` instead of acknowledging an unpersisted job.
 
-The development broker has one node. Quorum queue type alone does not provide HA. Dead-lettered jobs currently remain queued; the DLQ is the operational failure record until failure propagation and replay are implemented. Outbox/inbox/audit retention is not automated yet.
+The development broker has one node. Quorum queue type alone does not provide HA. A dead-lettered delivery no longer leaves its job queued: a consumer that gives up writes the terminal `failed` state — with `failure_reason` and the attempt count — on the job's own row, and `risk`, which does not own that row, reports its give-up to `jobs` as a `risk.job.failed.v1` event through its own outbox. `failed` is assigned only on real evidence (a permanent failure or an exhausted five-attempt budget), never on a clock, so a job with no answer simply stays `queued` and is surfaced by the queued-age metric and alert instead. A `failed` job is reclaimed by an explicit admin replay, never automatically; the dead-letter queue remains the operational failure record for deliveries no row can be attributed to. Outbox/inbox/audit retention is not automated yet.
 
 ## Security and operations
 

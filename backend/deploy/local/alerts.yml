@@ -40,7 +40,21 @@ groups:
           severity: critical
         annotations:
           summary: "Dead-letter backlog of {{ $value }} on {{ $labels.job }}"
-          action: "Inspect the dead-letter queue. Terminal-failure propagation and replay (front 4) are not implemented yet, so recovery is manual."
+          action: "Inspect the dead-letter queue (risk.jobs.v1.dead or jobs.results.v1.dead). The terminal failure is propagated to the job row as failed with its reason; reclaim the job with the admin replay action if it is recoverable, otherwise fix the cause before re-driving."
+
+      - alert: FireWatchStuckJobs
+        # A queued job older than the 15-minute data cycle means no answer reached
+        # it: a consumer died, or its delivery dead-lettered without the row being
+        # updated. It is a warning, never a failure verdict: the job stays queued
+        # and is never marked failed by a clock. The threshold is twice the cycle
+        # so a slow but healthy queue does not fire it.
+        expr: firewatch_queued_job_age_seconds > 1200
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Oldest queued job has waited {{ $value }}s on {{ $labels.job }}"
+          action: "Check the jobs consumer and both dead-letter queues for a delivery tied to the job. Re-drive a recoverable delivery; if none exists, reclaim the job with the admin replay action. Do not delete the job or force it terminal."
 
       - alert: FireWatchBrokerUnavailable
         expr: firewatch_broker_ready == 0

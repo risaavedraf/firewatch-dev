@@ -179,7 +179,10 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	broker := &messaging.Broker{DB: db, URL: os.Getenv("AMQP_URL"), Handle: publisher.Publish}
+	// ReportFailure records a give-up in this service's outbox so the jobs
+	// consumer can write the terminal state on the job's own row, which risk does
+	// not own. It reuses the store's outbox path; nothing is published here.
+	broker := &messaging.Broker{DB: db, URL: os.Getenv("AMQP_URL"), Handle: publisher.Publish, ReportFailure: store.RecordJobFailure}
 	workerDone := make(chan struct{})
 	go func() { defer close(workerDone); broker.Run(ctx) }()
 	defer func() { stop(); <-workerDone }()

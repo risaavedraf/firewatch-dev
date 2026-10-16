@@ -195,6 +195,41 @@ func (s Store) Publish(ctx context.Context, request v1.Event, assessment Assessm
 	return tx.Commit(ctx)
 }
 
+// jobFailureEvent builds the risk.job.failed.v1 report for a give-up from the
+// delivery that failed. It carries the job id, the trace id, the classified
+// reason and the attempt count the consumer spent. It is pure and split out so the
+// record's shape is testable without a database; the generated id is used as both
+// the event id and the outbox row id, exactly as the batch publication event does
+// it.
+func jobFailureEvent(delivery v1.Event, reason string, attempts int) v1.Event {
+	return v1.Event{
+		ID:            uuid.NewString(),
+		Type:          v1.JobFailedType,
+		OccurredAt:    time.Now().UTC(),
+		TraceID:       delivery.TraceID,
+		JobID:         delivery.JobID,
+		FailureReason: reason,
+		Attempts:      attempts,
+	}
+}
+
+// RecordJobFailure writes the cross-service terminal-failure report into this
+// service's outbox. risk does not own the job row, so it reports the failure to
+// the jobs consumer instead of writing it. It is one INSERT into the same outbox
+// the batch publication uses, so the existing relay publishes it with publisher
+// confirms and mandatory routing and nothing is published from the consumer hot
+// path. A failed insert is the caller's to log, and it never invents evidence: the
+// dead letter stays the record.
+func (s Store) RecordJobFailure(ctx context.Context, delivery v1.Event, reason string, attempts int) error {
+	report := jobFailureEvent(delivery, reason, attempts)
+	body, err := json.Marshal(report)
+	if err != nil {
+		return err
+	}
+	_, err = s.DB.Exec(ctx, `INSERT INTO outbox(id,routing_key,payload) VALUES($1,$2,$3)`, report.ID, report.Type, body)
+	return err
+}
+
 // ZoneExists reports whether the zone catalogue holds code.
 //
 // Membership is decided by the data in zones, never by a literal in Go: the

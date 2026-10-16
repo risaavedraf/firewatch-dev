@@ -27,6 +27,13 @@ const deadLetterQueue = v1.JobsQueue + ".dead"
 // reports it verbatim.
 const DeadLetterDepthUnknown = int64(-1)
 
+// QueuedAgeUnknown represents an oldest-queued-job age that could not be
+// observed: there is no queued job to measure, or the bounded read failed. -1 is
+// deliberately outside the range of a real age (>= 0), the same convention
+// DeadLetterDepthUnknown uses, so a missing reading can never look like a young,
+// healthy queue.
+const QueuedAgeUnknown = float64(-1)
+
 // Sampling is independent of delivery processing. Freshness is bounded at read
 // time; this polling interval does not promise instantaneous consistency.
 const deadLetterRefreshInterval = 3 * time.Second
@@ -72,9 +79,15 @@ func ReadyReason(dbOK, brokerReady bool, deadLetterDepth, maxDepth int64) (bool,
 }
 
 // MetricsText renders the Prometheus text body used by /metrics. It is a pure
-// function so the exact wire format, including the UNKNOWN dead-letter depth, is
-// pinned by a test. The pre-existing metric names and their order are unchanged.
-func MetricsText(requests uint64, brokerReady bool, published, processed, rejected uint64, deadLetterDepth int64, ageSeconds ...float64) string {
+// function so the exact wire format, including the UNKNOWN dead-letter depth and
+// the UNKNOWN queued age, is pinned by a test. The pre-existing metric names and
+// their order are unchanged; the queued-age series is appended after them.
+//
+// queuedAgeSeconds is how long the oldest queued job has waited (the queued-age
+// signal this service adds so a job that never receives an answer stops being
+// invisible). It reports QueuedAgeUnknown when there is no queued job or the
+// read failed. The dead-letter age stays optional through the trailing variadic.
+func MetricsText(requests uint64, brokerReady bool, published, processed, rejected uint64, deadLetterDepth int64, queuedAgeSeconds float64, ageSeconds ...float64) string {
 	ready := 0
 	if brokerReady {
 		ready = 1
@@ -83,7 +96,7 @@ func MetricsText(requests uint64, brokerReady bool, published, processed, reject
 	if len(ageSeconds) > 0 {
 		age = ageSeconds[0]
 	}
-	return fmt.Sprintf("firewatch_http_requests_total %d\nfirewatch_broker_ready %d\nfirewatch_events_published_total %d\nfirewatch_events_processed_total %d\nfirewatch_events_rejected_total %d\nfirewatch_dead_letter_depth %d\nfirewatch_dead_letter_depth_age_seconds %g\n", requests, ready, published, processed, rejected, deadLetterDepth, age)
+	return fmt.Sprintf("firewatch_http_requests_total %d\nfirewatch_broker_ready %d\nfirewatch_events_published_total %d\nfirewatch_events_processed_total %d\nfirewatch_events_rejected_total %d\nfirewatch_dead_letter_depth %d\nfirewatch_dead_letter_depth_age_seconds %g\nfirewatch_queued_job_age_seconds %g\n", requests, ready, published, processed, rejected, deadLetterDepth, age, queuedAgeSeconds)
 }
 
 func (b *Broker) Run(ctx context.Context) {
@@ -174,15 +187,15 @@ func (b *Broker) consume(ctx context.Context, deliveries <-chan amqp.Delivery) e
 			if !ok {
 				return errors.New("consumer channel closed")
 			}
-			var event v1.Event
-			if len(delivery.Body) > 16384 || json.Unmarshal(delivery.Body, &event) != nil || !valid(event) {
+			event, handle, ok := b.decode(delivery)
+			if !ok {
 				b.Rejected.Add(1)
 				if err := delivery.Reject(false); err != nil {
 					return err
 				}
 				continue
 			}
-			attempts, workErr := handleWithRetries(ctx, b.Handle, pause, event)
+			attempts, workErr := handleWithRetries(ctx, handle, pause, event)
 			if ctx.Err() != nil {
 				return ctx.Err()
 			}
@@ -198,6 +211,65 @@ func (b *Broker) consume(ctx context.Context, deliveries <-chan amqp.Delivery) e
 			}
 		}
 	}
+}
+
+// decode parses one delivery and selects the retry-loop handler for its type. It
+// returns ok=false when the body is oversized or malformed, carries an
+// unrecognised type, or fails that type's shape gate: each of those is rejected
+// rather than silently accepted. A recognised type is dispatched explicitly -
+// batch.published completes the job, risk.job.failed.v1 records the terminal
+// failure through the same writer - so supporting a new type is a deliberate
+// change and never an accidental acceptance.
+func (b *Broker) decode(delivery amqp.Delivery) (v1.Event, func(context.Context, v1.Event) error, bool) {
+	var event v1.Event
+	if len(delivery.Body) > 16384 || json.Unmarshal(delivery.Body, &event) != nil {
+		return event, nil, false
+	}
+	switch event.Type {
+	case v1.BatchPublishedType:
+		if !valid(event) {
+			return event, nil, false
+		}
+		return event, b.Handle, true
+	case v1.JobFailedType:
+		if !validFailure(event) {
+			return event, nil, false
+		}
+		return event, b.failHandler, true
+	default:
+		return event, nil, false
+	}
+}
+
+// failHandler adapts the terminal writer to the retry loop's handler shape, so a
+// risk.job.failed.v1 delivery is retried on a transient store failure and then
+// dead-lettered if it still cannot be recorded. A missing writer is safe: the
+// report is acknowledged without a write, mirroring the nil-safe terminal writer
+// the give-up path already had.
+func (b *Broker) failHandler(ctx context.Context, event v1.Event) error {
+	if b.Fail == nil {
+		return nil
+	}
+	return b.Fail(ctx, event.JobID, event.FailureReason, event.Attempts)
+}
+
+// validFailure reports whether a terminal-failure report is well formed: the
+// type, a non-nil id, job id and trace id, a non-empty bounded reason, and the
+// positive attempt count the reporting consumer spent. Only then may the
+// terminal write run. The reason VOCABULARY is not re-validated here for the
+// same reason the batch zone relationship is not: the reporting service owns it,
+// and pinning it as a literal would force a coordinated release to add a code.
+func validFailure(e v1.Event) bool {
+	if e.FailureReason == "" || len(e.FailureReason) > 255 || e.Attempts <= 0 {
+		return false
+	}
+	for _, value := range []string{e.ID, e.JobID, e.TraceID} {
+		id, err := uuid.Parse(value)
+		if err != nil || id == uuid.Nil {
+			return false
+		}
+	}
+	return true
 }
 
 // valid reports whether a batch-published event is well formed. It checks shape
@@ -429,6 +501,22 @@ func (b *Broker) runSession(parent context.Context, query func() (int64, error),
 	return consume(ctx)
 }
 
+// queueTopology is the routing topology declared by BOTH consumers. It is a
+// slice of queues with their routing keys, not the map it used to be: a queue can
+// carry more than one key, and a map cannot express that. jobs.results.v1
+// accepts both the batch result and the cross-service failure report. The order
+// is fixed so the declaration is deterministic, and every other declaration
+// (exchange, quorum queue type, delivery limit, dead-letter companion) is
+// unchanged. Both services must declare the same topology or the broker refuses
+// one at declaration time.
+var queueTopology = []struct {
+	queue string
+	keys  []string
+}{
+	{queue: v1.RiskQueue, keys: []string{v1.JobRequestedType}},
+	{queue: v1.JobsQueue, keys: []string{v1.BatchPublishedType, v1.JobFailedType}},
+}
+
 func topology(ch *amqp.Channel) error {
 	if err := ch.ExchangeDeclare(v1.Exchange, "topic", true, false, false, false, nil); err != nil {
 		return err
@@ -436,18 +524,20 @@ func topology(ch *amqp.Channel) error {
 	if err := ch.ExchangeDeclare("firewatch.dead", "direct", true, false, false, false, nil); err != nil {
 		return err
 	}
-	for queue, key := range map[string]string{v1.RiskQueue: v1.JobRequestedType, v1.JobsQueue: v1.BatchPublishedType} {
-		if _, err := ch.QueueDeclare(queue+".dead", true, false, false, false, amqp.Table{"x-queue-type": "quorum"}); err != nil {
+	for _, entry := range queueTopology {
+		if _, err := ch.QueueDeclare(entry.queue+".dead", true, false, false, false, amqp.Table{"x-queue-type": "quorum"}); err != nil {
 			return err
 		}
-		if err := ch.QueueBind(queue+".dead", queue, "firewatch.dead", false, nil); err != nil {
+		if err := ch.QueueBind(entry.queue+".dead", entry.queue, "firewatch.dead", false, nil); err != nil {
 			return err
 		}
-		if _, err := ch.QueueDeclare(queue, true, false, false, false, amqp.Table{"x-queue-type": "quorum", "x-delivery-limit": int32(5), "x-dead-letter-exchange": "firewatch.dead", "x-dead-letter-routing-key": queue, "x-overflow": "reject-publish", "x-dead-letter-strategy": "at-least-once"}); err != nil {
+		if _, err := ch.QueueDeclare(entry.queue, true, false, false, false, amqp.Table{"x-queue-type": "quorum", "x-delivery-limit": int32(5), "x-dead-letter-exchange": "firewatch.dead", "x-dead-letter-routing-key": entry.queue, "x-overflow": "reject-publish", "x-dead-letter-strategy": "at-least-once"}); err != nil {
 			return err
 		}
-		if err := ch.QueueBind(queue, key, v1.Exchange, false, nil); err != nil {
-			return err
+		for _, key := range entry.keys {
+			if err := ch.QueueBind(entry.queue, key, v1.Exchange, false, nil); err != nil {
+				return err
+			}
 		}
 	}
 	return nil

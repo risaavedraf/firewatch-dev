@@ -2,6 +2,7 @@ package messaging
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"reflect"
@@ -185,8 +186,9 @@ func TestReadyReasonIsTheWholeReadinessDecision(t *testing.T) {
 }
 
 // TestMetricsTextPinsTheDeadLetterDepthLine protects the /metrics wire format.
-// The pre-existing metric names and their order must not move, and the UNKNOWN
-// depth must surface as -1 instead of a healthy-looking zero.
+// The pre-existing metric names and their order must not move, the queued-age
+// series is appended after them, and both UNKNOWN sentinels must surface as -1
+// instead of a healthy-looking zero.
 func TestMetricsTextPinsTheDeadLetterDepthLine(t *testing.T) {
 	want := "firewatch_http_requests_total 11\n" +
 		"firewatch_broker_ready 1\n" +
@@ -194,16 +196,24 @@ func TestMetricsTextPinsTheDeadLetterDepthLine(t *testing.T) {
 		"firewatch_events_processed_total 31\n" +
 		"firewatch_events_rejected_total 41\n" +
 		"firewatch_dead_letter_depth 0\n" +
-		"firewatch_dead_letter_depth_age_seconds -1\n"
-	if got := MetricsText(11, true, 21, 31, 41, 0); got != want {
+		"firewatch_dead_letter_depth_age_seconds -1\n" +
+		"firewatch_queued_job_age_seconds -1\n"
+	if got := MetricsText(11, true, 21, 31, 41, 0, QueuedAgeUnknown); got != want {
 		t.Fatalf("metrics text mismatch\n got=%q\nwant=%q", got, want)
 	}
-	if got := MetricsText(0, true, 0, 0, 0, -1, 7); !strings.Contains(got, "firewatch_dead_letter_depth_age_seconds 7\n") {
-		t.Fatalf("age metric missing: %q", got)
+	aged := MetricsText(0, true, 0, 0, 0, -1, 12.5, 7)
+	if !strings.Contains(aged, "firewatch_dead_letter_depth_age_seconds 7\n") {
+		t.Fatalf("dead-letter age metric missing: %q", aged)
 	}
-	unknown := MetricsText(0, false, 1, 2, 3, DeadLetterDepthUnknown)
+	if !strings.Contains(aged, "firewatch_queued_job_age_seconds 12.5\n") {
+		t.Fatalf("queued-job age metric missing: %q", aged)
+	}
+	unknown := MetricsText(0, false, 1, 2, 3, DeadLetterDepthUnknown, QueuedAgeUnknown)
 	if !strings.Contains(unknown, "firewatch_dead_letter_depth -1\n") {
 		t.Fatalf("unknown depth must be reported as -1, got %q", unknown)
+	}
+	if !strings.Contains(unknown, "firewatch_queued_job_age_seconds -1\n") {
+		t.Fatalf("unknown queued age must be reported as -1, got %q", unknown)
 	}
 	if !strings.Contains(unknown, "firewatch_broker_ready 0\n") {
 		t.Fatalf("broker readiness line changed: %q", unknown)
@@ -524,4 +534,132 @@ func TestSessionCancellationInterruptsRetryBackoff(t *testing.T) {
 	await(t, entered)
 	cancel()
 	await(t, done)
+}
+
+// fakeAcknowledger records how a delivery was settled, so the consumer's
+// dispatch can be exercised end to end without a broker connection. settled is
+// signalled once so the test can wait on the real decision instead of sleeping.
+type fakeAcknowledger struct {
+	settled         chan struct{}
+	acked, rejected bool
+	requeue         bool
+}
+
+func (f *fakeAcknowledger) Ack(uint64, bool) error {
+	f.acked = true
+	f.settled <- struct{}{}
+	return nil
+}
+
+func (f *fakeAcknowledger) Nack(uint64, bool, bool) error { return nil }
+
+func (f *fakeAcknowledger) Reject(_ uint64, requeue bool) error {
+	f.rejected, f.requeue = true, requeue
+	f.settled <- struct{}{}
+	return nil
+}
+
+func deliveryOf(t *testing.T, event v1.Event) (amqp.Delivery, *fakeAcknowledger) {
+	t.Helper()
+	body, err := json.Marshal(event)
+	if err != nil {
+		t.Fatalf("marshal event: %v", err)
+	}
+	ack := &fakeAcknowledger{settled: make(chan struct{}, 1)}
+	return amqp.Delivery{Body: body, DeliveryTag: 1, Acknowledger: ack}, ack
+}
+
+// TestConsumerDispatchesByEventType pins the consumer's whole dispatch: a
+// batch.published completes the job, a risk.job.failed.v1 writes the terminal
+// failure through the same writer, and an unrecognised type is rejected instead
+// of silently accepted. It runs without a broker because the delivery carries a
+// recording acknowledger.
+func TestConsumerDispatchesByEventType(t *testing.T) {
+	now := time.Now()
+	batch := v1.Event{ID: uuid.NewString(), Type: v1.BatchPublishedType, ActorID: "admin", ZoneID: "valparaiso-demo", RequestedAt: now, OccurredAt: now, JobID: uuid.NewString(), TraceID: uuid.NewString(), BatchID: uuid.NewString()}
+	failure := v1.Event{ID: uuid.NewString(), Type: v1.JobFailedType, JobID: uuid.NewString(), TraceID: uuid.NewString(), FailureReason: failureReasonExhausted, Attempts: 5}
+	unrecognised := v1.Event{ID: uuid.NewString(), Type: v1.JobRequestedType, JobID: uuid.NewString(), TraceID: uuid.NewString()}
+	for _, tc := range []struct {
+		name          string
+		event         v1.Event
+		wantCompleted bool
+		wantReason    string
+		wantAttempts  int
+		wantRejected  bool
+	}{
+		{"batch published completes the job", batch, true, "", 0, false},
+		{"failure report writes the terminal failure", failure, false, failureReasonExhausted, 5, false},
+		{"unrecognised type is rejected", unrecognised, false, "", 0, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			completed := false
+			var recordedReason string
+			var recordedAttempts int
+			b := &Broker{
+				Handle: func(context.Context, v1.Event) error { completed = true; return nil },
+				Fail: func(_ context.Context, _ string, reason string, attempts int) error {
+					recordedReason, recordedAttempts = reason, attempts
+					return nil
+				},
+			}
+			delivery, ack := deliveryOf(t, tc.event)
+			deliveries := make(chan amqp.Delivery)
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			done := make(chan error, 1)
+			go func() { done <- b.consume(ctx, deliveries) }()
+			deliveries <- delivery
+			select {
+			case <-ack.settled:
+			case <-time.After(2 * time.Second):
+				t.Fatal("consumer did not settle the delivery")
+			}
+			cancel()
+			select {
+			case err := <-done:
+				if !errors.Is(err, context.Canceled) {
+					t.Fatalf("consume returned %v want context.Canceled", err)
+				}
+			case <-time.After(2 * time.Second):
+				t.Fatal("consumer did not stop")
+			}
+			if completed != tc.wantCompleted {
+				t.Fatalf("completed=%v want %v", completed, tc.wantCompleted)
+			}
+			rejected := uint64(0)
+			if tc.wantRejected {
+				rejected = 1
+			}
+			if b.Rejected.Load() != rejected {
+				t.Fatalf("rejected counter=%d want %d", b.Rejected.Load(), rejected)
+			}
+			if tc.wantRejected {
+				if !ack.rejected || ack.acked || ack.requeue {
+					t.Fatalf("unrecognised delivery: rejected=%v acked=%v requeue=%v", ack.rejected, ack.acked, ack.requeue)
+				}
+			} else if !ack.acked || ack.rejected {
+				t.Fatalf("known delivery: acked=%v rejected=%v", ack.acked, ack.rejected)
+			}
+			if recordedReason != tc.wantReason || recordedAttempts != tc.wantAttempts {
+				t.Fatalf("terminal write reason=%q attempts=%d want %q/%d", recordedReason, recordedAttempts, tc.wantReason, tc.wantAttempts)
+			}
+		})
+	}
+}
+
+// TestTopologyBindsTheJobsQueueToBothKeys protects the additive routing
+// contract: jobs' queue accepts both the batch result and the cross-service
+// failure report, while risk's queue keeps its single key. The declaration is a
+// slice, not a map, because a map cannot express two keys on one queue.
+func TestTopologyBindsTheJobsQueueToBothKeys(t *testing.T) {
+	want := []struct {
+		queue string
+		keys  []string
+	}{
+		{queue: v1.RiskQueue, keys: []string{v1.JobRequestedType}},
+		{queue: v1.JobsQueue, keys: []string{v1.BatchPublishedType, v1.JobFailedType}},
+	}
+	if !reflect.DeepEqual(queueTopology, want) {
+		t.Fatalf("queueTopology=%v want=%v", queueTopology, want)
+	}
 }

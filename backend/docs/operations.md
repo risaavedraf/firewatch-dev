@@ -27,6 +27,10 @@ Every service already exposes the delivery counters
 (`firewatch_http_requests_total`, `firewatch_broker_ready`,
 `firewatch_events_{published,processed,rejected}_total`,
 `firewatch_dead_letter_depth`, `firewatch_dead_letter_depth_age_seconds`).
+The `jobs` service adds `firewatch_queued_job_age_seconds`: how long the oldest
+`queued` job has waited, or `-1` when there is no queued job or the bounded read
+failed. A job with no answer is surfaced by that signal and the alert in §3
+instead of being marked failed by a clock.
 The `risk` service adds:
 
 | Layer | Metric | What it answers |
@@ -41,8 +45,9 @@ The `risk` service adds:
 
 **Scope limit:** the HTTP latency, error and runtime signals are implemented for
 the `risk` service today (`internal/metrics`). The `gateway` and `jobs` services
-still expose only the delivery counters, so their latency and error rate are not
-measured yet; the end-to-end p95 comes from the k6 benchmark instead.
+do not expose them, so their latency and error rate are not measured yet; the
+end-to-end p95 comes from the k6 benchmark instead. `jobs` also exposes the
+queued-age signal above, which is an availability signal, not a latency one.
 
 ## 3. Alerts: threshold and action
 
@@ -54,7 +59,8 @@ action, so an alert is never a bare number (`ALR-V3`).
 |---|---|---|
 | `FireWatchHighLatencyP95` | p95 > 500 ms for 5 min | investigate code, PostGIS, network, memory **before** scaling |
 | `FireWatchHighErrorRate` | 5xx rate > 1 % for 5 min | investigate the route; tell dependency failure from code defect |
-| `FireWatchDeadLetterBacklog` | `dead_letter_depth > 0` for 1 min | inspect the DLQ (replay is front 4, not implemented) |
+| `FireWatchDeadLetterBacklog` | `dead_letter_depth > 0` for 1 min | inspect the DLQ, match the `job_id` to the `failed` row and the log line, then re-drive or replay |
+| `FireWatchStuckJobs` | `queued_job_age_seconds > 1200` for 5 min | check the consumer and both DLQs; re-drive or replay; never force terminal |
 | `FireWatchBrokerUnavailable` | `broker_ready == 0` for 5 min | check RabbitMQ; degraded, not down |
 | `FireWatchDatabasePoolSaturated` | pool acquired ≥ max for 5 min | find the slow query before raising the limit |
 | `FireWatchTargetDown` | `up == 0` for 2 min | check the pod and its readiness |
@@ -132,7 +138,57 @@ validation is: run the k6 benchmark at 4 RPS and a peak above it, watch
 holds with the stated replicas. Per-size justification follows the observed load
 (`urgent/04-operacion-monitoreo.md:28`).
 
-## 9. What is explicitly not done
+## 9. Operator runbook: exhausted retries, dead letters and stuck jobs
+
+The recovery policy this runbook follows is
+`odd/tasks/security/backend-hardening/07-job-recovery.md`. A job reaches the
+terminal `failed` state only on real evidence, never on a clock: either its own
+consumer failed permanently or exhausted its five-attempt budget, or a delivery
+tied to it reached a dead-letter queue. The three cases below are the whole
+operator surface.
+
+### 9.1 Exhausted retries (a job is `failed`)
+
+- **Signal.** `GET /v1/jobs/{id}` answers `state: "failed"` with `failure_reason`
+  and `attempts`. The consumer logs `event_dead_lettered` with the classified
+  `reason` and the attempt count, and `firewatch_events_rejected_total` rises.
+- **Read it.** `permanent_error` means a retry can never succeed (a missing
+  reference, a malformed assessment); `retries_exhausted` means all five attempts
+  — one, two, four and eight seconds apart — failed. Only the bounded code is
+  stored on the row; the raw error is in the `event_dead_lettered` log line.
+- **Act.** Find the cause from the log's `error` field, fix the data or the code,
+  then reclaim the job with the admin replay action
+  (`POST /v1/jobs/{id}/replay`). Nothing is replayed automatically.
+
+### 9.2 Dead letters
+
+- **Signal.** `FireWatchDeadLetterBacklog` fires on
+  `firewatch_dead_letter_depth > 0`; readiness is already degraded. Two queues
+  exist, `risk.jobs.v1.dead` and `jobs.results.v1.dead`, one per consumer.
+- **Why a delivery is there.** An event exhausted its delivery budget or was
+  refused as malformed. The dead letter is the durable record. For the terminal
+  cases a consumer can attribute, the job's own row is marked `failed`
+  independently of the queue (see 9.1); for the rest there is no row to look at,
+  which is why the alert is raised.
+- **Act.** Inspect the dead queue, read the `job_id` from the payload, match it to
+  the `failed` row and to the `event_dead_lettered` log line, fix the cause, then
+  re-drive the delivery or replay the job. Replay is operator-driven, by design.
+
+### 9.3 Stuck jobs (a job is still `queued`)
+
+- **Signal.** `firewatch_queued_job_age_seconds` reports how long the oldest
+  `queued` job has waited; `-1` means there is no queued job or the bounded read
+  failed. `FireWatchStuckJobs` fires when it exceeds 20 minutes for 5 minutes.
+- **Why it happens.** No answer reached the job: a consumer is down, or its
+  delivery dead-lettered without the row being updated, or the queue is draining
+  slowly. The job is deliberately **not** failed by a clock, so a legitimate
+  backlog is never converted into a false terminal state.
+- **Act.** Check `firewatch_broker_ready`, `up` and both dead queues. Search the
+  dead-letter payloads for the job's `job_id`. Re-drive a recoverable delivery; if
+  none exists, reclaim the job with the admin replay action. Do not delete the job
+  or force it terminal.
+
+## 10. What is explicitly not done
 
 - No measured SLO/SLA, throughput, p95 or RTO: no benchmark or recovery run yet.
 - No cluster rollout or HPA-in-action verification.
