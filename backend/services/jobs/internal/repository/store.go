@@ -208,10 +208,17 @@ func (s Store) Fail(ctx context.Context, id, reason string, attempts int) error 
 	return err
 }
 
-// ErrJobNotReplayable means the job exists but is not in the failed state, so the
-// guarded replay transition matched no row. Only a failed job is replayable; the
-// caller answers 409 rather than silently accepting a second replay.
+// ErrJobNotReplayable means the job exists but is in a state no replay may
+// match: a published job already has its outcome, so the guarded replay
+// transition matched no row. The caller answers 409 rather than silently
+// accepting a second replay.
 var ErrJobNotReplayable = errors.New("job is not in a replayable state")
+
+// ErrReplayConfirmationRequired means the job is queued, and a queued job may
+// still be in flight, so a re-dispatch has to be confirmed explicitly by the
+// operator instead of being inferred from the state alone. The caller answers
+// 409 and writes nothing.
+var ErrReplayConfirmationRequired = errors.New("a queued job requires an explicit replay confirmation")
 
 // replayEvent builds the request event a replay enqueues. It is built FROM the
 // stored row and its STORED actor and zone — never from the operator who
@@ -222,19 +229,50 @@ func replayEvent(job Job, storedActor, trace string) v1.Event {
 	return requestEvent(job, storedActor, job.ZoneID, trace)
 }
 
-// Replay returns a failed job to queued in one guarded transaction. The update
-// matches only a failed row (WHERE state='failed'), so two concurrent replays
-// cannot both succeed: the loser matches no row and gets ErrJobNotReplayable
-// while the winner's transaction is the only one that enqueued.
+// replayGate decides whether a row in the given state may be replayed with the
+// confirmation the operator supplied. It is the recovery policy split out of the
+// transaction so its vocabulary is testable without a database, and it is the
+// same policy the guarded UPDATE enforces.
+//
+// A failed job is always replayable: a terminal state is real evidence that the
+// job is not running. A queued job is replayable only with the explicit
+// confirmation, because it may still be in flight and a blind re-dispatch would
+// run the same work twice. A published job is never replayable: it already has
+// its outcome.
+func replayGate(state string, confirmQueued bool) error {
+	switch state {
+	case "failed":
+		return nil
+	case "queued":
+		if !confirmQueued {
+			return ErrReplayConfirmationRequired
+		}
+		return nil
+	default:
+		return ErrJobNotReplayable
+	}
+}
+
+// Replay returns a failed job, or a queued one the operator confirmed, to queued
+// in one guarded transaction. The update matches a failed row, or a queued row
+// only when the re-dispatch was confirmed, so two concurrent replays cannot both
+// succeed: the loser matches no row and is answered 409.
 //
 // The row is reset and its side effects are written together, exactly as Create
-// does. The outgoing jobs.requested.v1 event is rebuilt FROM the stored row with
-// the STORED actor and zone, so the re-dispatched request still matches the job
-// the way Complete expects; a fresh event id makes it a new dispatch rather than
-// a redelivery. The audit names the operator who triggered the replay. Duplicate
-// effects are prevented downstream by the existing inbox and batch uniqueness,
-// never by this write trusting itself.
-func (s Store) Replay(ctx context.Context, id, actor, trace string) (Job, error) {
+// does. attempts returns to 0 because a re-dispatch spends a fresh budget, while
+// requested_at is deliberately LEFT ALONE: it is the instant the observation was
+// requested, and rewriting it would claim a fresh observation for data nobody
+// observed again. A replayed job older than the freshness window therefore
+// produces a batch that is already stale, which is the honest answer.
+//
+// The outgoing jobs.requested.v1 event is rebuilt FROM the stored row with the
+// STORED actor and zone, so the re-dispatched request still matches the job the
+// way Complete expects; a fresh event id makes it a new dispatch rather than a
+// redelivery. The audit names the operator who triggered the replay. Duplicate
+// effects are prevented downstream by the existing inbox and batch uniqueness -
+// and, for a request whose batch already exists, by the completion re-emitted in
+// risk's Publish -, never by this write trusting itself.
+func (s Store) Replay(ctx context.Context, id, actor, trace string, confirmQueued bool) (Job, error) {
 	tx, err := s.DB.Begin(ctx)
 	if err != nil {
 		return Job{}, err
@@ -242,19 +280,20 @@ func (s Store) Replay(ctx context.Context, id, actor, trace string) (Job, error)
 	defer tx.Rollback(ctx)
 	var job Job
 	var jobActor string
-	err = tx.QueryRow(ctx, `UPDATE jobs SET state='queued',failure_reason=NULL,failed_at=NULL,attempts=0 WHERE id=$1 AND state='failed' RETURNING actor_id::text, `+jobColumns, id).Scan(&jobActor, &job.ID, &job.ZoneID, &job.State, &job.BatchID, &job.RequestedAt, &job.ScenarioID, &job.EvaluatedAt, &job.Attempts, &job.FailureReason, &job.FailedAt)
+	err = tx.QueryRow(ctx, `UPDATE jobs SET state='queued',failure_reason=NULL,failed_at=NULL,attempts=0 WHERE id=$1 AND (state='failed' OR (state='queued' AND $2::boolean)) RETURNING actor_id::text, `+jobColumns, id, confirmQueued).Scan(&jobActor, &job.ID, &job.ZoneID, &job.State, &job.BatchID, &job.RequestedAt, &job.ScenarioID, &job.EvaluatedAt, &job.Attempts, &job.FailureReason, &job.FailedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
-		// The guarded update matched no row for one of two reasons. Read which,
-		// because an unknown job (404) and a job that is not failed (409) are
-		// different answers and must not be conflated.
-		var exists bool
-		switch existsErr := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM jobs WHERE id=$1)`, id).Scan(&exists); {
-		case existsErr != nil:
-			return Job{}, existsErr
-		case !exists:
+		// The guarded update matched no row for one of three reasons. Read which,
+		// because an unknown job (404), a queued job whose re-dispatch was not
+		// confirmed (409 replay_confirmation_required) and a published job (409
+		// job_not_replayable) are different answers and must not be conflated.
+		var state string
+		switch stateErr := tx.QueryRow(ctx, `SELECT state FROM jobs WHERE id=$1`, id).Scan(&state); {
+		case errors.Is(stateErr, pgx.ErrNoRows):
 			return Job{}, pgx.ErrNoRows
+		case stateErr != nil:
+			return Job{}, stateErr
 		default:
-			return Job{}, ErrJobNotReplayable
+			return Job{}, replayGate(state, confirmQueued)
 		}
 	}
 	if err != nil {

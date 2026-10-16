@@ -120,7 +120,9 @@ func classifyPublishError(err error) error {
 // The transaction shape is deliberate: the inbox row is the deduplication gate,
 // the batches insert is idempotent on job_id, and the outbox event is written in
 // the same transaction as the batch so a published event can never name a batch
-// that was not stored.
+// that was not stored. When the batch already exists the delivery is not
+// swallowed: it emits a completion for the stored batch (see
+// redispatchCompletion) so an operator re-dispatch can still settle the job.
 func (s Store) Publish(ctx context.Context, request v1.Event, assessment Assessment) error {
 	tx, err := s.DB.Begin(ctx)
 	if err != nil {
@@ -178,6 +180,25 @@ func (s Store) Publish(ctx context.Context, request v1.Event, assessment Assessm
 		return classifyPublishError(err)
 	}
 	if result.RowsAffected() == 0 {
+		// The batch is already stored for this job, so this delivery is an operator
+		// re-dispatch: it carries a fresh event id and the inbox gate above could not
+		// recognise it. Completing the job depends on the completion that names the
+		// stored batch, and a silent commit would repair nothing while the job stays
+		// stuck. The id is read rather than invented - a completion must never name a
+		// batch that was not stored - and a read that sees no row is returned as an
+		// error so the delivery is retried instead of committing an empty result.
+		var existingBatchID string
+		if err = tx.QueryRow(ctx, `SELECT id::text FROM batches WHERE job_id=$1`, request.JobID).Scan(&existingBatchID); err != nil {
+			return err
+		}
+		event := redispatchCompletion(request, existingBatchID)
+		body, err := json.Marshal(event)
+		if err != nil {
+			return err
+		}
+		if _, err = tx.Exec(ctx, `INSERT INTO outbox(id,routing_key,payload) VALUES($1,$2,$3)`, event.ID, event.Type, body); err != nil {
+			return err
+		}
 		return tx.Commit(ctx)
 	}
 	event := request
@@ -193,6 +214,24 @@ func (s Store) Publish(ctx context.Context, request v1.Event, assessment Assessm
 		return err
 	}
 	return tx.Commit(ctx)
+}
+
+// redispatchCompletion builds the risk.batch.published.v1 completion for a job
+// whose batch is already stored. It exists because an operator replay (S6)
+// republishes jobs.requested.v1 under a fresh event id: the inbox gate cannot
+// recognise it, the batch insert then affects zero rows, and without this event
+// the completion that settles the job is never sent. The completion names the
+// batch that already exists - minting a new id would report a batch that was
+// never stored - and copies the request envelope verbatim apart from the fresh
+// event id, the type, the batch id and the occurrence instant. It is pure and
+// split out so that shape is testable without a database.
+func redispatchCompletion(request v1.Event, existingBatchID string) v1.Event {
+	event := request
+	event.ID = uuid.NewString()
+	event.Type = v1.BatchPublishedType
+	event.BatchID = existingBatchID
+	event.OccurredAt = time.Now().UTC()
+	return event
 }
 
 // jobFailureEvent builds the risk.job.failed.v1 report for a give-up from the

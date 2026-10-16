@@ -49,6 +49,16 @@ func TestBatchDeduplicationAndOutOfOrderPublication(t *testing.T) {
 	if err = s.Publish(ctx, newer, assessment); err != nil {
 		t.Fatal(err)
 	}
+	// A broker redelivery of the same event id is stopped by the inbox gate
+	// before the batch insert, so it must add nothing at all.
+	var count int
+	if err = db.QueryRow(ctx, `SELECT count(*) FROM outbox WHERE payload->>'job_id'=$1`, newer.JobID).Scan(&count); err != nil || count != 1 {
+		t.Fatalf("same-id retry outbox count=%d err=%v", count, err)
+	}
+	// An operator re-dispatch arrives with a fresh event id, so the inbox gate
+	// cannot recognise it. The batch already exists, and the re-dispatch must
+	// still emit a completion naming that stored batch so the job can reach its
+	// terminal state; a silent commit would repair nothing.
 	duplicate := newer
 	duplicate.ID = uuid.NewString()
 	if err = s.Publish(ctx, duplicate, assessment); err != nil {
@@ -65,9 +75,25 @@ func TestBatchDeduplicationAndOutOfOrderPublication(t *testing.T) {
 	if err != nil || len(batches) != 1 || batches[0].JobID != newer.JobID {
 		t.Fatalf("old batch superseded newest: %+v %v", batches, err)
 	}
-	var count int
-	if err = db.QueryRow(ctx, `SELECT count(*) FROM outbox WHERE payload->>'job_id'=$1`, newer.JobID).Scan(&count); err != nil || count != 1 {
-		t.Fatalf("outbox count=%d err=%v", count, err)
+	// A re-dispatched delivery must not be swallowed: it writes a second
+	// completion, and both completions name the one stored batch. An invented
+	// batch id or a second batches row would report a batch that does not exist.
+	var outboxRows, distinctBatchIDs, batchesRows int
+	if err = db.QueryRow(ctx, `SELECT count(*), count(DISTINCT payload->>'batch_id') FROM outbox WHERE payload->>'job_id'=$1`, newer.JobID).Scan(&outboxRows, &distinctBatchIDs); err != nil {
+		t.Fatal(err)
+	}
+	if outboxRows != 2 || distinctBatchIDs != 1 {
+		t.Fatalf("outbox rows=%d distinct batch ids=%d, want 2 rows naming one batch", outboxRows, distinctBatchIDs)
+	}
+	var storedBatchID string
+	if err = db.QueryRow(ctx, `SELECT id::text FROM batches WHERE job_id=$1`, newer.JobID).Scan(&storedBatchID); err != nil {
+		t.Fatal(err)
+	}
+	if err = db.QueryRow(ctx, `SELECT count(*) FROM outbox WHERE payload->>'job_id'=$1 AND payload->>'batch_id'=$2`, newer.JobID, storedBatchID).Scan(&outboxRows); err != nil || outboxRows != 2 {
+		t.Fatalf("completions naming the stored batch=%d err=%v", outboxRows, err)
+	}
+	if err = db.QueryRow(ctx, `SELECT count(*) FROM batches WHERE job_id=$1`, newer.JobID).Scan(&batchesRows); err != nil || batchesRows != 1 {
+		t.Fatalf("batches rows=%d err=%v", batchesRows, err)
 	}
 	if batches[0].RiskLevel != "alto" {
 		t.Fatalf("risk level is %q, want the persisted %q", batches[0].RiskLevel, "alto")

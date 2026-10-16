@@ -41,6 +41,9 @@ type fakeStore struct {
 	replayID    string
 	replayActor string
 	replayTrace string
+	// replayConfirm records the confirmation the transport forwarded, so a test
+	// can prove a re-dispatch is only confirmed when the operator asked for it.
+	replayConfirm bool
 }
 
 func (s *fakeStore) Create(_ context.Context, actor, key, zone, trace string, scenarioID ...string) (repository.Job, error) {
@@ -58,11 +61,11 @@ func (s *fakeStore) Get(context.Context, string) (repository.Job, error) {
 func (s *fakeStore) Audit(context.Context) ([]repository.Audit, error) { return nil, nil }
 
 // Replay records the forwarded arguments so a test can pin that the operator
-// subject and the request trace are what reach persistence, and returns the
-// configured outcome.
-func (s *fakeStore) Replay(_ context.Context, id, actor, trace string) (repository.Job, error) {
+// subject, the request trace and the queued re-dispatch confirmation are what
+// reach persistence, and returns the configured outcome.
+func (s *fakeStore) Replay(_ context.Context, id, actor, trace string, confirmQueued bool) (repository.Job, error) {
 	s.replayCalls++
-	s.replayID, s.replayActor, s.replayTrace = id, actor, trace
+	s.replayID, s.replayActor, s.replayTrace, s.replayConfirm = id, actor, trace, confirmQueued
 	return s.replayJob, s.replayErr
 }
 
@@ -389,6 +392,11 @@ func TestReplayFailedJobReturnsQueued(t *testing.T) {
 	if store.replayCalls != 1 || store.replayID != id || store.replayActor != "operator-subject" || store.replayTrace != trace {
 		t.Fatalf("store call id=%q actor=%q trace=%q calls=%d", store.replayID, store.replayActor, store.replayTrace, store.replayCalls)
 	}
+	// A bodiless replay must never confirm a queued re-dispatch: the confirmation
+	// is the operator's explicit acceptance of a possible duplicate dispatch.
+	if store.replayConfirm {
+		t.Fatal("a bodiless replay carried a queued re-dispatch confirmation")
+	}
 	if w.Header().Get("X-Request-ID") != trace {
 		t.Fatalf("X-Request-ID header=%q want %q", w.Header().Get("X-Request-ID"), trace)
 	}
@@ -445,6 +453,7 @@ func TestReplayRejections(t *testing.T) {
 	}{
 		{"unknown job", "/v1/jobs/" + id + "/replay", pgx.ErrNoRows, http.StatusNotFound, "job_not_found", 1},
 		{"not failed is a conflict", "/v1/jobs/" + id + "/replay", repository.ErrJobNotReplayable, http.StatusConflict, "job_not_replayable", 1},
+		{"queued without confirmation is a conflict", "/v1/jobs/" + id + "/replay", repository.ErrReplayConfirmationRequired, http.StatusConflict, "replay_confirmation_required", 1},
 		{"storage failure", "/v1/jobs/" + id + "/replay", errors.New("storage unavailable"), http.StatusServiceUnavailable, "storage_unavailable", 1},
 		{"malformed id", "/v1/jobs/not-a-uuid/replay", nil, http.StatusBadRequest, "invalid_job_id", 0},
 	} {
@@ -472,6 +481,73 @@ func TestReplayRejections(t *testing.T) {
 			}
 			if store.replayCalls != tc.calls {
 				t.Fatalf("store calls=%d want=%d", store.replayCalls, tc.calls)
+			}
+		})
+	}
+}
+
+// TestReplayQueuedJobWithConfirmation pins the confirmed path: a body carrying
+// exactly the documented token forwards the confirmation to the store, so a
+// queued job can be recovered when the operator has checked for in-flight work.
+func TestReplayQueuedJobWithConfirmation(t *testing.T) {
+	id := uuid.NewString()
+	instant := time.Date(2030, 1, 2, 3, 4, 5, 0, time.UTC)
+	store := &fakeStore{replayJob: repository.Job{ID: id, ZoneID: "valparaiso-demo", State: "queued", RequestedAt: instant}}
+	handler, mint := replayHandler(t, store)
+	r := httptest.NewRequest(http.MethodPost, "/v1/jobs/"+id+"/replay", strings.NewReader(`{"confirm":"`+replayConfirmToken+`"}`))
+	r.Header.Set("Authorization", "Bearer "+mint("admin"))
+	r.Header.Set("X-Request-ID", uuid.NewString())
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, r)
+	if w.Code != http.StatusAccepted {
+		t.Fatalf("code=%d want=%d body=%s", w.Code, http.StatusAccepted, w.Body)
+	}
+	if store.replayCalls != 1 || !store.replayConfirm {
+		t.Fatalf("store confirm=%v calls=%d", store.replayConfirm, store.replayCalls)
+	}
+}
+
+// TestReplayRejectsMalformedConfirmation pins the shape rule of the replay body:
+// the optional body is the only place a queued re-dispatch is confirmed, so a
+// document that is not exactly the documented token is refused with 400 before
+// the store is reached. The store call count proves a rejection has no partial
+// effect; an absent body stays valid, and its own case is
+// TestReplayFailedJobReturnsQueued.
+func TestReplayRejectsMalformedConfirmation(t *testing.T) {
+	id := uuid.NewString()
+	for _, tc := range []struct {
+		name string
+		body string
+	}{
+		{"unknown token", `{"confirm":"yes"}`},
+		{"boolean instead of the token", `{"confirm":true}`},
+		{"absent confirmation", `{}`},
+		{"unknown field", `{"confirm":"queued_may_be_in_flight","force":true}`},
+		{"not an object", `["queued_may_be_in_flight"]`},
+		{"trailing document", `{"confirm":"queued_may_be_in_flight"}{}`},
+		{"malformed json", `{"confirm":`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			store := &fakeStore{}
+			handler, mint := replayHandler(t, store)
+			r := httptest.NewRequest(http.MethodPost, "/v1/jobs/"+id+"/replay", strings.NewReader(tc.body))
+			r.Header.Set("Authorization", "Bearer "+mint("admin"))
+			w := httptest.NewRecorder()
+			handler.ServeHTTP(w, r)
+			if w.Code != http.StatusBadRequest {
+				t.Fatalf("code=%d want=%d body=%s", w.Code, http.StatusBadRequest, w.Body)
+			}
+			var got struct {
+				Code string `json:"code"`
+			}
+			if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil || got.Code != "invalid_replay_request" {
+				t.Fatalf("code=%q err=%v body=%s", got.Code, err, w.Body)
+			}
+			if store.replayCalls != 0 {
+				t.Fatalf("a malformed replay reached the store %d times", store.replayCalls)
+			}
+			if store.replayConfirm {
+				t.Fatal("a rejected body still confirmed the re-dispatch")
 			}
 		})
 	}

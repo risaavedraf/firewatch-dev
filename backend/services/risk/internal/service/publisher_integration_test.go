@@ -137,8 +137,9 @@ func TestPublisherPersistsAndReadsBackTheFixtureAssessment(t *testing.T) {
 // selection path against actual storage: the real Publisher selects the built-in
 // provider from the request's scenario id, the real store retains the scenario and
 // the server-assigned instant on both the batch row and the result event, an
-// idempotent retry adds no second outbox row, and a legacy publication keeps both
-// columns NULL and omits both keys from its event payload.
+// operator re-dispatch publishes a second completion that names the same stored
+// batch, and a legacy publication keeps both columns NULL and omits both keys from
+// its event payload.
 func TestPublisherPersistsScenarioMetadataThroughTheRealStore(t *testing.T) {
 	if testing.Short() || os.Getenv("TEST_DATABASE_URL") == "" {
 		t.Skip("requires migrated disposable risk database")
@@ -169,19 +170,33 @@ func TestPublisherPersistsScenarioMetadataThroughTheRealStore(t *testing.T) {
 	if err := publisher.Publish(ctx, request); err != nil {
 		t.Fatalf("publish the scenario through the real store: %v", err)
 	}
-	// An at-least-once retry with a fresh delivery id must not create a second
-	// outbox row and must keep the original scenario and instant.
+	// An operator re-dispatch arrives with a fresh event id, so the inbox gate
+	// cannot recognise it: the batch already exists, and the store must emit a
+	// second completion that still names that stored batch while keeping the
+	// original scenario and instant. A silent commit here would leave the job
+	// unable to reach its terminal state.
 	retry := request
 	retry.ID = uuid.NewString()
 	if err := publisher.Publish(ctx, retry); err != nil {
-		t.Fatalf("retry the same scenario job: %v", err)
+		t.Fatalf("re-dispatch the same scenario job: %v", err)
 	}
-	var outboxRows int
-	if err := db.QueryRow(ctx, `SELECT count(*) FROM outbox WHERE payload->>'job_id'=$1`, request.JobID).Scan(&outboxRows); err != nil || outboxRows != 1 {
-		t.Fatalf("idempotent retry wrote outbox rows=%d err=%v", outboxRows, err)
+	var outboxRows, distinctBatchIDs int
+	if err := db.QueryRow(ctx, `SELECT count(*), count(DISTINCT payload->>'batch_id') FROM outbox WHERE payload->>'job_id'=$1`, request.JobID).Scan(&outboxRows, &distinctBatchIDs); err != nil || outboxRows != 2 || distinctBatchIDs != 1 {
+		t.Fatalf("re-dispatch wrote outbox rows=%d naming %d batches: %v", outboxRows, distinctBatchIDs, err)
 	}
+	var storedBatchID string
+	if err := db.QueryRow(ctx, `SELECT id::text FROM batches WHERE job_id=$1`, request.JobID).Scan(&storedBatchID); err != nil {
+		t.Fatal(err)
+	}
+	var namedStored int
+	if err := db.QueryRow(ctx, `SELECT count(*) FROM outbox WHERE payload->>'job_id'=$1 AND payload->>'batch_id'=$2`, request.JobID, storedBatchID).Scan(&namedStored); err != nil || namedStored != 2 {
+		t.Fatalf("completions naming the stored batch=%d err=%v", namedStored, err)
+	}
+	// The read-back selects the completion for the stored batch instead of an
+	// arbitrary single row: with a second completion present, only matching the
+	// stored batch id pins the payload to this job's batch.
 	var payload []byte
-	if err := db.QueryRow(ctx, `SELECT payload FROM outbox WHERE payload->>'job_id'=$1`, request.JobID).Scan(&payload); err != nil {
+	if err := db.QueryRow(ctx, `SELECT payload FROM outbox WHERE payload->>'job_id'=$1 AND payload->>'batch_id'=$2`, request.JobID, storedBatchID).Scan(&payload); err != nil {
 		t.Fatal(err)
 	}
 	var result v1.Event

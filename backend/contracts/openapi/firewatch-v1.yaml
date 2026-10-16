@@ -129,30 +129,74 @@ paths:
     post:
       operationId: replayJob
       description: >-
-        Admin only. Returns a failed job to queued so its work is dispatched
-        again; nothing is replayed automatically. Only a failed job is
-        replayable, and the transition is one guarded update, so two concurrent
-        replays cannot both enqueue - the loser is answered 409 rather than
-        silently accepted. The terminal failure_reason and failed_at are cleared
-        and attempts is reset to 0. The row, its audit record and a new
-        jobs.requested.v1 event are written in one transaction, exactly as job
-        creation does; duplicate effects are prevented downstream by the unique
-        inbox that already exists, never by this call. The body is the same Job
-        object as GET /v1/jobs/{id}.
+        Admin only. Returns a failed job to queued, or re-dispatches a queued
+        one, so its work is dispatched again; nothing is replayed automatically.
+        The transition is one guarded update, so two concurrent replays cannot
+        both enqueue - the loser is answered 409 rather than silently accepted.
+        A failed job is replayed by its state alone: failure_reason and
+        failed_at are cleared and attempts returns to 0. A queued job may still
+        be in flight, so re-dispatching it requires the optional confirmation in
+        the request body; without it the request is answered 409
+        replay_confirmation_required and nothing is written. A published job is
+        never replayable, with or without the confirmation. The row, its audit
+        record and a new jobs.requested.v1 event are written in one transaction,
+        exactly as job creation does, and requested_at is deliberately NOT
+        rewritten: it is the instant the observation was requested, so a
+        replayed job older than the freshness window produces a batch that is
+        already stale. Duplicate effects are prevented downstream by the unique
+        inbox that already exists - and, for a re-dispatch whose batch already
+        exists, by the completion re-emitted for that stored batch -, not by
+        this call. The body is the same Job object as GET /v1/jobs/{id}.
       parameters:
         - in: path
           name: id
           required: true
           schema: {type: string, format: uuid}
+      requestBody:
+        required: false
+        description: >-
+          Optional, and only meaningful for a queued job. A malformed body is
+          refused for either state; a failed job is replayed whether or not the
+          confirmation is sent.
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                confirm:
+                  type: string
+                  enum: [queued_may_be_in_flight]
+                  description: >-
+                    The operator's explicit acceptance that a queued job may
+                    still be running, so the same work may be dispatched twice;
+                    this value is the only accepted one.
       responses:
         '202':
           description: >-
-            The failed job was returned to queued; terminal fields are cleared
-            and attempts is 0.
+            A failed job was returned to queued with its terminal fields
+            cleared and attempts at 0, or a queued job was re-dispatched; the
+            body is the resulting job.
           content:
             application/json:
               schema: {$ref: '#/components/schemas/Job'}
-        '400': {$ref: '#/components/responses/BadRequest'}
+        '400':
+          description: >-
+            Rejected before any effect: the id is not a uuid, or the body is not
+            exactly the documented confirmation.
+          headers:
+            X-Request-ID: {$ref: '#/components/headers/RequestID'}
+            Cache-Control: {schema: {type: string, enum: [no-store]}}
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [code, request_id]
+                properties:
+                  code:
+                    type: string
+                    enum: [invalid_job_id, invalid_replay_request]
+                  request_id: {type: string, format: uuid}
         '401': {$ref: '#/components/responses/Unauthorized'}
         '403': {$ref: '#/components/responses/Forbidden'}
         '404':
@@ -170,9 +214,11 @@ paths:
                   request_id: {type: string, format: uuid}
         '409':
           description: >-
-            The job exists but is not failed, so it is not replayable. A job
-            that is already queued or published, or a replay that lost the race
-            to a concurrent one, is answered here; code is job_not_replayable.
+            The job exists but its state forbids this replay, or the replay lost
+            the race to a concurrent one. code is replay_confirmation_required
+            when the job is queued and the body did not confirm the re-dispatch,
+            and job_not_replayable when the job is published and already has its
+            outcome.
           headers:
             X-Request-ID: {$ref: '#/components/headers/RequestID'}
             Cache-Control: {schema: {type: string, enum: [no-store]}}
@@ -182,7 +228,9 @@ paths:
                 type: object
                 required: [code, request_id]
                 properties:
-                  code: {type: string, enum: [job_not_replayable]}
+                  code:
+                    type: string
+                    enum: [replay_confirmation_required, job_not_replayable]
                   request_id: {type: string, format: uuid}
         '429': {$ref: '#/components/responses/RateLimited'}
         '502': {$ref: '#/components/responses/UpstreamUnavailable'}

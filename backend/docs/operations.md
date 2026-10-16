@@ -185,13 +185,22 @@ operator surface.
   backlog is never converted into a false terminal state.
 - **Act.** Check `firewatch_broker_ready`, `up` and both dead queues. Search the
   dead-letter payloads for the job's `job_id`, and re-drive a delivery you find.
-- **When no delivery can be found, there is no repair available today.** The admin
-  replay accepts only a job already marked `failed`, and this one is still
-  `queued`, so replay answers `409 job_not_replayable`. That guard is deliberate: a
-  queued job may still be in flight, and re-enqueueing it blindly would risk
-  duplicate processing. Record the observation and escalate; do not delete the job
-  and do not force it terminal. This is the accountable-recovery gap listed in
-  section 10: the alert detects the case, it does not repair it.
+- **When no delivery can be found**, the job is still `queued` and the admin
+  replay recovers it: `POST /v1/jobs/{id}/replay` with the body
+  `{"confirm":"queued_may_be_in_flight"}` re-dispatches it. The confirmation is
+  required because a queued job may still be in flight, and sending it is the
+  operator's acceptance that the same work may run twice - so check the dead
+  queues above first. Without it the route answers `409
+  replay_confirmation_required` and writes nothing. A `published` job is still
+  refused (`409 job_not_replayable`): it already has its outcome.
+- **What the re-dispatch guarantees.** The row keeps its `requested_at`, so a job
+  older than the 15-minute freshness window produces a batch that is already
+  `stale`. That is deliberate: nobody observed the zone again, and moving the
+  instant would claim a fresh observation. If the assessment had already been
+  stored but its result never reached `jobs`, `risk` now re-emits the completion
+  for that stored batch instead of swallowing the re-dispatched request, so the
+  job reaches `published` in either case; a repeated completion for the same
+  batch is idempotent, and no second batch is ever created.
 
 ## 10. What is explicitly not done
 
@@ -200,7 +209,10 @@ operator surface.
 - No Alertmanager routing.
 - Latency/error/runtime signals exist only for the `risk` service.
 - No drift evaluation, because there is no ground truth yet.
-- **A `queued` job whose delivery cannot be traced has no replay path.** The replay
-  accepts only a `failed` job, because a queued one may still be in flight.
-  Extending replay to `queued` needs an explicit guard against re-enqueueing work
-  that is still running, and that decision has not been taken.
+- **A `queued` job's re-dispatch is an operator attestation, not proof.** The
+  replay cannot see the broker, so it cannot know whether a copy of the request is
+  still in flight: it refuses (`409 replay_confirmation_required`) unless the
+  operator confirms, and duplicate *effects* are prevented downstream by the
+  completion re-emitted for the batch that already exists. The duplicate *work* -
+  one extra assessment when the request really was in flight - is bounded but not
+  prevented.
