@@ -95,7 +95,8 @@ El id duplicado se prueba con una prueba del gateway contra un upstream de prueb
 - **T4 — S6 — verificación agregada del padre** — ruta: inline (`npm run verify`, `go test ./...`, `go vet`, sonda viva read-only) — hecho, ver L10
 - **T5 — S6 — verificación independiente y decisión de riesgo** — ruta: `gentle-ai-verify` (solo lectura) sobre `main..f9eb60e`, obligada por el plan de `assess`, que devolvió `unassessable` y por tanto trata el candidato como riesgo alto (L11) — en curso
 - **T6 — S7 — fila del índice `odd/tasks/README.md`** — ruta: inline — hecho, ver L6
-- **T7 — S7 — issue aprobado y PR** — ruta: `gh` — **bloqueada**: publicar en el remoto requiere autorización explícita del usuario (S7)
+- **T7 — S7 — issue aprobado y PR** — ruta: `gh` — hecho: issue **#27** (`status:approved` y `type:bug`) y PR **#28** contra `main` con la plantilla y `Closes #27`; el merge es decisión del usuario (ver L13)
+- **T8 — Revisión nativa del candidato** — ruta: `gentle_review` con el lineage del proveedor, sobre el rango commiteado `main..HEAD`, autorizada por el usuario en L13 — en curso
 
 ## Log
 
@@ -175,3 +176,15 @@ El id duplicado se prueba con una prueba del gateway contra un upstream de prueb
   - **Residual 2, NO corregido y declarado.** `MapPanel.tsx:113` conserva «La capa territorial se carga desde /v1/risk/zones al conectar» como texto por defecto sin zona seleccionada. No se cambia: describe de qué depende la capa, no la historia del usuario, y en el mismo panel `map-empty` ya nombra el rechazo (S2 verificado). Añadir la rama del motivo a un lector de coordenadas sería ruido, no corrección.
   - **Cobertura, sin extenderla en silencio.** El veredicto cubre `main..f9eb60e`. El commit de T5b es **posterior** al veredicto y por tanto **no está cubierto por él**: lo cubren la corrida enfocada y la escalera completa del padre. El commit de documentación `b958f73` también es posterior y no toca código.
   - **Lo que el verificador no pudo verificar, declarado por él:** el camino en navegador y el eco real de jobs y risk en ejecución (S9), y el `odd/tasks/README.md` que estaba modificado fuera del rango, hoy ya commiteado. La nota del mapa y el panel de rol no tenían prueba dedicada que fijara su copy tras un rechazo: eso quedó cubierto por la prueba nueva de T5b para el panel de rol, y sigue sin prueba para la nota del mapa, que es el residual 2.
+- **L13 — Decisión del usuario y publicación, verbatim.** Ante las dos preguntas de este turno respondió:
+
+> Sí, inicia la revisión nativa del candidato
+> Sí: abre el issue y el PR
+
+  Ejecutado en ese orden de importancia, no de comodidad:
+  - **Issue #27** con `status:approved` y `type:bug`: los tres hallazgos con sus mediciones, la **corrección de severidad** del hallazgo 3 (no es una región viva en esta base), los criterios de aceptación y el alcance excluido declarado.
+  - **Rama publicada** (`git push -u origin fix/session-copy-and-correlation-id`): condición necesaria del PR que el usuario autorizó, no una decisión separada de esta ruta.
+  - **PR #28** contra `main`, con la plantilla del repositorio rellenada, **exactamente una** etiqueta `type:bug` y `Closes #27`. El cuerpo declara explícitamente que el veredicto independiente cubre hasta `f9eb60e` y que los dos commits posteriores no están cubiertos por él.
+  - **El merge no lo ejecuta esta ruta.**
+  - **Lo que la autoridad nativa dijo al ser consultada, antes de empezar:** no hay revisión pendiente, y su proyección de *workspace* ve **cero** cambios —`paths: []`, `base_tree == current_candidate_tree`— porque todo el trabajo está commiteado. Para revisar la rama hace falta un rango commiteado, y su única acción disponible es `start`, precedida por la resolución de la selección de archivos sin versionar. Esos archivos son `.gentle-ai-default-agent.json` y `opencode.json`, anteriores a esta ruta y ajenos a ella.
+  - **Registro honesto del orden:** el PR se abrió con la verificación independiente ya recibida, pero **antes** de la revisión nativa, que el usuario autorizó en la misma respuesta. Si la revisión nativa encuentra un bloqueante, la corrección entra como commit nuevo en la misma rama y el PR se actualiza; no se presenta como revisado antes de estarlo.
