@@ -8,6 +8,13 @@ COPY services/risk/ ./
 RUN go build -trimpath -ldflags="-s -w" -o /server ./cmd/server
 
 FROM build AS test
+# The contract tests in internal/handler load the published OpenAPI document
+# through a repository-relative path, so the test stage has to carry it. Without
+# this copy they fail with "no such file or directory" inside the container, and
+# the integration job - the only place the database-side rules run - cannot pass.
+# The production stages do not need it, which is why it is added here and not in
+# the build stage.
+COPY contracts/openapi/ /src/contracts/openapi/
 ENTRYPOINT ["go", "test", "-count=1", "./..."]
 
 FROM gcr.io/distroless/static-debian12:nonroot@sha256:afa5c872c891853ca7fcf1f12c3edb23f7eeef36189728842dd51042ff57f7ab AS runtime
