@@ -24,6 +24,8 @@ paths:
         '503': {$ref: '#/components/responses/OperationalUnavailable'}
         '401': {$ref: '#/components/responses/Unauthorized'}
         '403': {$ref: '#/components/responses/Forbidden'}
+        '429': {$ref: '#/components/responses/RateLimited'}
+        '502': {$ref: '#/components/responses/UpstreamUnavailable'}
   /v1/jobs/status:
     get:
       operationId: getJobsStatus
@@ -40,6 +42,8 @@ paths:
         '503': {$ref: '#/components/responses/OperationalUnavailable'}
         '401': {$ref: '#/components/responses/Unauthorized'}
         '403': {$ref: '#/components/responses/Forbidden'}
+        '429': {$ref: '#/components/responses/RateLimited'}
+        '502': {$ref: '#/components/responses/UpstreamUnavailable'}
   /v1/jobs:
     post:
       operationId: createDemoJob
@@ -83,9 +87,17 @@ paths:
         '400': {$ref: '#/components/responses/BadRequest'}
         '401': {$ref: '#/components/responses/Unauthorized'}
         '403': {$ref: '#/components/responses/Forbidden'}
-        '415': {description: JSON content type required}
-        '429': {description: Gateway rate limit exceeded}
-        '503': {description: Storage unavailable; no acceptance promised}
+        '415':
+          description: JSON content type required.
+          headers:
+            X-Request-ID: {$ref: '#/components/headers/RequestID'}
+            Cache-Control: {schema: {type: string, enum: [no-store]}}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '429': {$ref: '#/components/responses/RateLimited'}
+        '502': {$ref: '#/components/responses/UpstreamUnavailable'}
+        '503': {$ref: '#/components/responses/StorageUnavailable'}
   /v1/jobs/{id}:
     get:
       operationId: getJob
@@ -106,7 +118,10 @@ paths:
         '400': {$ref: '#/components/responses/BadRequest'}
         '401': {$ref: '#/components/responses/Unauthorized'}
         '403': {$ref: '#/components/responses/Forbidden'}
-        '404': {description: Unknown job}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '429': {$ref: '#/components/responses/RateLimited'}
+        '502': {$ref: '#/components/responses/UpstreamUnavailable'}
+        '503': {$ref: '#/components/responses/StorageUnavailable'}
   /v1/risk/latest:
     get:
       operationId: getLatestBatch
@@ -123,7 +138,25 @@ paths:
         '400': {$ref: '#/components/responses/BadRequest'}
         '401': {$ref: '#/components/responses/Unauthorized'}
         '403': {$ref: '#/components/responses/Forbidden'}
-        '404': {description: No published batch; data_status is insufficient}
+        '404':
+          description: >-
+            No published batch for the zone; the caller has insufficient data.
+            This is an empty-state answer rather than a failure, so it carries
+            code and data_status and, unlike the shared error body, no
+            request_id.
+          headers:
+            X-Request-ID: {$ref: '#/components/headers/RequestID'}
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [code, data_status]
+                properties:
+                  code: {type: string, enum: [no_published_batch]}
+                  data_status: {type: string, enum: [insufficient]}
+        '429': {$ref: '#/components/responses/RateLimited'}
+        '502': {$ref: '#/components/responses/UpstreamUnavailable'}
+        '503': {$ref: '#/components/responses/StorageUnavailable'}
   /v1/risk/history:
     get:
       operationId: listBatches
@@ -141,6 +174,9 @@ paths:
         '400': {$ref: '#/components/responses/BadRequest'}
         '401': {$ref: '#/components/responses/Unauthorized'}
         '403': {$ref: '#/components/responses/Forbidden'}
+        '429': {$ref: '#/components/responses/RateLimited'}
+        '502': {$ref: '#/components/responses/UpstreamUnavailable'}
+        '503': {$ref: '#/components/responses/StorageUnavailable'}
   /v1/risk/synthetic-scenarios:
     get:
       operationId: listSyntheticScenarios
@@ -160,6 +196,8 @@ paths:
                 items: {$ref: '#/components/schemas/SyntheticScenario'}
         '401': {$ref: '#/components/responses/Unauthorized'}
         '403': {$ref: '#/components/responses/Forbidden'}
+        '429': {$ref: '#/components/responses/RateLimited'}
+        '502': {$ref: '#/components/responses/UpstreamUnavailable'}
   /v1/risk/sources:
     get:
       operationId: getRiskSources
@@ -248,7 +286,18 @@ paths:
         '401': {$ref: '#/components/responses/Unauthorized'}
         '403': {$ref: '#/components/responses/Forbidden'}
         '503':
-          description: Invalid geography integrity or missing active descriptor
+          description: >-
+            The embedded geography artifact failed its integrity check, or no
+            active publisher descriptor is available. code is
+            geography_integrity_unavailable or risk_source_unavailable.
+          headers:
+            X-Request-ID: {$ref: '#/components/headers/RequestID'}
+            Cache-Control: {schema: {type: string, enum: [no-store]}}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '429': {$ref: '#/components/responses/RateLimited'}
+        '502': {$ref: '#/components/responses/UpstreamUnavailable'}
   /v1/risk/zones:
     get:
       operationId: listZones
@@ -278,7 +327,9 @@ paths:
         '400': {$ref: '#/components/responses/BadRequest'}
         '401': {$ref: '#/components/responses/Unauthorized'}
         '403': {$ref: '#/components/responses/Forbidden'}
-        '503': {description: Storage unavailable}
+        '503': {$ref: '#/components/responses/StorageUnavailable'}
+        '429': {$ref: '#/components/responses/RateLimited'}
+        '502': {$ref: '#/components/responses/UpstreamUnavailable'}
   /v1/audit:
     get:
       operationId: listAudit
@@ -305,6 +356,9 @@ paths:
                     occurred_at: {type: string, format: date-time}
         '401': {$ref: '#/components/responses/Unauthorized'}
         '403': {$ref: '#/components/responses/Forbidden'}
+        '429': {$ref: '#/components/responses/RateLimited'}
+        '502': {$ref: '#/components/responses/UpstreamUnavailable'}
+        '503': {$ref: '#/components/responses/StorageUnavailable'}
 components:
   securitySchemes:
     bearerAuth: {type: http, scheme: bearer, bearerFormat: JWT}
@@ -320,6 +374,14 @@ components:
           Catalogue zone code. The valid set is the zone catalogue, served by
           the zones endpoint. It is deliberately not an enum: an enum here
           would drift from the table.
+  headers:
+    RequestID:
+      description: >-
+        Canonical lower-case dashed UUID minted by the gateway, returned on
+        every response and repeated as request_id in the JSON error body. For
+        the configured browser origin it is also named in
+        Access-Control-Expose-Headers so page JavaScript can read it.
+      schema: {type: string, format: uuid}
   responses:
     OperationalReady:
       description: Dependencies ready, not pipeline delivery assurance
@@ -337,10 +399,91 @@ components:
       content:
         application/json:
           schema: {$ref: '#/components/schemas/OperationalStatus'}
-    BadRequest: {description: Invalid input}
-    Unauthorized: {description: Missing or invalid access token}
-    Forbidden: {description: Role not permitted}
+    BadRequest:
+      description: Invalid input; the request was rejected before any effect.
+      headers:
+        X-Request-ID: {$ref: '#/components/headers/RequestID'}
+        Cache-Control: {schema: {type: string, enum: [no-store]}}
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/ErrorResponse'}
+    Unauthorized:
+      description: Missing, malformed or unverifiable access token.
+      headers:
+        X-Request-ID: {$ref: '#/components/headers/RequestID'}
+        Cache-Control: {schema: {type: string, enum: [no-store]}}
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/ErrorResponse'}
+    Forbidden:
+      description: Token verified but its role is not permitted for this route.
+      headers:
+        X-Request-ID: {$ref: '#/components/headers/RequestID'}
+        Cache-Control: {schema: {type: string, enum: [no-store]}}
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/ErrorResponse'}
+    NotFound:
+      description: The addressed resource does not exist.
+      headers:
+        X-Request-ID: {$ref: '#/components/headers/RequestID'}
+        Cache-Control: {schema: {type: string, enum: [no-store]}}
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/ErrorResponse'}
+    RateLimited:
+      description: >-
+        Gateway quota exhausted; the request is answered before routing. The
+        bound is a single global limiter, not per caller, so it applies to every
+        operation in this document.
+      headers:
+        X-Request-ID: {$ref: '#/components/headers/RequestID'}
+        Retry-After:
+          description: Seconds the caller should wait before retrying.
+          schema: {type: string, example: '1'}
+        Cache-Control: {schema: {type: string, enum: [no-store]}}
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/ErrorResponse'}
+    UpstreamUnavailable:
+      description: >-
+        Gateway could not reach the upstream service that owns the route
+        (connection failure or response-header timeout); no upstream response
+        was observed.
+      headers:
+        X-Request-ID: {$ref: '#/components/headers/RequestID'}
+        Cache-Control: {schema: {type: string, enum: [no-store]}}
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/ErrorResponse'}
+    StorageUnavailable:
+      description: >-
+        The dependency the operation reads or writes was unavailable; the
+        operation has no effect and stored state is unchanged.
+      headers:
+        X-Request-ID: {$ref: '#/components/headers/RequestID'}
+        Cache-Control: {schema: {type: string, enum: [no-store]}}
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/ErrorResponse'}
   schemas:
+    ErrorResponse:
+      type: object
+      description: >-
+        One error body shared by the gateway and both backend services. It
+        carries a stable machine-readable code and the request's correlation id,
+        which is also returned in the X-Request-ID header.
+      required: [code, request_id]
+      properties:
+        code:
+          type: string
+          description: >-
+            Stable machine-readable error code. The set is documented on each
+            response; it is not a free-form message.
+        request_id:
+          type: string
+          format: uuid
+          description: Correlation id, identical to the X-Request-ID header.
     OperationalStatus:
       type: object
       required: [checked_at, ready, reason, dependencies]
