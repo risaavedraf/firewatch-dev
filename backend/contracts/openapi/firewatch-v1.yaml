@@ -595,8 +595,11 @@ components:
         code:
           type: string
           description: >-
-            Stable machine-readable error code. The set is documented on each
-            response; it is not a free-form message.
+            Stable machine-readable error code, not a free-form message. The
+            responses that distinguish route-specific failures enumerate the
+            codes they answer. The shared error responses are reused by many
+            operations, so they describe the status and headers instead and
+            leave the code to the layer that decided the failure.
         request_id:
           type: string
           format: uuid
