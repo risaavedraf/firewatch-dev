@@ -25,9 +25,9 @@
 | ID | Spec | Ruta | Descripción | Commit |
 | --- | --- | --- | --- | --- |
 | T1 | S1 | inline | Acordar y documentar la política de reintentos/backoff/estado terminal. | Hecho — política en S1/S2 (`29811ef`) |
-| T2 | S2 | inline | Implementar replay idempotente de la DLQ y reconciliación. | **Unidad 1 hecha**: estado terminal en la fila propia del job (migración 004, `attempts`/`failure_reason`/`failed_at`, `Fail` solo desde `queued`). **Pendiente**: reporte de fallo `risk`→`jobs` y replay de operador. |
-| T3 | S3 | inline | Probar reinicios y entregas duplicadas/reordenadas. | Pendiente — exige DB y broker; Docker caído |
-| T4 | S4 | inline | Alertas y runbook para reintentos agotados, DLQ y trabajos atascados. | Pendiente |
+| T2 | S2 | inline | Implementar replay idempotente de la DLQ y reconciliación. | Hecho: estado terminal en la fila (migración 004), reporte de fallo `risk`→`jobs` (`risk.job.failed.v1` vía outbox) y replay de operador `POST /v1/jobs/{id}/replay`. |
+| T3 | S3 | inline | Probar reinicios y entregas duplicadas/reordenadas. | **Parcial**: cubierto a nivel unitario (escrituras guardadas en ambos consumidores). La prueba con DB y broker sigue pendiente — Docker caído |
+| T4 | S4 | inline | Alertas y runbook para reintentos agotados, DLQ y trabajos atascados. | Hecho: regla `FireWatchStuckJobs` + acción de la regla de DLQ + runbook en `backend/docs/operations.md` |
 
 Ruta por defecto: **inline**. Delegar escritura solo por disparador.
 

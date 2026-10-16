@@ -27,12 +27,31 @@ A job that simply never receives an answer stays `queued`. It stops being invisi
 
 **Observability.** Dead-letter depth and queued-job age are alerted, and the runbook covers exhausted retries, dead letters and stuck jobs.
 
+## Mechanism (2026-10-16)
+
+The policy above is delivered by the pieces below, fixed here so both halves of the flow are built against one design instead of two guesses.
+
+**The cross-service failure report.** A job can die in either consumer and, today, nothing reaches its row. `risk` cannot write that row — it does not own it — so it reports the terminal failure as an event:
+
+- A new wire type `JobFailedType = "risk.job.failed.v1"` in `backend/contracts/gen/events/v1`, carried in the existing `Event` envelope with two additive optional fields: `failure_reason` and `attempts`. Additive and optional so a legacy message keeps the shape it always had.
+- `risk` does **not** publish from its consumer hot path. On give-up it inserts the failure event into its own `outbox` in one statement, and the existing relay publishes it with the same publisher confirms and mandatory routing every other event already uses. If that insert fails the code still rejects the delivery and logs: the dead letter stays the record, and no evidence is invented.
+- `jobs` binds its own queue to the new routing key and dispatches on the event type: `batch.published` still completes the job, `risk.job.failed.v1` writes the terminal failure through the writer this unit already introduced. An unrecognised type is rejected rather than silently accepted.
+- Topology must therefore carry more than one binding per queue. Both services currently declare exactly one key per queue, so the declaration changes shape in **both** consumers — which the local-adapter decision already requires, and which is why the rule is stated on both sides.
+
+**Operator replay.** `POST /v1/jobs/{id}/replay`, admin-only through the existing authorization, is the only way work comes back: nothing is replayed automatically.
+
+- Only a `failed` job is replayable. The transition is one guarded update (`WHERE id=$1 AND state='failed'`), so two concurrent replays cannot both enqueue; the loser is answered `409` instead of being silently accepted.
+- The replay returns the row to `queued` and clears the terminal fields, and writes the audit record and the outgoing `jobs.requested.v1` event in the same transaction, exactly as job creation does.
+- Duplicate effects are prevented downstream by the inbox unique constraint that already exists, never by trusting the replay itself.
+
+**Observability.** Dead-letter depth is already alerted. Stuck jobs gain a queued-age signal and an alert, and the runbook covers exhausted retries, dead letters and stuck jobs.
+
 ## Acceptance checklist
 
-- [~] Agree retry budgets, backoff, permanent-failure handling, and product-visible terminal/recovery states — the budget, backoff and permanent-failure handling are agreed and implemented, and the terminal state is persisted and visible. The **recovery** half (replay) is still pending, so this stays partial.
-- [ ] Implement durable recovery/reconciliation and replay without duplicate effects — the durable terminal transition exists, but the cross-service failure report and the operator replay are later units.
-- [~] Handle restart and duplicate/reordered delivery safely across persistence and acknowledgment boundaries — the terminal write only transitions a `queued` row, so a duplicate or reordered delivery cannot rewrite a terminal job, and `attempts` is durable on the row instead of living in process memory. Resuming an interrupted retry budget across a restart is deliberately **not** implemented: the policy keeps the in-line budget unchanged.
-- [ ] Provide alerts and an operator runbook for exhausted retries, dead letters, and stuck jobs — later unit; the DLQ action is still manual, as `05-observabilidad` recorded.
+- [x] Agree retry budgets, backoff, permanent-failure handling, and product-visible terminal/recovery states — agreed and delivered: five attempts with the literal 1/2/4/8 schedule, permanent errors skipping every retry, a persisted `failed` state with its reason and attempt count, and an explicit operator recovery. The literal schedule is pinned against the agreed policy rather than against the implementation.
+- [~] Implement durable recovery/reconciliation and replay without duplicate effects — the failures of both consumers now reach the row, and the replay is a single guarded transaction that also writes the audit record and the outgoing request event. Duplicate safety is structural: the replay updates only a `failed` row, so only one of two concurrent replays can enqueue, and downstream duplication is stopped by the existing inbox and batch uniqueness. The database-level observation of both is still pending, so this stays partial rather than satisfied.
+- [~] Handle restart and duplicate/reordered delivery safely across persistence and acknowledgment boundaries — a duplicate or reordered delivery can no longer rewrite a terminal row (both the terminal write and the replay transition are guarded), and the attempt count is durable on the row. Resuming an interrupted retry budget across a restart is deliberately **not** implemented: the policy keeps the in-line budget unchanged.
+- [x] Provide alerts and an operator runbook for exhausted retries, dead letters, and stuck jobs — the dead-letter backlog rule now names the propagated terminal state and the replay, a stuck-job rule alerts on the oldest queued job with a concrete action, and the operations runbook covers all three cases. The rules are not loaded by a running Prometheus here, so their semantics are unexecuted.
 
 ## Verification — future, not run
 

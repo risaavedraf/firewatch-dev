@@ -27,6 +27,11 @@ type Repository interface {
 	// property of the data, not of a literal compiled into this service, so the
 	// transport asks the catalogue instead of comparing to a hardcoded zone.
 	ZoneExists(ctx context.Context, code string) (bool, error)
+	// Replay returns a failed job to queued. It is the operator-driven recovery
+	// path: the single guarded store transition also writes the audit record and
+	// the outgoing request event, so the transport only maps its outcome to a
+	// status code.
+	Replay(ctx context.Context, id, actor, trace string) (repository.Job, error)
 }
 
 // knownScenarioID reports whether id is part of the shared wire vocabulary. The
@@ -148,6 +153,35 @@ func New(store Repository, verifier Verifier, checks ...StatusCheck) http.Handle
 			return
 		}
 		respond(w, 200, job)
+	})
+	mux.HandleFunc("POST /v1/jobs/{id}/replay", func(w http.ResponseWriter, r *http.Request) {
+		// Echo the correlation id first so every rejection below carries the same
+		// request_id as its response header, exactly as the create path does.
+		trace, err := uuid.Parse(r.Header.Get("X-Request-ID"))
+		if err != nil {
+			trace = uuid.New()
+		}
+		w.Header().Set("X-Request-ID", trace.String())
+		id, err := uuid.Parse(r.PathValue("id"))
+		if err != nil {
+			fail(w, 400, "invalid_job_id")
+			return
+		}
+		job, err := store.Replay(r.Context(), id.String(), r.Context().Value(subjectKey{}).(string), trace.String())
+		if errors.Is(err, pgx.ErrNoRows) {
+			fail(w, 404, "job_not_found")
+			return
+		}
+		if errors.Is(err, repository.ErrJobNotReplayable) {
+			fail(w, 409, "job_not_replayable")
+			return
+		}
+		if err != nil {
+			slog.Error("replay_job_failed", "request_id", trace.String())
+			fail(w, 503, "storage_unavailable")
+			return
+		}
+		respond(w, 202, job)
 	})
 	mux.HandleFunc("GET /v1/audit", func(w http.ResponseWriter, r *http.Request) {
 		items, err := store.Audit(r.Context())

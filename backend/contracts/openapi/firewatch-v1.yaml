@@ -125,6 +125,68 @@ paths:
         '429': {$ref: '#/components/responses/RateLimited'}
         '502': {$ref: '#/components/responses/UpstreamUnavailable'}
         '503': {$ref: '#/components/responses/StorageUnavailable'}
+  /v1/jobs/{id}/replay:
+    post:
+      operationId: replayJob
+      description: >-
+        Admin only. Returns a failed job to queued so its work is dispatched
+        again; nothing is replayed automatically. Only a failed job is
+        replayable, and the transition is one guarded update, so two concurrent
+        replays cannot both enqueue - the loser is answered 409 rather than
+        silently accepted. The terminal failure_reason and failed_at are cleared
+        and attempts is reset to 0. The row, its audit record and a new
+        jobs.requested.v1 event are written in one transaction, exactly as job
+        creation does; duplicate effects are prevented downstream by the unique
+        inbox that already exists, never by this call. The body is the same Job
+        object as GET /v1/jobs/{id}.
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: {type: string, format: uuid}
+      responses:
+        '202':
+          description: >-
+            The failed job was returned to queued; terminal fields are cleared
+            and attempts is 0.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Job'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404':
+          description: Unknown job id; code is job_not_found.
+          headers:
+            X-Request-ID: {$ref: '#/components/headers/RequestID'}
+            Cache-Control: {schema: {type: string, enum: [no-store]}}
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [code, request_id]
+                properties:
+                  code: {type: string, enum: [job_not_found]}
+                  request_id: {type: string, format: uuid}
+        '409':
+          description: >-
+            The job exists but is not failed, so it is not replayable. A job
+            that is already queued or published, or a replay that lost the race
+            to a concurrent one, is answered here; code is job_not_replayable.
+          headers:
+            X-Request-ID: {$ref: '#/components/headers/RequestID'}
+            Cache-Control: {schema: {type: string, enum: [no-store]}}
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [code, request_id]
+                properties:
+                  code: {type: string, enum: [job_not_replayable]}
+                  request_id: {type: string, format: uuid}
+        '429': {$ref: '#/components/responses/RateLimited'}
+        '502': {$ref: '#/components/responses/UpstreamUnavailable'}
+        '503': {$ref: '#/components/responses/StorageUnavailable'}
   /v1/risk/latest:
     get:
       operationId: getLatestBatch

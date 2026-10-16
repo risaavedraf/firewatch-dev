@@ -207,3 +207,70 @@ func (s Store) Fail(ctx context.Context, id, reason string, attempts int) error 
 	_, err := s.DB.Exec(ctx, `UPDATE jobs SET state='failed',failure_reason=$2,failed_at=now(),attempts=$3 WHERE id=$1 AND state='queued'`, id, reason, attempts)
 	return err
 }
+
+// ErrJobNotReplayable means the job exists but is not in the failed state, so the
+// guarded replay transition matched no row. Only a failed job is replayable; the
+// caller answers 409 rather than silently accepting a second replay.
+var ErrJobNotReplayable = errors.New("job is not in a replayable state")
+
+// replayEvent builds the request event a replay enqueues. It is built FROM the
+// stored row and its STORED actor and zone — never from the operator who
+// triggered the replay — so the re-dispatched request still matches the job when
+// Complete compares actor_id and zone_id. Only the trace, the fresh event id and
+// the new occurrence come from the replay itself.
+func replayEvent(job Job, storedActor, trace string) v1.Event {
+	return requestEvent(job, storedActor, job.ZoneID, trace)
+}
+
+// Replay returns a failed job to queued in one guarded transaction. The update
+// matches only a failed row (WHERE state='failed'), so two concurrent replays
+// cannot both succeed: the loser matches no row and gets ErrJobNotReplayable
+// while the winner's transaction is the only one that enqueued.
+//
+// The row is reset and its side effects are written together, exactly as Create
+// does. The outgoing jobs.requested.v1 event is rebuilt FROM the stored row with
+// the STORED actor and zone, so the re-dispatched request still matches the job
+// the way Complete expects; a fresh event id makes it a new dispatch rather than
+// a redelivery. The audit names the operator who triggered the replay. Duplicate
+// effects are prevented downstream by the existing inbox and batch uniqueness,
+// never by this write trusting itself.
+func (s Store) Replay(ctx context.Context, id, actor, trace string) (Job, error) {
+	tx, err := s.DB.Begin(ctx)
+	if err != nil {
+		return Job{}, err
+	}
+	defer tx.Rollback(ctx)
+	var job Job
+	var jobActor string
+	err = tx.QueryRow(ctx, `UPDATE jobs SET state='queued',failure_reason=NULL,failed_at=NULL,attempts=0 WHERE id=$1 AND state='failed' RETURNING actor_id::text, `+jobColumns, id).Scan(&jobActor, &job.ID, &job.ZoneID, &job.State, &job.BatchID, &job.RequestedAt, &job.ScenarioID, &job.EvaluatedAt, &job.Attempts, &job.FailureReason, &job.FailedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		// The guarded update matched no row for one of two reasons. Read which,
+		// because an unknown job (404) and a job that is not failed (409) are
+		// different answers and must not be conflated.
+		var exists bool
+		switch existsErr := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM jobs WHERE id=$1)`, id).Scan(&exists); {
+		case existsErr != nil:
+			return Job{}, existsErr
+		case !exists:
+			return Job{}, pgx.ErrNoRows
+		default:
+			return Job{}, ErrJobNotReplayable
+		}
+	}
+	if err != nil {
+		return Job{}, err
+	}
+	job.EvaluatedAt = canonicalEvaluatedAt(job.EvaluatedAt)
+	event := replayEvent(job, jobActor, trace)
+	body, err := json.Marshal(event)
+	if err != nil {
+		return Job{}, err
+	}
+	if _, err = tx.Exec(ctx, `INSERT INTO outbox(id,routing_key,payload) VALUES($1,$2,$3)`, event.ID, event.Type, body); err != nil {
+		return Job{}, err
+	}
+	if _, err = tx.Exec(ctx, `INSERT INTO audit(actor_id,action,job_id,trace_id) VALUES($1,'job.requested',$2,$3)`, actor, job.ID, trace); err != nil {
+		return Job{}, err
+	}
+	return job, tx.Commit(ctx)
+}
