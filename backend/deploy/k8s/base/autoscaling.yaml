@@ -1,0 +1,81 @@
+# Horizontal Pod Autoscalers for FireWatch — front 6, S3.
+#
+# The policy scales on measured CPU utilisation against the container's CPU
+# request, never on a guessed load: "measure before scaling" is the rule this
+# front exists to satisfy. Every pod here has a CPU request in workloads.yaml, so
+# the utilisation target is meaningful.
+#
+# The scale-down window is deliberately longer than the scale-up window, so a
+# brief lull does not shrink the pool that the next 15-minute data cycle needs.
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: gateway
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: gateway
+  minReplicas: 2
+  maxReplicas: 6
+  behavior:
+    scaleUp:
+      stabilizationWindowSeconds: 60
+    scaleDown:
+      stabilizationWindowSeconds: 300
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: jobs
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: jobs
+  minReplicas: 2
+  maxReplicas: 6
+  behavior:
+    scaleUp:
+      stabilizationWindowSeconds: 60
+    scaleDown:
+      stabilizationWindowSeconds: 300
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: risk
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: risk
+  minReplicas: 2
+  maxReplicas: 6
+  behavior:
+    scaleUp:
+      stabilizationWindowSeconds: 60
+    scaleDown:
+      stabilizationWindowSeconds: 300
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70

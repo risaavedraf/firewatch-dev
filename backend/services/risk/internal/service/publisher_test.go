@@ -714,3 +714,50 @@ func TestFeaturesFromIgnoresNonCanonicalVariables(t *testing.T) {
 		t.Fatalf("expected all 5 canonical features to be absent, got %+v", features)
 	}
 }
+
+// stubObserver records the levels the publication path reported, so the
+// observability wiring can be asserted without the real metrics type.
+type stubObserver struct{ levels []classify.Level }
+
+func (o *stubObserver) Observe(level classify.Level) { o.levels = append(o.levels, level) }
+
+// TestPublisherReportsTheOutcomeOnlyAfterPersistence protects the observability
+// seam: the level is reported exactly once, and only once the assessment is
+// persisted, so the log and the counter describe stored predictions rather than
+// discarded ones.
+func TestPublisherReportsTheOutcomeOnlyAfterPersistence(t *testing.T) {
+	observer := &stubObserver{}
+	writer := &stubWriter{}
+	if err := (Publisher{
+		Provider:   source.NewFixtureProvider(),
+		Classifier: classify.NewAcademicRuleV1(),
+		Store:      writer,
+		Outcomes:   observer,
+	}).Publish(context.Background(), sampleRequest()); err != nil {
+		t.Fatalf("publish the built-in fixture: %v", err)
+	}
+	// The fixture scores inside the high band, so the reported level is Alto,
+	// which ties the counter to the same value the persisted row carries.
+	if len(observer.levels) != 1 || observer.levels[0] != classify.LevelAlto {
+		t.Fatalf("the observer recorded %v, want exactly one %q", observer.levels, classify.LevelAlto)
+	}
+}
+
+// TestPublisherDoesNotReportAnOutcomeWhenPersistenceFails is the control for the
+// rule above: a store failure means nothing was published, so the counter must
+// not be advanced for an assessment that was then discarded.
+func TestPublisherDoesNotReportAnOutcomeWhenPersistenceFails(t *testing.T) {
+	observer := &stubObserver{}
+	writer := &stubWriter{err: errors.New("store unavailable")}
+	if err := (Publisher{
+		Provider:   source.NewFixtureProvider(),
+		Classifier: classify.NewAcademicRuleV1(),
+		Store:      writer,
+		Outcomes:   observer,
+	}).Publish(context.Background(), sampleRequest()); err == nil {
+		t.Fatal("a store failure was reported as a successful publication")
+	}
+	if len(observer.levels) != 0 {
+		t.Fatalf("the observer recorded %v for a failed publication", observer.levels)
+	}
+}

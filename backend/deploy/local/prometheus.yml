@@ -1,5 +1,10 @@
 global:
   scrape_interval: 15s
+# Alert rules are evaluated by Prometheus itself. Without an Alertmanager the
+# firing alerts are still visible in the Prometheus UI and as the ALERTS series;
+# routing them is a later integration step.
+rule_files:
+  - /etc/prometheus/alerts.yml
 scrape_configs:
   - job_name: jobs
     static_configs:
