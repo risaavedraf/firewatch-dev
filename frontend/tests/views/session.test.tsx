@@ -229,10 +229,10 @@ test('logout returns the role panel to the explicit unavailable state', async ()
 // port of the legacy assertion
 // `the permissions matrix documents the real server guards and marks what it cannot verify`.
 const GUARD_LINES: Record<string, RegExp> = {
-  'backend/services/gateway/internal/handler/gateway.go:39': /mux\.Handle\("\/v1\/audit"/,
-  'backend/services/gateway/internal/handler/gateway.go:80': /health\/ready/,
-  'backend/services/gateway/internal/handler/gateway.go:102': /auth := strings\.Fields/,
-  'backend/services/gateway/internal/handler/gateway.go:108': /verifier\.Verify\(ctx, auth\[1\]\)/,
+  'backend/services/gateway/internal/handler/gateway.go:58': /mux\.Handle\("\/v1\/audit"/,
+  'backend/services/gateway/internal/handler/gateway.go:107': /health\/ready/,
+  'backend/services/gateway/internal/handler/gateway.go:121': /auth := strings\.Fields/,
+  'backend/services/gateway/internal/handler/gateway.go:127': /verifier\.Verify\(ctx, auth\[1\]\)/,
   'backend/services/risk/internal/handler/security.go:43': /role == "viewer" \|\| role == "admin"/,
   'backend/services/risk/internal/handler/security.go:48': /fail\(w, 403, "forbidden"\)/,
   'backend/services/risk/internal/handler/api.go:41': /"GET \/v1\/risk\/status"/,
@@ -244,11 +244,11 @@ const GUARD_LINES: Record<string, RegExp> = {
   'backend/services/risk/internal/handler/api.go:89': /return Authorize\(verifier, mux\)/,
   'backend/services/jobs/internal/handler/security.go:44': /role == "admin"/,
   'backend/services/jobs/internal/handler/security.go:49': /fail\(w, 403, "forbidden"\)/,
-  'backend/services/jobs/internal/handler/api.go:51': /"GET \/v1\/jobs\/status"/,
-  'backend/services/jobs/internal/handler/api.go:52': /"POST \/v1\/jobs"/,
-  'backend/services/jobs/internal/handler/api.go:135': /"GET \/v1\/jobs\/\{id\}"/,
-  'backend/services/jobs/internal/handler/api.go:152': /"GET \/v1\/audit"/,
-  'backend/services/jobs/internal/handler/api.go:160': /return Authorize\(verifier, mux\)/,
+  'backend/services/jobs/internal/handler/api.go:86': /"GET \/v1\/jobs\/status"/,
+  'backend/services/jobs/internal/handler/api.go:87': /"POST \/v1\/jobs"/,
+  'backend/services/jobs/internal/handler/api.go:170': /"GET \/v1\/jobs\/\{id\}"/,
+  'backend/services/jobs/internal/handler/api.go:228': /"GET \/v1\/audit"/,
+  'backend/services/jobs/internal/handler/api.go:236': /return Authorize\(verifier, mux\)/,
 };
 
 test('the permissions matrix documents the real server guards and marks what it cannot verify', () => {
