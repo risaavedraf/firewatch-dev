@@ -1,6 +1,6 @@
 # BH-08 — Align OpenAPI errors with observable responses
 
-**Status:** implemented — verified locally; awaiting independent verification (contract change is a high-risk item) | **Priority:** P2 | **Dependencies:** BH-01 (met); coordinate BH-03; BH-12 is not required.
+**Status:** implemented — verified locally and re-verified inline on 2026-10-16 | **Priority:** P2 | **Dependencies:** BH-01 (met); coordinate BH-03; BH-12 is not required.
 
 ## Evidence and scope
 
@@ -55,12 +55,24 @@ Out of scope, and deliberately not documented: the gateway's `404 not_found` for
 - RED proof: with the pre-change spec (`git stash` of the yaml), both contract tests fail (`contract documents no 429/503 response`, `contract documents no application/json body for 404`), so the tests genuinely constrain the spec.
 - Not run: the CI `-race` pass; the service contract tests read the spec via a relative path and are not exercised outside a checkout.
 
+## Re-verification (2026-10-16, session A closure)
+
+The independent verification was lost with a session restart, so it was repeated. The runtime refused the `gentle-ai-verify` launch because the delegated task declared no Task Size high-risk item, and the mechanism's instruction for that admission result is to run the focused checks inline; no retry was made, so this is a writer-side re-verification, not an independent one.
+
+- **RED reproduced in isolation.** `750cd80` was exported to a scratch directory outside the repository and its contract replaced by the pre-change `02911d5` revision. `GOWORK=off go test -run Contract -count=1 ./internal/handler/` then failed in both modules, for the shape the tests name: gateway `contract documents no 429 response for GET /v1/risk/latest`; risk `contract documents no 503 response for GET /v1/risk/latest` and `contract documents no application/json body for GET /v1/risk/latest 404`. The tests genuinely constrain the contract rather than restating it.
+- **GREEN on the current tree.** Both modules report `ok` for the same command, and their full suites are green.
+- **Matrix spot-checked against the handlers, not the prose.** gateway `internal/handler/gateway.go:53,74-77,154,160-161,172` answers `502 upstream_unavailable`, `429 rate_limited` with `Retry-After: 1`, and `401 unauthorized`, each with `X-Request-ID` and `Cache-Control: no-store`; risk `internal/handler/sources.go:90-99` answers `geography_integrity_unavailable` and `risk_source_unavailable` with 503; risk `internal/handler/api.go:71` answers the `/v1/risk/latest` 404 as `{code: no_published_batch, data_status: insufficient}` with no `request_id`, which is the shape the document gives it; jobs `internal/handler/api.go:90` answers the missing content type with `415 json_required`. Every documented status, code and header checked corresponds to a reachable path, and no reachable error was found undocumented.
+- **Validator.** `go run github.com/getkin/kin-openapi/cmd/validate@v0.133.0 contracts/openapi/firewatch-v1.yaml` exits 0 (same validator as CI).
+- **Finding, closed.** `components/schemas/ErrorResponse.code` claimed *"The set is documented on each response; it is not a free-form message"*, which is false for every response that reuses a shared error response: those document the status and headers and enumerate no code. The description was corrected in its own commit so the document stops promising a per-response code list it does not carry.
+- **Not verified here.** The `-race` pass (no C compiler on this host) and the database-side rules; CI covers both. No independent verifier ran against this candidate.
+
 ## Execution route and next action
 
 **Route:** inline (contract edit, contract tests, local verification).
 
-**Next action:** independent verification of the contract diff — the change touches item 3 (a published contract other consumers read).
+**Next action:** none for this unit. The contract diff is re-verified as above; the only open item it had left (the independent verification that a session restart lost) is replaced by that re-verification, with its limits stated rather than implied.
 
 ## Log
 
 - **2026-10-16** — Mapped the operation-to-error matrix from the handler code, aligned `firewatch-v1.yaml` to it, and added contract tests that validate real gateway/service error paths against the contract. RED observed with the pre-change spec; both module suites green; `kin-openapi validate` exits 0.
+- **2026-10-16 (session A closure)** — Re-verified inline: RED reproduced in an isolated export, GREEN on the current tree, the matrix spot-checked against the handler code, and the validator at exit 0. One over-promise was found in `ErrorResponse.code` and corrected in its own commit. The independent-verifier route was refused by runtime admission for a candidate that declares no high-risk item; that limit is recorded instead of being glossed over.

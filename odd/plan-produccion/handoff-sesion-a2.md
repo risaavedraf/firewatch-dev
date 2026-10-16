@@ -6,7 +6,7 @@ Continuación de la **Sesión A** del reparto sugerido en [`README.md`](README.m
 
 Terminar los frentes **4** (recuperación de fallos terminales y replay de DLQ), **10** (OpenAPI como fuente de verdad y contract tests) y **11** (hardening BH-01…BH-11). **BH-12 permanece diferida** (activación explícita).
 
-## Estado al cierre de la sesión A (2026-10-16)
+## Estado que la sesión A dejó al abrirse la A2 (2026-10-16)
 
 - Rama de trabajo: **`fix/session-copy-and-correlation-id`** (los commits de la sesión A se hicieron aquí; no se creó rama nueva).
 - **Commits de la sesión A, en orden:**
@@ -152,3 +152,24 @@ El candidato se evaluó dos veces (`assess` → `high`, `review_due` por riesgo)
 1. `mem_context` y `mem_search` en el proyecto `firewatch`; topics útiles: `firewatch/backend-hardening/a2-decisions` y `firewatch/backend-hardening/a2-execution`.
 2. `git status` **antes** de escribir nada: si aparece un archivo que no tocaste, es de otra sesión → no lo incluyas.
 3. El estado real por unidad vive en `odd/tasks/security/backend-hardening/<NN>-*.md` y en el `## Log` de `odd/plan-produccion/`. No marcar una casilla sin resultado observado.
+
+## Estado al cierre de la sesión A (2026-10-16)
+
+**La sesión A queda cerrada.** Los tres pendientes que A2 dejó abiertos se resolvieron, y hay un cuarto entregado por decisión humana:
+
+| Pendiente de A2 | Resolución |
+| --- | --- |
+| **BH-09** — ratificación escrita de la política de tokens | **Ratificada por el usuario tal cual está en el código** (D5): RS256 + JWKS remoto, `typ`/`sub`/`exp` verificados, cierre en falso (401) si el JWKS no responde, `jobs` solo `admin` incluidas las lecturas, `risk` `viewer` o `admin`. |
+| **BH-08** — re-verificación independiente | **Re-verificada en línea**: RED reproducido en un export aislado con el contrato previo, GREEN en el árbol actual, matriz operación-error contrastada contra los handlers y validador de CI en 0. La ruta de verificador independiente fue **rechazada por admisión en tiempo de ejecución** (el candidato no declara ítem de riesgo alto ante la compuerta), así que queda registrado como auto-verificación con sus límites escritos, no como verificación independiente. Una promesa de más del contrato se corrigió en `cf23d20`. |
+| **Hueco declarado #1** — un job `queued` sin camino de replay | **Resuelto por decisión humana: extender el replay**, no aceptar el hueco. Entregado en `90f48a6`: confirmación explícita (`{"confirm":"queued_may_be_in_flight"}`; sin ella `409 replay_confirmation_required` y nada escrito) y, en `risk`, completion re-emitido para el lote ya almacenado. Límite residual declarado: la confirmación es una atestación del operador y el **trabajo** duplicado se acota, no se evita. |
+| **Entrega** | Autorizada por el usuario: push de la rama y PR con el alcance completo. |
+
+**Commits nuevos desde el cierre de A2:** `90f48a6` (BH-07 u4: replay de `queued` + compuerta de conflicto en `risk`) y `cf23d20` (corrección de la descripción de `ErrorResponse.code`).
+
+**Rebanadas de revisión del PR — una unidad por commit:** BH-01, BH-08/frente 10, BH-02, BH-09, frentes 5/6 de la sesión B, plan de producción, decisiones A2, BH-03, BH-07 u1, u2, u3, BH-07 u4 + contrato (`90f48a6`), corrección del contrato (`cf23d20`), cierre documental. La rama acumula el frente completo (≈6 000 líneas autoradas), así que la revisión conviene hacerla **por rebanada**, no como un diff único.
+
+**Evidencia observada en esta sesión:** suites verdes en `gateway` (2 paquetes), `risk` (10), `jobs` (5) y `contracts/gen`; `gofmt -l` sin salida; `go vet` limpio en los cuatro módulos; `kin-openapi v0.133.0 validate` en 0; pruebas de contrato de `gateway`/`risk` y de replay de `jobs` en PASS; RED del hueco de contrato reproducido en un árbol aislado. **No ejecutado aquí:** las pruebas de integración con PostgreSQL (saltan sin `TEST_DATABASE_URL`; CI las corre con `docker compose --profile test run --rm jobs-test` y `risk-test`) y `-race` (sin compilador de C en este host).
+
+**Sigue diferido, con razón y sin decisión de producto pendiente:** BH-02 (inventario y scan de imágenes: sin daemon de Docker y sin `trivy` en este host), BH-10 (DB y broker aislados), BH-04/05/06/11 (decisiones de entorno y accesos), BH-12 (activación explícita), la verificación end-to-end de BH-07 (PostgreSQL + broker) y el `-race` local.
+
+**Revisión nativa:** el candidato `b0f77f9..HEAD` se evalúa de nuevo como `high` con `review_due` (80 rutas, ≈6 081 líneas). Los dos declives anteriores fueron por candidato, y este incluye los commits de hoy, así que la oferta se relanza **una vez**; la respuesta es del usuario y el push/PR no dependen de ella.

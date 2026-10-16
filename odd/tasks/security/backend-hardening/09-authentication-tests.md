@@ -1,6 +1,6 @@
 # BH-09 — Add policy-grounded authentication negative tests
 
-**Status:** implemented — verified locally | **Priority:** P2 | **Dependencies:** BH-01 (met); the token policy is defined in production code (see below).
+**Status:** implemented — verified locally; policy ratified in writing on 2026-10-16 | **Priority:** P2 | **Dependencies:** BH-01 (met); the token policy is defined in production code (see below).
 
 ## Evidence and scope
 
@@ -20,8 +20,8 @@ No new policy is invented: every expectation below cites one of these.
 
 ## Acceptance checklist
 
-- [~] Agree algorithm, required-claim, key-refresh, cache, and outage policy before encoding expectations.
-  - Algorithm, issuer/audience, `typ`/`sub` and expiry are already fixed by the production config above, and the tests assert exactly those. Key-refresh/cache remain go-oidc's `RemoteKeySet` defaults; the outage behaviour is asserted (fail closed). **Residual:** the team has not formally ratified this policy in writing — the tests pin code-defined behaviour.
+- [x] Agree algorithm, required-claim, key-refresh, cache, and outage policy before encoding expectations.
+  - Algorithm, issuer/audience, `typ`/`sub` and expiry are already fixed by the production config above, and the tests assert exactly those. Key-refresh/cache remain go-oidc's `RemoteKeySet` defaults; the outage behaviour is asserted (fail closed). **Ratified in writing on 2026-10-16** by the project operator during the session A closure (decision D5 of [`odd/plan-produccion/handoff-sesion-a2.md`](../../../plan-produccion/handoff-sesion-a2.md)), as the asymmetry the code already implements: RS256 only, keys from the remote JWKS, issuer and audience verified, `typ` `Bearer` and non-empty `sub` required, expiry and `nbf` checked, and a failure to reach the key set closes the door with 401 instead of accepting an unverified token. `jobs` requires `admin` on every route including the reads; `risk` accepts `viewer` or `admin`.
 - [x] Test bad signatures, disallowed algorithms, missing `exp`, and empty `sub` with explicit expected outcomes — `auth_negative_test.go`: a signature from a key outside the set, RS512 where RS256 is the only allowed algorithm, a token with no `exp`, and a token with `sub: ""` all must yield 401.
 - [x] Cover JWKS rotation, unknown keys, and outages without silently accepting unverified tokens — an unknown key (key absent from the set) and an unreachable JWKS are both asserted to fail closed with 401. A genuine rotation (a new key appearing) is not simulated; the equivalent "key not in the set" class is.
 - [x] Retain valid-token controls and ensure gateway mocks are not the sole evidence — a valid-token control asserts 200, so the rejections are not vacuous, and the tests drive the real handler `Authorize` rather than a mocked gateway.
@@ -42,8 +42,9 @@ These tests pin **existing** behaviour, so no RED was expected or produced: no p
 
 **Route:** inline (test-only addition; no production change).
 
-**Next action:** none required to close the coverage gap; the written policy ratification in the checklist remains a human item.
+**Next action:** none. The coverage gap is closed and the token policy is ratified in writing; both were the last open items of this unit.
 
 ## Log
 
 - **2026-10-16** — Added `auth_negative_test.go` over the real `Authorize` path for the review's named gaps, citing the production policy for each expectation. All cases pass, including the valid-token control and the fail-closed JWKS case.
+- **2026-10-16 (session A closure)** — The written ratification the checklist was waiting for was given: the operator ratified the token policy exactly as the code defines it, including the `admin`-only asymmetry of `jobs` and the `viewer`/`admin` pair of `risk`. The checklist item moves from partial to satisfied; nothing in the code or the tests changed, because the ratified policy is the one already pinned.

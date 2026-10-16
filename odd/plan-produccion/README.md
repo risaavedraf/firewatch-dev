@@ -98,7 +98,7 @@ Cada frente tiene su propio documento con el contrato ODD (**Specs → Tasks →
 
 **Reparto sugerido de sesiones (paralelizable):**
 
-- **Sesión A (paralela):** frentes 4, 10, 11 (mismo frente de backend/hardening; superficies disjuntas, coordinar BH-07/BH-08 con 4/10).
+- **Sesión A (paralela):** frentes 4, 10, 11 (mismo frente de backend/hardening; superficies disjuntas, coordinar BH-07/BH-08 con 4/10). **Ejecutada y cerrada el 2026-10-16:** política acordada, BH-01/02/03/07/08/09 al día y el último hueco de recuperación resuelto; ver §9.
 - **Sesión B (paralela):** frente 5 y 6 (operación; comparten el acuerdo de umbrales/SLO — resolver ese acuerdo primero). **Ejecutada el 2026-10-16:** acuerdo resuelto, frente 5 implementado y verificado, frente 6 con artefactos escritos y ejecución pendiente. Ver §8.
 - **Sesión C (decisión):** frente 14 (decisión de motor) y frente 7 (registry/claves): son decisiones humanas que habilitan al resto.
 - **Sesión D:** frente 9 (frontend/browser) y frente 15 (DIFROL): acotadas y documentales.
@@ -157,4 +157,35 @@ Límite declarado: latencia/errores/recursos se implementaron **solo en el servi
 - **Sin commit:** el repositorio sigue en `nogit`; además el árbol de trabajo contiene cambios de la **Sesión A** en paralelo (contract tests de `kin-openapi` y su `go.mod`). Se verificó que estos últimos **no** provienen de esta sesión y no se tocaron.
 
 **Para retomar:** el detalle accionable por spec está en las tablas "Pendientes al cierre de la Sesión B" de [`05-observabilidad.md`](05-observabilidad.md) y [`06-autoscaling-carga-slo.md`](06-autoscaling-carga-slo.md).
+
+## 9. Registro de avance — Sesión A (cerrada el 2026-10-16)
+
+Sesión ejecutada sobre los frentes **4 (fallos terminales y replay), 10 (OpenAPI y contract tests) y 11 (hardening BH-01…BH-11)**, en la rama `fix/backend-hardening-bh`. El detalle autoritativo vive en el `## Log` de [`04-dlq-replay-terminal.md`](04-dlq-replay-terminal.md) (L3–L4), [`10-openapi-contract-tests.md`](10-openapi-contract-tests.md), [`11-hardening-bh.md`](11-hardening-bh.md) (L3) y en el documento de cada unidad (`../tasks/security/backend-hardening/NN-*.md`). El cierre tiene su propia sección en [`handoff-sesion-a2.md`](handoff-sesion-a2.md) §«Estado al cierre de la sesión A».
+
+### 9.1 Estado por unidad
+
+| Unidad | Estado | Evidencia / límite |
+| --- | --- | --- |
+| BH-01 — Toolchain y baseline | **Cerrada** | `02911d5` |
+| BH-02 — Vulnerabilidades e imágenes | **Parcial** | `702aff6`: `govulncheck` limpio en los 4 módulos; el inventario y el scan de imágenes exigen daemon de Docker y `trivy`, y este host no los tiene |
+| BH-03 — Cuotas del gateway | **Implementada** | `2981dc5`; `-race` solo corre en CI |
+| BH-07 / frente 4 — Recuperación y replay | **Implementada**, incluido el replay de un job `queued` | `54c1ce8`, `0b0f784`, `537f83a`, `90f48a6`; la verificación end-to-end sigue necesitando PostgreSQL y broker |
+| BH-08 / frente 10 — OpenAPI y contract tests | **Implementada y re-verificada en línea** | `750cd80`, `1436dae`, `cf23d20`; sin verificador independiente: la admisión lo rechazó |
+| BH-09 — Autenticación negativa | **Implementada y ratificada por escrito** | `03baa09`; ratificación D5 el 2026-10-16 |
+| BH-04/05/06/10/11 | **Diferidas** | Decisiones de entorno y accesos; BH-10 exige DB y broker aislados |
+| BH-12 — Errores centralizados | **Diferida** | Requiere activación explícita |
+
+### 9.2 Decisión humana que cerró el último hueco
+
+Un job `queued` cuya entrega no se puede rastrear no tenía camino de reparación: el replay solo aceptaba `failed`, porque un job encolado puede seguir en vuelo. **La decisión fue extender el replay, no aceptar el hueco**, con un *guard* explícito: el operador confirma con `{"confirm":"queued_may_be_in_flight"}` (sin ella, `409 replay_confirmation_required` y nada escrito), y en `risk` la rama de conflicto de lote re-emite el completion del lote ya almacenado en vez de omitirlo, para que el replay también repare el caso «el lote se guardó pero el resultado se perdió». `attempts` vuelve a 0 y `requested_at` no se reescribe: un job viejo re-despachado produce un lote ya vencido, a propósito.
+
+### 9.3 Evidencia observada y límites
+
+- Verdes: `gateway` (2 paquetes), `risk` (10), `jobs` (5) y `contracts/gen`; `gofmt -l` sin salida; `go vet` limpio en los cuatro módulos; `kin-openapi v0.133.0 validate` en 0; pruebas de contrato y de replay en PASS.
+- RED observados: el del contrato previo (reproducido en un export aislado) y el de las reglas nuevas del replay en el límite del transporte.
+- **No ejecutado aquí:** las pruebas de integración con PostgreSQL (saltan sin `TEST_DATABASE_URL`; CI las corre con los perfiles `test`) y `-race` (sin compilador de C). La regla de S6 no tiene RED ejecutable en este host: su única superficie es la rama SQL, y por eso queda a cargo de CI.
+
+### 9.4 Qué no cierra esta sesión
+
+Nada por decisión pendiente: lo que queda abierto lo está por **entorno** (Docker, PostgreSQL, broker, clúster) o por **otra sesión** (frentes 1, 2, 3, 5/6, 7, 8, 9, 12, 13, 14, 15). El frente 6 conserva su ejecución pendiente y el frente 5 su único ítem de código abierto, ambos de la sesión B.
 
