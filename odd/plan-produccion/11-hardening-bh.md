@@ -25,11 +25,11 @@
 | --- | --- | --- | --- |
 | T1 | BH-01 — Toolchain y baseline | **Cerrada** (`02911d5`) | [`01-toolchain-baseline.md`](../tasks/security/backend-hardening/01-toolchain-baseline.md) |
 | T2 | BH-02 — Vulnerabilidades e imágenes | **Parcial** (`702aff6`) — `govulncheck` limpio en los 4 módulos; falta el inventario y el scan de imágenes con `trivy`, que exige daemon de Docker | [`02-vulnerability-scans.md`](../tasks/security/backend-hardening/02-vulnerability-scans.md) |
-| T3 | BH-03 — Cuotas gateway | Política **acordada**; implementación en curso | [`03-gateway-rate-limits.md`](../tasks/security/backend-hardening/03-gateway-rate-limits.md) |
+| T3 | BH-03 — Cuotas gateway | **Implementada** (`2981dc5`); `-race` pendiente en CI | [`03-gateway-rate-limits.md`](../tasks/security/backend-hardening/03-gateway-rate-limits.md) |
 | T4 | BH-04 — Mínimo privilegio del broker | Pendiente — decisión de entorno/accesos | [`04-broker-least-privilege.md`](../tasks/security/backend-hardening/04-broker-least-privilege.md) |
 | T5 | BH-05 — Seguridad de transporte | Pendiente — decisión de entorno | [`05-transport-security.md`](../tasks/security/backend-hardening/05-transport-security.md) |
 | T6 | BH-06 — Egress Kubernetes | Pendiente — decisión de entorno | [`06-kubernetes-egress.md`](../tasks/security/backend-hardening/06-kubernetes-egress.md) |
-| T7 | BH-07 — Recuperación de jobs *(coordina con frente 4)* | Política **acordada**; implementación en curso | [`07-job-recovery.md`](../tasks/security/backend-hardening/07-job-recovery.md) |
+| T7 | BH-07 — Recuperación de jobs *(coordina con frente 4)* | **Implementada** (`54c1ce8`, `0b0f784`, `537f83a`); verificación end-to-end pendiente por Docker | [`07-job-recovery.md`](../tasks/security/backend-hardening/07-job-recovery.md) |
 | T8 | BH-08 — Errores OpenAPI *(frente 10)* | **Implementada** (`750cd80`); re-verificación independiente pendiente | [`08-openapi-errors.md`](../tasks/security/backend-hardening/08-openapi-errors.md) |
 | T9 | BH-09 — Autenticación negativa | **Implementada** (`03baa09`); ratificación escrita pendiente | [`09-authentication-tests.md`](../tasks/security/backend-hardening/09-authentication-tests.md) |
 | T10 | BH-10 — Idempotencia concurrente | **Diferida** — exige DB y broker aislados con Docker levantado | [`10-concurrent-idempotency.md`](../tasks/security/backend-hardening/10-concurrent-idempotency.md) |

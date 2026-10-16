@@ -101,3 +101,54 @@ Las cuatro decisiones humanas de arriba quedaron resueltas. La política acordad
 - **D7 — Archivos.** `.agents/` quedó en `.gitignore`; la doc se commiteó completa; los artefactos de los frentes 5/6 (sesión B) se commitearon junto a `backend/docs/operations.md` para que la documentación y el código que describe lleguen en el mismo commit.
 
 **Los commits de la sesión A cambiaron de SHA** al reaplicarse sobre `main`: `ee215b4`→`02911d5`, `b91714b`→`750cd80`, `aed5e09`→`702aff6`, `678a13a`→`03baa09`. La tabla de la sección «Estado al cierre de la sesión A» apunta a los SHA viejos, que ya no existen en la rama de trabajo.
+
+## Estado al cierre de la A2 (2026-10-16)
+
+Rama **`fix/backend-hardening-bh`**, nacida en `main` (`b0f77f9`). Árbol limpio. **15 commits, 77 archivos, +5383/−152. Sin pushear, sin issue, sin PR.**
+
+| Commit | Unidad | Contenido |
+|---|---|---|
+| `02911d5` | BH-01 | Baseline de toolchain *(cherry-pick de `ee215b4`)* |
+| `750cd80` | BH-08 | Contract tests contra rutas reales *(cherry-pick de `b91714b`)* |
+| `702aff6` | BH-02 | Evidencia de scans de dependencias *(cherry-pick de `aed5e09`)* |
+| `03baa09` | BH-09 | Tests negativos de la política de tokens *(cherry-pick de `678a13a`)* |
+| `2ab9cc4` | — | `.agents/` fuera de control de versiones |
+| `9326daa` | frentes 5/6 | Métricas de resultado y artefactos operativos de la sesión B, con `operations.md` |
+| `784f589` | — | El plan de producción, un archivo por frente |
+| `e025643` | — | Arranque del frontend, semántica de health y citas obsoletas |
+| `29811ef` | A2 | Decisiones D1–D7 y las políticas acordadas |
+| `2981dc5` | **BH-03** | Tres capas de cuota del gateway |
+| `54c1ce8` | **BH-07 u1** | Estado terminal `failed` en la fila del job |
+| `1436dae` | BH-08 | Corrección de dos descripciones falsas del contrato, más las sondas del verificador |
+| `0b0f784` | **BH-07 u2** | Reporte de fallo `risk`→`jobs` y señal de job atascado |
+| `537f83a` | **BH-07 u3** | Replay de operador |
+| `a00b483` | BH-07 | Corrección del bloqueador del runbook, más las sondas del verificador |
+
+### Qué está entregado y verificado
+
+- **BH-03** — el agregado pre-auth queda sin cambios (refill 20/s, burst 40 por réplica) y sigue siendo la única cota previa a la autenticación; se añaden la cuota por `sub` tras el JWT (5/s, burst 10) y una cuota anónima **compartida** (1/s, burst 5), con estado acotado por evicción y tope duro. Sin `X-Forwarded-For` ni proxy confiable. El `429` conserva su forma.
+- **BH-07** — `failed` con `failure_reason`, `attempts` y `failed_at` persistidos; el consumidor de `jobs` marca su propia fila al agotar; `risk` reporta su fallo por su **outbox** (`risk.job.failed.v1`) y `jobs` lo aplica; replay de operador admin-only con transición guardada; `firewatch_queued_job_age_seconds`, alerta de job atascado y runbook.
+- **Evidencia observada**: suites verde en `gateway`, `jobs` (5 paquetes), `risk` (10) y `contracts/gen`; `gofmt` y `go vet` limpios; el contrato valida con el mismo validador que CI. Verificación independiente en **dos rondas**, que encontró y cerró **3 bloqueadores**: dos descripciones del contrato que afirmaban comportamiento inexistente y una instrucción del runbook que prescribía un replay imposible.
+
+### Huecos declarados — leer esto antes de retomar
+
+1. **Un job `queued` cuya entrega no se puede rastrear no tiene camino de replay.** El guard `failed`-solo es deliberado, porque un job encolado puede seguir en vuelo. **Decisión pendiente:** extender el replay a `queued` con un guard explícito contra reencolar trabajo en vuelo, o aceptar el hueco. Está escrito en `backend/docs/operations.md` §10.
+2. **No observado, exige PostgreSQL:** un reenvío tardío del fallo viejo podría volver a marcar `failed` un job ya replayado (`Fail` no compara identidad de evento); y si `risk` ya persistió el lote pero `jobs` no consumió el resultado, la rama de conflicto de lote de `risk` no emite otro completion, así que el replay podría dejar el job `queued`.
+3. **Advisory:** con `Broker.Fail == nil` un `risk.job.failed.v1` se ACKea sin escribir. Producción lo cablea, pero a diferencia del give-up esa rama no deja dead letter.
+4. **Sin probar en este host:** `-race` (no hay compilador de C y `CGO_ENABLED=0`), la migración `004` y las transacciones contra PostgreSQL, y la topología viva contra RabbitMQ. Docker sigue caído. CI es la comprobación autoritativa de esas partes.
+
+### Revisión nativa
+
+El candidato se evaluó dos veces (`assess` → `high`, `review_due` por riesgo) y el usuario **saltó ambas**. Cada declive es por candidato: no se creó registro, nada se consumió y las revisiones siguen activas. El límite revisado **no avanzó**, así que el próximo corte sigue siendo `b0f77f9..HEAD`.
+
+### Qué falta de A2
+
+- **BH-08** — la re-verificación independiente, que se perdió con el reinicio de sesión; hoy sería sobre `750cd80` y `1436dae`.
+- **BH-09** — la ratificación escrita de la política de tokens, incluida la asimetría `admin`/`viewer` de D5.
+- **Push, issue y PR** — la rama es local. **Decisión humana**, no un pendiente técnico.
+
+### Cómo retomar
+
+1. `mem_context` y `mem_search` en el proyecto `firewatch`; topics útiles: `firewatch/backend-hardening/a2-decisions` y `firewatch/backend-hardening/a2-execution`.
+2. `git status` **antes** de escribir nada: si aparece un archivo que no tocaste, es de otra sesión → no lo incluyas.
+3. El estado real por unidad vive en `odd/tasks/security/backend-hardening/<NN>-*.md` y en el `## Log` de `odd/plan-produccion/`. No marcar una casilla sin resultado observado.
