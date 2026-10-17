@@ -57,10 +57,21 @@ El trabajo está desglosado en **un archivo por spec** (frente) en esta misma ca
 
 ## 4. Bloqueos y decisiones humanas
 
-- **Motor de datos productivo** (frente 14): decisión pendiente, hoy solo aprobado PostGIS local.
-- **Umbrales, responsables y firmas** (frentes 8, 12, 13): no avanzan sin acuerdo explícito del equipo.
+**Resueltas el 2026-10-16** (sesión A2 y sesión B; el detalle vive en [`handoff-sesion-a2.md`](handoff-sesion-a2.md) §«Decisiones resueltas» y en el `## Log` de cada frente):
+
+- **Política de recuperación** (frente 4 / BH-07): estado terminal `failed` solo con evidencia real, reintentos sin cambios y replay de operador; el hueco de un job `queued` se resolvió **extendiendo el replay** con confirmación explícita, no aceptándolo.
+- **Cuotas del gateway** (BH-03) y **política de tokens** (BH-09, ratificada por escrito).
+- **Umbrales y herramientas de operación** (frentes 5 y 6): objetivos fijados y registrados — **ninguno medido todavía**.
+- **Rama y entrega**: `fix/backend-hardening-bh`, publicada como PR #29.
+
+**Siguen abiertas:**
+
+- **Motor de datos productivo** (frente 14): decisión pendiente; hoy solo está aprobado PostGIS local.
+- **Responsables y firmas** (frentes 8, 12, 13): no avanzan sin acuerdo explícito del equipo.
 - **`prevention`**: el backlog FWP03 está **propuesto**, no aprobado como alcance — requiere revisión antes de implementarse (ver [`odd/tasks/frontend/frontend-mockup/README.md:48-54`](../tasks/frontend/frontend-mockup/README.md)).
 - **Procedencia DIFROL** (frente 15): verificar antes de asumir la fuente lista.
+- **Entorno y accesos** para BH-02 (imágenes), BH-04/05/06/11, BH-10 y el escenario end-to-end de BH-07: no esperan una decisión de producto, sino infraestructura disponible (Docker/`trivy`, PostgreSQL y broker aislados, clúster).
+- **Merge del PR #29** y el **duplicado residual** `odd/tasks/backend-hardening/` en la raíz (`odd/tasks/README.md` §«Estado de la organización»).
 
 ## 5. Definición de terminado por frente
 
@@ -187,5 +198,38 @@ Un job `queued` cuya entrega no se puede rastrear no tenía camino de reparació
 
 ### 9.4 Qué no cierra esta sesión
 
-Nada por decisión pendiente: lo que queda abierto lo está por **entorno** (Docker, PostgreSQL, broker, clúster) o por **otra sesión** (frentes 1, 2, 3, 5/6, 7, 8, 9, 12, 13, 14, 15). El frente 6 conserva su ejecución pendiente y el frente 5 su único ítem de código abierto, ambos de la sesión B.
+Nada por decisión pendiente: lo que queda abierto lo está por **entorno** (Docker, PostgreSQL, broker, clúster) o por **otra sesión** (frentes 1, 2, 3, 5/6, 7, 8, 9, 12, 13, 14, 15). El frente 6 conserva su ejecución pendiente y el frente 5 su único ítem de código abierto, ambos de la sesión B. El inventario completo, con qué desbloquea cada cosa, está en §10.
+
+## 10. Pendientes consolidados (2026-10-16)
+
+Todo lo que sigue abierto de este plan, en un solo lugar, con **qué lo desbloquea**: una decisión humana, un entorno, otra sesión o otro frente. El estado por unidad de hardening vive en [`../tasks/security/backend-hardening/`](../tasks/security/backend-hardening/) y el índice del §5 se mantiene en [`../tasks/README.md`](../tasks/README.md).
+
+| Frente | Estado | Qué falta | Qué lo desbloquea |
+| --- | --- | --- | --- |
+| 1 — Ingesta y scheduler | Pendiente | Plan por spec listo; nada implementado | Acceso y periodicidad reales de las fuentes (decisión humana) y el frente 2 |
+| 2 — Servicio de inferencia | Pendiente | El *seam* está documentado, no implementado | Frente 1; modelo real y su política de aprobación |
+| 3 — `prevention` | Pendiente | Backlog FWP03 **propuesto**, no aprobado | Revisión de alcance por el equipo (§4) |
+| 4 — Fallos terminales y replay | **Implementado y verificado** | El escenario end-to-end (interrumpir PostgreSQL, agotar reintentos, restaurar, reiniciar consumidores) y `-race` local | Entorno con PostgreSQL y broker |
+| 5 — Observabilidad | Parcial | Medición (RPS/p95/errores/memoria); `LOG-I3` (*ground truth*); latencia y errores **solo en `risk`**: falta instrumentar `gateway` y `jobs`; sin Alertmanager no hay enrutamiento | Entorno y *ground truth* para medir; **el ítem de código abierto no requiere entorno** |
+| 6 — Autoscaling, carga y p95/SLO | Parcial | Ejecutar k6, verificar el HPA en clúster y medir el RTO | Entorno aislado y clúster de destino |
+| 7 — Firma, registry y rollout | Pendiente | Firma, promoción y despliegue verificado (la CI ya produce SBOM/provenance) | Decisión de registry y llaves, y clúster (accesos) |
+| 8 — Gobierno y seguridad (U1) | Pendiente | Controles y clasificación sin aprobar | Designar responsable y aprobar |
+| 9 — Login browser/móvil/a11y | Pendiente | Recorrido navegador con Keycloak vivo, móvil 390 px y accesibilidad | Realm y cliente vivos; el recorrido lo ejecuta el usuario con el guion |
+| 10 — OpenAPI y contract tests | **Implementado y re-verificado** | Nada propio; la re-verificación fue en línea porque la admisión rechazó al verificador independiente | — |
+| 11 — Hardening BH-01…BH-11 | Sesión A cerrada (detalle en §9) | BH-02 imágenes (inventario + `trivy`); BH-04/05/06 (entorno); BH-10 (DB y broker aislados); BH-11 (depende de BH-02/04/05/06); BH-12 (activación explícita) | Docker y `trivy`, entorno y accesos, y una decisión de activación para BH-12 |
+| 12 — Evaluación científica | **Bloqueado** | Nada avanza sin datos reales | Datos representativos, modelo evaluable, *ground truth* y umbrales acordados |
+| 13 — Go/No-Go | **Bloqueado** | Ídem | Evidencia de datos y modelo, y criterios firmados |
+| 14 — Motor de datos y continuidad | Pendiente | Decisión de motor productivo (hoy solo PostGIS local aprobado) | Decisión humana; el despliegue redundante depende del frente 7 |
+| 15 — Procedencia geoespacial (DIFROL) | Pendiente | Validación de la cartografía | Revisión DIFROL |
+
+### 10.1 Entrega y revisión
+
+- **PR #29** (`fix/backend-hardening-bh` → `main`, 83 archivos, +6 033/−188): abierto, `MERGEABLE` y con CI verde. **El merge es decisión del usuario.**
+- Conviene revisarlo **por rebanada** (una unidad por commit); el reparto está en [`handoff-sesion-a2.md`](handoff-sesion-a2.md) §«Estado al cierre de la sesión A».
+- **Revisión nativa:** el candidato `b0f77f9..HEAD` se evaluó como `high` con `review_due`; la oferta se hizo una vez y el consentimiento quedó **declinado para este candidato** (`lineage_created: false`, sin autoridad consumida). Un cambio nuevo vuelve a tener su propia oferta.
+- **Duplicado pendiente de decisión humana:** `odd/tasks/backend-hardening/` sigue en la raíz del índice de tareas; su copia verificada vive en `odd/tasks/security/backend-hardening/`.
+
+### 10.2 Registro
+
+El §5 exige declarar **qué está entregado** y **qué falta** en [`../tasks/README.md`](../tasks/README.md). Al cerrar la sesión A se actualizó allí la fila del plan de hardening, las doce unidades y se agregó la tabla de los frentes de este plan, para que el índice deje de decir que BH-01…BH-11 están pendientes.
 

@@ -1,7 +1,7 @@
 # Frente 10 — OpenAPI como fuente de verdad y contract tests
 
 - **Grupo de entrega:** G3 — Robustez de backend.
-- **Estado:** Pendiente — planificación. El OpenAPI consta validado **solo sintácticamente**.
+- **Estado:** **Implementado, verificado y re-verificado (2026-10-16).** El contrato pasó de validar solo sintácticamente a describir las respuestas observables, con contract tests que ejecutan rutas reales y fallan contra el documento previo (`750cd80`, `1436dae`) y una corrección posterior de una descripción que prometía una lista de códigos por respuesta que el documento no lleva (`cf23d20`). **Falta:** nada propio de este frente; la re-verificación fue **en línea** porque la admisión en tiempo de ejecución rechazó el verificador independiente (el candidato no declara ítem de riesgo alto ante esa compuerta). Detalle y límites en [`../tasks/security/backend-hardening/08-openapi-errors.md`](../tasks/security/backend-hardening/08-openapi-errors.md).
 - **Riesgo (Task Size):** alto al implementar — ítem 3 (contrato publicado que otros consumen).
 - **Depende de:** BH-01 (tests ejecutables); coordinar con BH-03; **BH-12 no es requisito**.
 - **Seam / superficie:** `contracts/openapi/firewatch-v1.yaml`, handlers y gateway.
@@ -25,9 +25,9 @@
 
 | ID | Spec | Ruta | Descripción | Commit |
 | --- | --- | --- | --- | --- |
-| T1 | S1 | inline | Construir la matriz operación-error desde el comportamiento vigente. | — |
-| T2 | S2 | inline | Alinear esquemas de error (cuerpo/headers/request ID). | — |
-| T3 | S3 | inline | Añadir contract tests contra rutas reales. | — |
+| T1 | S1 | inline | Construir la matriz operación-error desde el comportamiento vigente. | Hecho: `750cd80` |
+| T2 | S2 | inline | Alinear esquemas de error (cuerpo/headers/request ID). | Hecho: `750cd80`; descripción de `ErrorResponse.code` corregida en `cf23d20` |
+| T3 | S3 | inline | Añadir contract tests contra rutas reales. | Hecho: `750cd80` (`gateway` y `risk`), RED reproducido contra el contrato previo |
 
 Ruta por defecto: **inline**. Delegar el contrato a un verificador solo si el diff nombra un ítem de riesgo alto.
 
@@ -43,3 +43,4 @@ Ruta por defecto: **inline**. Delegar el contrato a un verificador solo si el di
 ## Log
 
 - **L1 (2026-10-16)** — Creación del desglose por spec a partir de [`README.md`](README.md) §1 (frente 10). Documento de planificación; sin implementación.
+- **L2 (2026-10-16, cierre de la sesión A)** — El frente **es** la unidad BH-08 y quedó entregado con ella: matriz operación-error, esquemas compartidos, `429`/`502` en cada operación y los `503`/`404`/`415` que faltaban, más contract tests que cargan el documento y validan respuestas reales. La re-verificación se hizo en línea (RED reproducido en un export aislado con el contrato de `02911d5`; GREEN en el árbol; matriz contrastada contra los handlers; validador de CI en 0) y encontró una promesa de más del contrato, corregida en `cf23d20`. **BH-12 sigue diferida y no fue requisito.** El frente no queda «terminado» según §5 del README del plan solo en el sentido de que la revisión independiente no corrió; el contenido y sus pruebas sí están.
