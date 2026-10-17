@@ -26,7 +26,8 @@ Branch: `fix/backend-hardening-bh` → `main`; delivery strategy: `stacked-to-ma
 
 - T1 — S1, S4; route: inline; status: pending independent verification; commit: `bd9aa16`. Integrate the 24 unique `fix/backend-hardening-bh` commits into `main` and verify backend/contract changes. Parent non-race suites passed, but independent verification was partial because its scratch environment has Go 1.27.1 while modules require 1.27.2; race proof is also unavailable without `gcc`.
   - Risk: item 1 (job failure migration), item 2 (authentication and authorization), item 3 (OpenAPI/event contracts), item 4 (broker retry/replay concurrency).
-- T2 — S1, S4; route: inline; status: pending; commit: none. Integrate the remaining unique backend/frontend fixes and demo-selector commits in dependency order.
+- T2 — S1, S4; route: inline; status: completed; commit: `cb7e9e6`. Merge `fix/session-copy-and-correlation-id`; verify the demo-selector and frontend-review branches are already represented by patch-equivalent changes in `main` instead of duplicating them.
+  - Risk: item 3 (adds the `X-Request-ID` response header and matching error-body correlation ID consumed by API clients).
 - T3 — S2; route: inline; status: pending; commit: none. Integrate the React and page-redesign histories using the approved page-redesign conflict outcome.
 - T4 — S3, S4; route: inline; status: pending; commit: none. Remove only clean, integrated local worktrees and branches; preserve modified/untracked work.
 
@@ -42,3 +43,6 @@ Branch: `fix/backend-hardening-bh` → `main`; delivery strategy: `stacked-to-ma
 - L8 — Delivery strategy: user selected “stacked-to-main (Recomendado)”, so integrate in reviewable local slices on `main`; no push or PR creation.
 - L9 — T1 verification on the fast-forwarded `main`: `go test -race -count=1 ./...` failed because CGO is disabled; with CGO enabled it failed because `gcc` is absent. For gateway, jobs, and risk, `GOWORK=off go test -count=1 ./...`, `gofmt -l .`, `go mod verify`, and `go vet ./...` passed.
 - L10 — Independent verifier returned partial with no candidate-caused backend defect reproduced. Its isolated scratch Go toolchain was 1.27.1, below the modules' required 1.27.2; it could not execute the behavioral probes, migration application, or race tests. The scratch directory was removed by the parent. T1 remains pending independent proof.
+- L11 — T2: merged `fix/session-copy-and-correlation-id` as `cb7e9e6`; resolved shared guard citations against the merged gateway's actual lines (69, 125, 139, 145), retaining both rate-limit and request-correlation tests. The gateway Go suite passed. Frontend CI commands `npm test` (24 files/246 tests), `npm run lint`, `npm run typecheck`, `npm run build`, and `npm run smoke` all passed. `gofmt -l .`, `go mod verify`, and `go vet ./...` passed for the gateway module.
+- L12 — `git cherry main` shows all 2 commits from `feat/demo-local-stack-scenario-selector` and all 2 from `fix/frontend-review-findings` are patch-equivalent in `main`; neither branch adds new content requiring a duplicate merge. The 5 unique patches remaining in `frontend/react-vite` are assigned to T3.
+- L13 — RDD assessment for T2 (`base-ref c8830b9`) returned `risk: medium`, `review_due: false`, `review_due_reason: under_budget`; retain the slice for the later feature assessment.
