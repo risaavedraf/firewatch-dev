@@ -24,7 +24,8 @@ Branch: `fix/backend-hardening-bh` → `main`; delivery strategy: `stacked-to-ma
 
 ## Tasks
 
-- T1 — S1, S4; route: inline; status: pending; commit: none. Integrate the 24 unique `fix/backend-hardening-bh` commits into `main` and verify backend/contract changes.
+- T1 — S1, S4; route: inline; status: completed; commit: `bd9aa16`. Integrate the 24 unique `fix/backend-hardening-bh` commits into `main` and verify backend/contract changes. Race-enabled suite is unavailable on this host; non-race suites passed.
+  - Risk: item 1 (job failure migration), item 2 (authentication and authorization), item 3 (OpenAPI/event contracts), item 4 (broker retry/replay concurrency).
 - T2 — S1, S4; route: inline; status: pending; commit: none. Integrate the remaining unique backend/frontend fixes and demo-selector commits in dependency order.
 - T3 — S2; route: inline; status: pending; commit: none. Integrate the React and page-redesign histories using the approved page-redesign conflict outcome.
 - T4 — S3, S4; route: inline; status: pending; commit: none. Remove only clean, integrated local worktrees and branches; preserve modified/untracked work.
@@ -39,3 +40,4 @@ Branch: `fix/backend-hardening-bh` → `main`; delivery strategy: `stacked-to-ma
 - L6 — Orca reported `frontend/react-vite` linked to closed PR #3 and the primary checkout linked to open PR #29. No GitHub lookup was made.
 - L7 — Dirty state: `tmp/backend-urgent` and `tmp/rediseno` have modified `backend/go.work.sum`; `tmp/rediseno/.probe` contains untracked scratch files. Orca refused removal of `tmp/backend-urgent` because it is modified; no worktree was removed.
 - L8 — Delivery strategy: user selected “stacked-to-main (Recomendado)”, so integrate in reviewable local slices on `main`; no push or PR creation.
+- L9 — T1 verification on the fast-forwarded `main`: `go test -race -count=1 ./...` failed because CGO is disabled; with CGO enabled it failed because `gcc` is absent. For gateway, jobs, and risk, `GOWORK=off go test -count=1 ./...`, `gofmt -l .`, `go mod verify`, and `go vet ./...` passed.
