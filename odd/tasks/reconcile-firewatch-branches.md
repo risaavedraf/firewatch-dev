@@ -24,7 +24,7 @@ Branch: `fix/backend-hardening-bh` → `main`; delivery strategy: `stacked-to-ma
 
 ## Tasks
 
-- T1 — S1, S4; route: inline; status: completed; commit: `bd9aa16`. Integrate the 24 unique `fix/backend-hardening-bh` commits into `main` and verify backend/contract changes. Race-enabled suite is unavailable on this host; non-race suites passed.
+- T1 — S1, S4; route: inline; status: pending independent verification; commit: `bd9aa16`. Integrate the 24 unique `fix/backend-hardening-bh` commits into `main` and verify backend/contract changes. Parent non-race suites passed, but independent verification was partial because its scratch environment has Go 1.27.1 while modules require 1.27.2; race proof is also unavailable without `gcc`.
   - Risk: item 1 (job failure migration), item 2 (authentication and authorization), item 3 (OpenAPI/event contracts), item 4 (broker retry/replay concurrency).
 - T2 — S1, S4; route: inline; status: pending; commit: none. Integrate the remaining unique backend/frontend fixes and demo-selector commits in dependency order.
 - T3 — S2; route: inline; status: pending; commit: none. Integrate the React and page-redesign histories using the approved page-redesign conflict outcome.
@@ -41,3 +41,4 @@ Branch: `fix/backend-hardening-bh` → `main`; delivery strategy: `stacked-to-ma
 - L7 — Dirty state: `tmp/backend-urgent` and `tmp/rediseno` have modified `backend/go.work.sum`; `tmp/rediseno/.probe` contains untracked scratch files. Orca refused removal of `tmp/backend-urgent` because it is modified; no worktree was removed.
 - L8 — Delivery strategy: user selected “stacked-to-main (Recomendado)”, so integrate in reviewable local slices on `main`; no push or PR creation.
 - L9 — T1 verification on the fast-forwarded `main`: `go test -race -count=1 ./...` failed because CGO is disabled; with CGO enabled it failed because `gcc` is absent. For gateway, jobs, and risk, `GOWORK=off go test -count=1 ./...`, `gofmt -l .`, `go mod verify`, and `go vet ./...` passed.
+- L10 — Independent verifier returned partial with no candidate-caused backend defect reproduced. Its isolated scratch Go toolchain was 1.27.1, below the modules' required 1.27.2; it could not execute the behavioral probes, migration application, or race tests. The scratch directory was removed by the parent. T1 remains pending independent proof.
