@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 
+import { idleCopy, rejectedSessionCopy } from '../app/sessionCopy';
 import { useSessionState } from '../app/store';
 import { PanelHeading, UnimplementedNote } from '../components/ui';
 import { timing } from '../config';
@@ -33,7 +34,7 @@ interface SourcesSnapshot {
 function provenanceFailureMessage(failure: Failure): string {
   switch (failure.kind) {
     case 'unauthorized':
-      return 'La API rechazó el token (401). La sesión se cerró; conecta nuevamente.';
+      return rejectedSessionCopy();
     case 'forbidden':
       return 'La API denegó el permiso para consultar la procedencia (403). Solicita acceso a un administrador.';
     case 'malformed':
@@ -47,8 +48,8 @@ function provenanceFailureMessage(failure: Failure): string {
   }
 }
 
-function provenanceStatusText(phase: Phase, decision: ProvenanceDecision | null, failure: Failure | null): string {
-  if (phase === 'unconsulted') return 'Conecta un token autorizado para consultar la procedencia.';
+function provenanceStatusText(phase: Phase, decision: ProvenanceDecision | null, failure: Failure | null, unconsulted: string): string {
+  if (phase === 'unconsulted') return unconsulted;
   if (phase === 'loading') return 'Consultando procedencia…';
   if (failure !== null) return provenanceFailureMessage(failure);
   if (decision !== null && decision.available) {
@@ -135,7 +136,7 @@ export function SourcesView() {
 
   const pipelineStatus =
     phase === 'unconsulted'
-      ? 'Conecta un token autorizado para comprobar los servicios.'
+      ? idleCopy(session, 'comprobar los servicios')
       : phase === 'loading'
         ? 'Consultando servicios…'
         : pipeline !== null
@@ -171,7 +172,7 @@ export function SourcesView() {
           }
         />
         <p id="sources-status" className={statusClass} role="status" aria-live="polite">
-          {provenanceStatusText(phase, provenance, provenanceFailure)}
+          {provenanceStatusText(phase, provenance, provenanceFailure, idleCopy(session, 'consultar la procedencia'))}
         </p>
         <dl className="data-list">
           <div>

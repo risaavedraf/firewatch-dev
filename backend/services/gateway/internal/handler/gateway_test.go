@@ -2,11 +2,13 @@ package handler
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -563,5 +565,119 @@ func TestGatewayHealthAndPreflightConsumeNoQuota(t *testing.T) {
 	anonymous := httptest.NewRequest(http.MethodGet, "/v1/risk/latest", nil)
 	if got := serve(app, anonymous); got != http.StatusUnauthorized {
 		t.Fatalf("first anonymous request got %d, want %d", got, http.StatusUnauthorized)
+	}
+}
+
+// canonicalUUIDPattern is the one format this route accepts: the canonical
+// dashed lower-case UUID string that uuid.UUID.String() produces, version 4 with
+// the RFC 9562 variant, and the format jobs and risk already emit on their
+// responses.
+var canonicalUUIDPattern = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$`)
+
+// asCanonicalUUID reformats a correlation id the way the jobs and risk
+// services do on their way out (`uuid.Parse(forwarded).String()`). Both the
+// bare 32-hex form and the canonical dashed form map to the canonical string,
+// which reproduces their response header without this module taking a uuid
+// dependency. A value that is not 32 hex digits is returned unchanged, so a
+// surprising input fails the assertions instead of the helper.
+func asCanonicalUUID(raw string) string {
+	bare := strings.ReplaceAll(raw, "-", "")
+	if len(bare) != 32 {
+		return raw
+	}
+	return bare[0:8] + "-" + bare[8:12] + "-" + bare[12:16] + "-" + bare[16:20] + "-" + bare[20:32]
+}
+
+// S4: the response exposes exactly one X-Request-ID, in one format, and it is
+// the gateway's own id. jobs and risk re-stamp the header on their responses
+// (`uuid.Parse` the forwarded id, write back `id.String()`), and
+// httputil.ReverseProxy copies response headers with Add, so without discarding
+// the upstream value the browser receives two values, joins them with ", " and
+// the page renders both formats in the same message. The upstream value is
+// dropped in ModifyResponse, which runs before the proxy copies the upstream
+// headers, so the gateway's own Set stays the only value.
+func TestGatewayExposesExactlyOneCorrelationIDFromUpstreamResponses(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		// mintUnrelatedID models an upstream that answers with an id of its
+		// own instead of echoing the one the gateway forwarded.
+		mintUnrelatedID bool
+	}{
+		{name: "the upstream reformats the forwarded id like jobs and risk"},
+		{name: "the upstream mints an unrelated id", mintUnrelatedID: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			upstreamResponseID := func(forwarded string) string {
+				if tc.mintUnrelatedID {
+					return "aabbccdd-eeff-0011-2233-445566778899"
+				}
+				return asCanonicalUUID(forwarded)
+			}
+			forwarded := make(chan string, 1)
+			upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				id := r.Header.Get("X-Request-ID")
+				forwarded <- id
+				w.Header().Set("X-Request-ID", upstreamResponseID(id))
+				w.WriteHeader(http.StatusOK)
+			}))
+			defer upstream.Close()
+			target, _ := url.Parse(upstream.URL)
+			app := New(verifier{}, target, target, allowedOrigin)
+
+			request := httptest.NewRequest(http.MethodGet, "/v1/audit", nil)
+			request.Header.Set("Origin", allowedOrigin)
+			request.Header.Set("Authorization", "Bearer valid")
+			request.Header.Set("X-Request-ID", "spoofed")
+			response := httptest.NewRecorder()
+			app.ServeHTTP(response, request)
+			if response.Code != http.StatusOK {
+				t.Fatalf("proxied /v1/audit got %d want %d", response.Code, http.StatusOK)
+			}
+
+			gatewayID := asCanonicalUUID(<-forwarded)
+			values := response.Header().Values("X-Request-ID")
+			if len(values) != 1 {
+				t.Fatalf("X-Request-ID got %d values %q, want exactly one: the gateway's own id", len(values), values)
+			}
+			if !canonicalUUIDPattern.MatchString(values[0]) {
+				t.Errorf("X-Request-ID got %q, want the canonical dashed UUID jobs and risk emit", values[0])
+			}
+			if values[0] != gatewayID {
+				t.Errorf("X-Request-ID got %q, want the gateway's own id %q and not the upstream's %q", values[0], gatewayID, upstreamResponseID(gatewayID))
+			}
+		})
+	}
+}
+
+// S4: one id means one literal. The page renders the request_id of the JSON
+// error body and the id it reads back from the exposed header, and the
+// gateway's log line carries the same value, so all three stay comparable when
+// an operator quotes them.
+func TestGatewayErrorBodyCarriesTheSameCorrelationIDAsTheHeader(t *testing.T) {
+	app := newTestGateway(t, allowedOrigin)
+
+	request := httptest.NewRequest(http.MethodGet, "/v1/jobs", nil)
+	request.Header.Set("Origin", allowedOrigin)
+	response := httptest.NewRecorder()
+	app.ServeHTTP(response, request)
+	if response.Code != http.StatusUnauthorized {
+		t.Fatalf("unauthenticated /v1/jobs got %d want %d", response.Code, http.StatusUnauthorized)
+	}
+
+	var body struct {
+		RequestID string `json:"request_id"`
+	}
+	if err := json.NewDecoder(response.Body).Decode(&body); err != nil {
+		t.Fatalf("decode error body: %v", err)
+	}
+	values := response.Header().Values("X-Request-ID")
+	if len(values) != 1 {
+		t.Fatalf("X-Request-ID got %d values %q, want exactly one", len(values), values)
+	}
+	if !canonicalUUIDPattern.MatchString(values[0]) {
+		t.Errorf("X-Request-ID got %q, want the canonical dashed UUID jobs and risk emit", values[0])
+	}
+	if body.RequestID != values[0] {
+		t.Errorf("body request_id got %q and header got %q, want the same literal", body.RequestID, values[0])
 	}
 }

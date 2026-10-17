@@ -66,6 +66,7 @@ function baseProps(overrides: Partial<ComponentProps<typeof MapPanel>> = {}): Co
   return {
     collection: CATALOGUE,
     loadState: 'ready',
+    sessionReason: null,
     selectedCode: '05101',
     zoneLevels: noLevels(),
     onSelect: vi.fn(),
@@ -192,6 +193,14 @@ describe('map rendering honesty', () => {
     rerender(<MapPanel {...baseProps({ collection: null, loadState: 'idle' })} />);
     expect(mainlandSvg()).toHaveAttribute('hidden');
     expect(screen.getByRole('status')).toHaveTextContent('Conecta un token autorizado para cargar las zonas analizadas.');
+  });
+
+  test('a rejected token names the rejection instead of the first-visit copy (S2)', () => {
+    render(<MapPanel {...baseProps({ collection: null, loadState: 'idle', sessionReason: 'rejected' })} />);
+
+    const message = screen.getByRole('status').textContent ?? '';
+    expect(message).not.toBe('Conecta un token autorizado para cargar las zonas analizadas.');
+    expect(message).toMatch(/rechazó el token/i);
   });
 
   test('an island-only catalogue keeps the mainland hidden and says why', () => {

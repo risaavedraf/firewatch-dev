@@ -1,7 +1,7 @@
 import { act, render, waitFor } from '@testing-library/react';
 
 import { gatewayOrigin, issuer, pkceTransactionKey } from '../../src/config';
-import { completeLogin, resetSession } from '../../src/core/session';
+import { completeLogin, getSessionSnapshot, resetSession } from '../../src/core/session';
 import { AuditView } from '../../src/views/AuditView';
 
 import {
@@ -296,4 +296,20 @@ test('closing the session clears the register and a fenced reply cannot repaint 
   expect(document.querySelectorAll('#audit-rows tr')).toHaveLength(0);
   expect(badgeText()).toBe('SIN CONSULTAR');
   expect(text('audit-status')).toBe('Conecta un token autorizado para consultar el registro de actividad.');
+});
+
+// S2 — a 401 on the admin read carries the bearer, so the register must name the
+// rejection instead of showing the first-visit copy.
+test('a rejected token is named in the register, never as a first visit (S2)', async () => {
+  await connect(ADMIN_TOKEN);
+  render(<AuditView />);
+  await waitFor(() => {
+    expect(fetchStub.callsFor(AUDIT_URL)).toHaveLength(1);
+  });
+
+  await answerAudit({ code: 'unauthorized' }, 401);
+
+  expect(getSessionSnapshot()).toEqual({ status: 'signed-out', roles: null, reason: 'rejected' });
+  expect(text('audit-status')).not.toBe('Conecta un token autorizado para consultar el registro de actividad.');
+  expect(text('audit-status')).toMatch(/rechazó el token/i);
 });

@@ -17,15 +17,27 @@ export interface SessionState {
   // The roles the access token declares, or `null` when the token is absent,
   // unreadable or declares none. Never a guess and never a default.
   roles: string[] | null;
+  // Why there is no longer an established session. `'rejected'` means the
+  // transport sent a non-empty bearer and the gateway answered 401, so the
+  // token existed and the server refused it. It is `null` for a first visit,
+  // for a logout and for a 401 answered to a request that carried no token:
+  // those are not a rejected token. The transport is the only writer.
+  reason: 'rejected' | null;
 }
 
 let accessToken = '';
 let idToken = '';
-let snapshot: SessionState = { status: 'signed-out', roles: null };
+let snapshot: SessionState = { status: 'signed-out', roles: null, reason: null };
 const listeners = new Set<() => void>();
 
 function publish(next: SessionState): void {
-  if (snapshot.status === next.status && sameRoles(snapshot.roles, next.roles)) return;
+  if (
+    snapshot.status === next.status &&
+    snapshot.reason === next.reason &&
+    sameRoles(snapshot.roles, next.roles)
+  ) {
+    return;
+  }
   snapshot = next;
   for (const listener of listeners) listener();
 }
@@ -195,7 +207,7 @@ function parseTransaction(stored: string | null): { state: string; verifier: str
 }
 
 export function startLogin(): void {
-  publish({ status: 'signing-in', roles: null });
+  publish({ status: 'signing-in', roles: null, reason: null });
   void beginAuthorizationCodeFlow();
 }
 
@@ -221,7 +233,7 @@ async function beginAuthorizationCodeFlow(): Promise<void> {
   } catch {
     // A browser that cannot build the challenge never reaches the provider:
     // the session stays closed instead of sending a weak or absent challenge.
-    publish({ status: 'signed-out', roles: null });
+    publish({ status: 'signed-out', roles: null, reason: null });
   }
 }
 
@@ -295,7 +307,7 @@ export async function resumePendingLogin(search: string): Promise<void> {
 function connectSession(token: string, returnedIDToken: string): void {
   accessToken = token;
   idToken = returnedIDToken;
-  publish({ status: 'signed-in', roles: decodeRoles(token) });
+  publish({ status: 'signed-in', roles: decodeRoles(token), reason: null });
 }
 
 export function signOut(): void {
@@ -317,10 +329,14 @@ export function signOut(): void {
   }
 }
 
-export function resetSession(): void {
+// Closes the session. `reason` is `'rejected'` only when the caller is the
+// transport reporting a 401 for a non-empty bearer it actually sent (S3); a
+// logout, a failed login and a tokenless 401 pass `null` and say nothing about
+// a token the server never saw.
+export function resetSession(reason: 'rejected' | null = null): void {
   accessToken = '';
   idToken = '';
-  publish({ status: 'signed-out', roles: null });
+  publish({ status: 'signed-out', roles: null, reason });
 }
 
 // A page restored from the back/forward cache keeps the session it had in memory.

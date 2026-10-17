@@ -49,6 +49,17 @@ func New(verifier Verifier, jobs, risk *url.URL, webOrigin string) http.Handler 
 				r.Out.Header.Del("X-User-ID")
 				r.Out.Header.Del("X-User-Role")
 			},
+			// jobs and risk re-stamp X-Request-ID on their own responses
+			// (`uuid.Parse` the forwarded id, write back `id.String()`). ReverseProxy
+			// copies response headers with Add, so that value would arrive next to
+			// the one this gateway already set, and the browser would join both with
+			// ", " so the page renders two ids in two formats. ModifyResponse runs
+			// before the copy, so dropping the upstream value here leaves the
+			// gateway's own id as the only value of the header.
+			ModifyResponse: func(res *http.Response) error {
+				res.Header.Del("X-Request-ID")
+				return nil
+			},
 			Transport:    &http.Transport{MaxIdleConns: 100, MaxIdleConnsPerHost: 20, IdleConnTimeout: 60 * time.Second, ResponseHeaderTimeout: 10 * time.Second},
 			ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) { failure(w, 502, "upstream_unavailable") },
 		}
@@ -70,7 +81,14 @@ func New(verifier Verifier, jobs, risk *url.URL, webOrigin string) http.Handler 
 	anonymous := limit.NewBucket(limit.Policy{Rate: anonymousRate, Burst: anonymousBurst}, limit.SystemClock)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
-		id := fmt.Sprintf("%x", randomID())
+		// S4: one correlation id, one format. This is the canonical dashed UUID
+		// string the jobs and risk services emit: they parse the value forwarded
+		// here and write back id.String(), and the JSON error body, the exposed
+		// header and the log line below quote this same literal. The bytes are
+		// formatted here because this module has no uuid dependency and this route
+		// does not add one.
+		b := randomID()
+		id := fmt.Sprintf("%x-%x-%x-%x-%x", b[0:4], b[4:6], b[6:8], b[8:10], b[10:16])
 		r.Header.Set("X-Request-ID", id)
 		w.Header().Set("X-Request-ID", id)
 		w.Header().Set("X-Content-Type-Options", "nosniff")
@@ -146,6 +164,14 @@ func randomID() []byte {
 	if _, err := rand.Read(b); err != nil {
 		panic(err)
 	}
+	// RFC 9562 version 4 and variant bits. The id this gateway mints is exposed to
+	// the page and quoted in three logs, and jobs and risk parse it as a UUID and
+	// write it back unchanged: without these two lines the string carries a UUID's
+	// shape while its version nibble is random, which a strict consumer is free to
+	// reject. The services' parse/print round trip preserves both bits, so every
+	// consumer sees the same conformant value.
+	b[6] = (b[6] & 0x0f) | 0x40
+	b[8] = (b[8] & 0x3f) | 0x80
 	return b
 }
 func failure(w http.ResponseWriter, status int, code string) {
