@@ -5,8 +5,9 @@ Branch: `fix/backend-hardening-bh` → `main`; delivery strategy: `stacked-to-ma
 
 ### S1 — Integrate local work into main
 - User request: “hacer que todo vaya al main? hay un montón de worktrees abiertos en Orca y el worktree principal está en la rama fix/backend-hardening y hay como mil ramas abiertas, 1 issue y 2 pr, podemos dejar limpio el repo y que todo esté en la rama main porfa”
+- Follow-up request: “quiero que todos los cambios que hemos hecho esten en la rama main así poder borrar las otras ramas”
 - User authorization: “Integrar todo localmente”
-- Acceptance: preserve every authorized, unintegrated local branch change on `main`; do not perform remote/GitHub operations or push.
+- Acceptance: ensure every selected branch tip and every relevant tracked change in its worktree is represented on `main` before deleting the local branch ref. Preserve untracked scratch files unless the user explicitly authorizes their deletion. Do not perform remote/GitHub operations or push.
 - Check: compare the final `main` history and tree against every in-scope local branch before cleanup.
 
 ### S2 — Resolve overlapping frontend histories
@@ -30,7 +31,7 @@ Branch: `fix/backend-hardening-bh` → `main`; delivery strategy: `stacked-to-ma
   - Risk: item 3 (adds the `X-Request-ID` response header and matching error-body correlation ID consumed by API clients).
 - T3 — S2; route: inline; status: completed; commits: `548a4dd`, `340d5a1`. Record the React and page-redesign histories as represented in the existing `main` tree; preserve the current page-redesign outcome without replacing newer source files with stale branch snapshots.
   - Risk: none (tree-preserving history merges; no source paths changed).
-- T4 — S3, S4; route: inline; status: completed; commit: none (local metadata cleanup). Removed the clean merged `tmp/ci-gates` worktree and all safe merged local branch refs; preserved dirty worktrees and scratch files.
+- T4 — S1, S3, S4; route: inline; status: completed; commit: none (local metadata cleanup). Confirm the checksum changes were already in `main`, fast-forwarded/detached both remaining worktrees to `main`, removed `tmp/backend-urgent`, and deleted both local branch refs. Retained detached `tmp/rediseno` because its nested `.probe` contains untracked scratch files.
 
 ## Log
 
@@ -55,3 +56,5 @@ Branch: `fix/backend-hardening-bh` → `main`; delivery strategy: `stacked-to-ma
 - L19 — Final independent recheck confirmed candidate `3304c6d4f4ffe0eb30646e5880b3486d96f8aba5`. On both baseline and candidate, gateway/jobs/risk formatting, standard tests, module verification, and vet passed using the cached Go 1.27.2 executable with network disabled. No frontend rerun was needed because T2 frontend gates had already passed on the unchanged tree. The verifier found no candidate-caused defect; race, separate database migration execution, and historical preservation preconditions remain unverified. It confirmed all 15 selected commit tips are ancestors of the candidate and reported 19 preserved `.probe` files.
 - L20 — Native RDD assessment of the complete change range returned `risk: high`, `review_due: true` for security evidence. The user chose “Omitir esta vez”; the exact provider-issued decline returned `action: declined`, `consent: declined_this_candidate`, and the matching target identity. No review actors were launched; future review settings were not changed.
 - L21 — At the cleanup snapshot, before subsequent log-only documentation commits, checkout/inventory verification showed `HEAD=e36ff374b67764de6114c9fdc05def19cc155487`, branch `main`, clean primary tree, 81 commits ahead of `origin/main`, and six FireWatch Orca worktrees. Candidate `3304c6d...` used by the independent verifier was the source-integrated parent before the final verification/consent log; subsequent commits changed documentation only.
+- L22 — User clarified: “quiero que todos los cambios que hemos hecho esten en la rama main así poder borrar las otras ramas”. Reopened T4. Read `main:backend/go.work.sum` and confirmed both uncommitted entries from the remaining worktrees already exist in `main`; each worktree's complete diff for that file matched the main version. `.probe` remains untracked scratch and is preserved.
+- L23 — Fast-forwarded `tmp/backend-urgent` and `tmp/rediseno` to `main`, detached both, removed the now-clean `tmp/backend-urgent` worktree, and deleted the two remaining local branch refs after ancestry checks. Only local branch ref left is `main`; remote branch refs were untouched. Retained `tmp/rediseno` detached at `main` because nested `.probe` still contains 19 untracked files.
