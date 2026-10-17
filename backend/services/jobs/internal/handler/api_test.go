@@ -17,6 +17,7 @@ import (
 	"github.com/coreos/go-oidc/v3/oidc"
 	"github.com/go-jose/go-jose/v4"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 )
 
 type fakeStore struct {
@@ -27,6 +28,22 @@ type fakeStore struct {
 	// scenarios records the optional scenario each Create received, so a test can
 	// prove the transport forwarded (or withheld) the selection.
 	scenarios []string
+	// job and getErr let a test drive GET /v1/jobs/{id} through the Repository
+	// interface without a database.
+	job    repository.Job
+	getErr error
+	// replayJob, replayErr and the recorded arguments let a test drive
+	// POST /v1/jobs/{id}/replay through the Repository interface and prove the
+	// transport forwards one call to the single store transition.
+	replayJob   repository.Job
+	replayErr   error
+	replayCalls int
+	replayID    string
+	replayActor string
+	replayTrace string
+	// replayConfirm records the confirmation the transport forwarded, so a test
+	// can prove a re-dispatch is only confirmed when the operator asked for it.
+	replayConfirm bool
 }
 
 func (s *fakeStore) Create(_ context.Context, actor, key, zone, trace string, scenarioID ...string) (repository.Job, error) {
@@ -39,9 +56,18 @@ func (s *fakeStore) Create(_ context.Context, actor, key, zone, trace string, sc
 	return repository.Job{ID: uuid.NewString(), ZoneID: zone, State: "queued"}, nil
 }
 func (s *fakeStore) Get(context.Context, string) (repository.Job, error) {
-	return repository.Job{}, nil
+	return s.job, s.getErr
 }
 func (s *fakeStore) Audit(context.Context) ([]repository.Audit, error) { return nil, nil }
+
+// Replay records the forwarded arguments so a test can pin that the operator
+// subject, the request trace and the queued re-dispatch confirmation are what
+// reach persistence, and returns the configured outcome.
+func (s *fakeStore) Replay(_ context.Context, id, actor, trace string, confirmQueued bool) (repository.Job, error) {
+	s.replayCalls++
+	s.replayID, s.replayActor, s.replayTrace, s.replayConfirm = id, actor, trace, confirmQueued
+	return s.replayJob, s.replayErr
+}
 
 // ZoneExists stands in for the zones catalogue so the handler path that decides
 // membership is exercised without a database.
@@ -114,6 +140,99 @@ func TestStatusAuthorization(t *testing.T) {
 				if w.Code != 503 || s.Reason != "status_unavailable" || s.Dependencies.Database.State != "unknown" || s.Dependencies.DeadLetter.MaxDepth != nil || s.CheckedAt.IsZero() || w.Header().Get("Cache-Control") != "no-store" || w.Header().Get("Content-Type") != "application/json" {
 					t.Fatalf("unavailable: %s", w.Body)
 				}
+			}
+		})
+	}
+}
+
+// TestGetJobExposesStateAndPersistedFailure drives GET /v1/jobs/{id} through the
+// Repository interface. It proves the terminal 'failed' state and its persisted
+// failure_reason/attempts/failed_at reach the wire, and that the two pre-existing
+// states still answer unchanged (the nullable fields stay absent).
+func TestGetJobExposesStateAndPersistedFailure(t *testing.T) {
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatal(err)
+	}
+	signer, err := jose.NewSigner(jose.SigningKey{Algorithm: jose.RS256, Key: key}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	verifier := oidc.NewVerifier("https://issuer.test", &oidc.StaticKeySet{PublicKeys: []crypto.PublicKey{&key.PublicKey}}, &oidc.Config{ClientID: "firewatch-api", SupportedSigningAlgs: []string{"RS256"}})
+	instant := time.Date(2030, 1, 2, 3, 4, 5, 0, time.UTC)
+	reason := "permanent_error"
+	id := uuid.NewString()
+	cases := []struct {
+		name              string
+		job               repository.Job
+		wantState         string
+		wantAttempts      int
+		wantFailureReason *string
+		wantFailedAt      *time.Time
+		wantFieldsAbsent  bool
+	}{
+		{
+			name:         "queued legacy job keeps its previous shape",
+			job:          repository.Job{ID: id, ZoneID: "valparaiso-demo", State: "queued", RequestedAt: instant},
+			wantState:    "queued",
+			wantAttempts: 0, wantFieldsAbsent: true,
+		},
+		{
+			name:         "published job keeps its previous shape",
+			job:          repository.Job{ID: id, ZoneID: "valparaiso-demo", State: "published", RequestedAt: instant},
+			wantState:    "published",
+			wantAttempts: 0, wantFieldsAbsent: true,
+		},
+		{
+			name:              "failed job exposes its reason, attempts and instant",
+			job:               repository.Job{ID: id, ZoneID: "valparaiso-demo", State: "failed", RequestedAt: instant, Attempts: 5, FailureReason: &reason, FailedAt: &instant},
+			wantState:         "failed",
+			wantAttempts:      5,
+			wantFailureReason: &reason,
+			wantFailedAt:      &instant,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			payload, _ := json.Marshal(map[string]any{"iss": "https://issuer.test", "aud": "firewatch-api", "sub": "admin-subject", "exp": time.Now().Add(time.Hour).Unix(), "typ": "Bearer", "realm_access": map[string]any{"roles": []string{"admin"}}})
+			signed, err := signer.Sign(payload)
+			if err != nil {
+				t.Fatal(err)
+			}
+			token, err := signed.CompactSerialize()
+			if err != nil {
+				t.Fatal(err)
+			}
+			r := httptest.NewRequest(http.MethodGet, "/v1/jobs/"+id, nil)
+			r.Header.Set("Authorization", "Bearer "+token)
+			w := httptest.NewRecorder()
+			New(&fakeStore{job: tc.job}, verifier).ServeHTTP(w, r)
+			if w.Code != http.StatusOK {
+				t.Fatalf("code=%d body=%s", w.Code, w.Body)
+			}
+			var got struct {
+				State         string     `json:"state"`
+				Attempts      int        `json:"attempts"`
+				FailureReason *string    `json:"failure_reason"`
+				FailedAt      *time.Time `json:"failed_at"`
+			}
+			if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
+				t.Fatal(err)
+			}
+			if got.State != tc.wantState || got.Attempts != tc.wantAttempts {
+				t.Fatalf("state=%q attempts=%d want %q/%d: %s", got.State, got.Attempts, tc.wantState, tc.wantAttempts, w.Body)
+			}
+			if (got.FailureReason == nil) != (tc.wantFailureReason == nil) || (got.FailedAt == nil) != (tc.wantFailedAt == nil) {
+				t.Fatalf("nullable fields mismatch: %s", w.Body)
+			}
+			if tc.wantFailureReason != nil && *got.FailureReason != *tc.wantFailureReason {
+				t.Fatalf("failure_reason=%q want %q", *got.FailureReason, *tc.wantFailureReason)
+			}
+			if tc.wantFailedAt != nil && !got.FailedAt.Equal(*tc.wantFailedAt) {
+				t.Fatalf("failed_at=%v want %v", got.FailedAt, tc.wantFailedAt)
+			}
+			if tc.wantFieldsAbsent && (strings.Contains(w.Body.String(), `"failure_reason"`) || strings.Contains(w.Body.String(), `"failed_at"`)) {
+				t.Fatalf("non-failed job must omit the terminal fields: %s", w.Body)
 			}
 		})
 	}
@@ -213,6 +332,222 @@ func TestCreateAuthorizationAndValidation(t *testing.T) {
 			}
 			if tc.want != 202 && store.calls != 0 {
 				t.Fatal("rejected request reached persistence")
+			}
+		})
+	}
+}
+
+// replayHandler builds the transport with the production RS256 policy and a
+// signer, so a replay test can mint a token of any role without a remote JWKS.
+// The subject is fixed so a test can assert the operator identity the transport
+// forwards to the store.
+func replayHandler(t *testing.T, store *fakeStore) (http.Handler, func(roles ...string) string) {
+	t.Helper()
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatal(err)
+	}
+	verifier := oidc.NewVerifier("https://issuer.test", &oidc.StaticKeySet{PublicKeys: []crypto.PublicKey{&key.PublicKey}}, &oidc.Config{ClientID: "firewatch-api", SupportedSigningAlgs: []string{"RS256"}})
+	mint := func(roles ...string) string {
+		claims := map[string]any{"iss": "https://issuer.test", "aud": "firewatch-api", "sub": "operator-subject", "exp": time.Now().Add(time.Minute).Unix(), "typ": "Bearer", "realm_access": map[string]any{"roles": roles}}
+		return signTokenWith(t, key, jose.RS256, claims)
+	}
+	return New(store, verifier), mint
+}
+
+// TestReplayFailedJobReturnsQueued pins the happy path: a failed job is returned
+// to queued through exactly one store call, the response is the same Job object
+// as GET with the terminal fields cleared and attempts reset, and the operator
+// subject is what the transport forwards.
+func TestReplayFailedJobReturnsQueued(t *testing.T) {
+	id := uuid.NewString()
+	instant := time.Date(2030, 1, 2, 3, 4, 5, 0, time.UTC)
+	store := &fakeStore{replayJob: repository.Job{ID: id, ZoneID: "valparaiso-demo", State: "queued", RequestedAt: instant}}
+	handler, mint := replayHandler(t, store)
+	trace := uuid.NewString()
+	r := httptest.NewRequest(http.MethodPost, "/v1/jobs/"+id+"/replay", nil)
+	r.Header.Set("Authorization", "Bearer "+mint("admin"))
+	r.Header.Set("X-Request-ID", trace)
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, r)
+	if w.Code != http.StatusAccepted {
+		t.Fatalf("code=%d want=%d body=%s", w.Code, http.StatusAccepted, w.Body)
+	}
+	var got struct {
+		ID            string     `json:"id"`
+		State         string     `json:"state"`
+		Attempts      int        `json:"attempts"`
+		FailureReason *string    `json:"failure_reason"`
+		FailedAt      *time.Time `json:"failed_at"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.ID != id || got.State != "queued" || got.Attempts != 0 {
+		t.Fatalf("body=%s", w.Body)
+	}
+	if got.FailureReason != nil || got.FailedAt != nil {
+		t.Fatalf("terminal fields must be cleared: %s", w.Body)
+	}
+	if store.replayCalls != 1 || store.replayID != id || store.replayActor != "operator-subject" || store.replayTrace != trace {
+		t.Fatalf("store call id=%q actor=%q trace=%q calls=%d", store.replayID, store.replayActor, store.replayTrace, store.replayCalls)
+	}
+	// A bodiless replay must never confirm a queued re-dispatch: the confirmation
+	// is the operator's explicit acceptance of a possible duplicate dispatch.
+	if store.replayConfirm {
+		t.Fatal("a bodiless replay carried a queued re-dispatch confirmation")
+	}
+	if w.Header().Get("X-Request-ID") != trace {
+		t.Fatalf("X-Request-ID header=%q want %q", w.Header().Get("X-Request-ID"), trace)
+	}
+}
+
+// TestReplayRequiresAdmin pins that the replay route sits behind the existing
+// authorization: no token and a non-admin role are refused before the store is
+// reached, so replay cannot become a weaker recovery entry point.
+func TestReplayRequiresAdmin(t *testing.T) {
+	id := uuid.NewString()
+	for _, tc := range []struct {
+		name   string
+		roles  []string
+		noAuth bool
+		want   int
+	}{
+		{"missing token", nil, true, http.StatusUnauthorized},
+		{"viewer forbidden", []string{"viewer"}, false, http.StatusForbidden},
+		{"unknown role forbidden", []string{"operator"}, false, http.StatusForbidden},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			store := &fakeStore{}
+			handler, mint := replayHandler(t, store)
+			r := httptest.NewRequest(http.MethodPost, "/v1/jobs/"+id+"/replay", nil)
+			if !tc.noAuth {
+				r.Header.Set("Authorization", "Bearer "+mint(tc.roles...))
+			}
+			w := httptest.NewRecorder()
+			handler.ServeHTTP(w, r)
+			if w.Code != tc.want {
+				t.Fatalf("code=%d want=%d body=%s", w.Code, tc.want, w.Body)
+			}
+			if store.replayCalls != 0 {
+				t.Fatal("an unauthorised replay reached the store")
+			}
+		})
+	}
+}
+
+// TestReplayRejections pins the failure vocabulary of the new route: an unknown
+// id is 404 job_not_found, a job that is not failed is 409 job_not_replayable, a
+// storage failure is 503 storage_unavailable, and a malformed id keeps the
+// existing 400 invalid_job_id without ever reaching the store. The successful
+// store call count proves a rejection produces no partial effect.
+func TestReplayRejections(t *testing.T) {
+	id := uuid.NewString()
+	for _, tc := range []struct {
+		name     string
+		target   string
+		storeErr error
+		want     int
+		wantCode string
+		calls    int
+	}{
+		{"unknown job", "/v1/jobs/" + id + "/replay", pgx.ErrNoRows, http.StatusNotFound, "job_not_found", 1},
+		{"not failed is a conflict", "/v1/jobs/" + id + "/replay", repository.ErrJobNotReplayable, http.StatusConflict, "job_not_replayable", 1},
+		{"queued without confirmation is a conflict", "/v1/jobs/" + id + "/replay", repository.ErrReplayConfirmationRequired, http.StatusConflict, "replay_confirmation_required", 1},
+		{"storage failure", "/v1/jobs/" + id + "/replay", errors.New("storage unavailable"), http.StatusServiceUnavailable, "storage_unavailable", 1},
+		{"malformed id", "/v1/jobs/not-a-uuid/replay", nil, http.StatusBadRequest, "invalid_job_id", 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			store := &fakeStore{replayErr: tc.storeErr}
+			handler, mint := replayHandler(t, store)
+			trace := uuid.NewString()
+			r := httptest.NewRequest(http.MethodPost, tc.target, nil)
+			r.Header.Set("Authorization", "Bearer "+mint("admin"))
+			r.Header.Set("X-Request-ID", trace)
+			w := httptest.NewRecorder()
+			handler.ServeHTTP(w, r)
+			if w.Code != tc.want {
+				t.Fatalf("code=%d want=%d body=%s", w.Code, tc.want, w.Body)
+			}
+			var got struct {
+				Code      string `json:"code"`
+				RequestID string `json:"request_id"`
+			}
+			if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
+				t.Fatal(err)
+			}
+			if got.Code != tc.wantCode || got.RequestID != trace {
+				t.Fatalf("code=%q request_id=%q want %q/%q body=%s", got.Code, got.RequestID, tc.wantCode, trace, w.Body)
+			}
+			if store.replayCalls != tc.calls {
+				t.Fatalf("store calls=%d want=%d", store.replayCalls, tc.calls)
+			}
+		})
+	}
+}
+
+// TestReplayQueuedJobWithConfirmation pins the confirmed path: a body carrying
+// exactly the documented token forwards the confirmation to the store, so a
+// queued job can be recovered when the operator has checked for in-flight work.
+func TestReplayQueuedJobWithConfirmation(t *testing.T) {
+	id := uuid.NewString()
+	instant := time.Date(2030, 1, 2, 3, 4, 5, 0, time.UTC)
+	store := &fakeStore{replayJob: repository.Job{ID: id, ZoneID: "valparaiso-demo", State: "queued", RequestedAt: instant}}
+	handler, mint := replayHandler(t, store)
+	r := httptest.NewRequest(http.MethodPost, "/v1/jobs/"+id+"/replay", strings.NewReader(`{"confirm":"`+replayConfirmToken+`"}`))
+	r.Header.Set("Authorization", "Bearer "+mint("admin"))
+	r.Header.Set("X-Request-ID", uuid.NewString())
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, r)
+	if w.Code != http.StatusAccepted {
+		t.Fatalf("code=%d want=%d body=%s", w.Code, http.StatusAccepted, w.Body)
+	}
+	if store.replayCalls != 1 || !store.replayConfirm {
+		t.Fatalf("store confirm=%v calls=%d", store.replayConfirm, store.replayCalls)
+	}
+}
+
+// TestReplayRejectsMalformedConfirmation pins the shape rule of the replay body:
+// the optional body is the only place a queued re-dispatch is confirmed, so a
+// document that is not exactly the documented token is refused with 400 before
+// the store is reached. The store call count proves a rejection has no partial
+// effect; an absent body stays valid, and its own case is
+// TestReplayFailedJobReturnsQueued.
+func TestReplayRejectsMalformedConfirmation(t *testing.T) {
+	id := uuid.NewString()
+	for _, tc := range []struct {
+		name string
+		body string
+	}{
+		{"unknown token", `{"confirm":"yes"}`},
+		{"boolean instead of the token", `{"confirm":true}`},
+		{"absent confirmation", `{}`},
+		{"unknown field", `{"confirm":"queued_may_be_in_flight","force":true}`},
+		{"not an object", `["queued_may_be_in_flight"]`},
+		{"trailing document", `{"confirm":"queued_may_be_in_flight"}{}`},
+		{"malformed json", `{"confirm":`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			store := &fakeStore{}
+			handler, mint := replayHandler(t, store)
+			r := httptest.NewRequest(http.MethodPost, "/v1/jobs/"+id+"/replay", strings.NewReader(tc.body))
+			r.Header.Set("Authorization", "Bearer "+mint("admin"))
+			w := httptest.NewRecorder()
+			handler.ServeHTTP(w, r)
+			if w.Code != http.StatusBadRequest {
+				t.Fatalf("code=%d want=%d body=%s", w.Code, http.StatusBadRequest, w.Body)
+			}
+			var got struct {
+				Code string `json:"code"`
+			}
+			if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil || got.Code != "invalid_replay_request" {
+				t.Fatalf("code=%q err=%v body=%s", got.Code, err, w.Body)
+			}
+			if store.replayCalls != 0 {
+				t.Fatalf("a malformed replay reached the store %d times", store.replayCalls)
+			}
+			if store.replayConfirm {
+				t.Fatal("a rejected body still confirmed the re-dispatch")
 			}
 		})
 	}

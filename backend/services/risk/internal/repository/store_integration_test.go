@@ -49,6 +49,16 @@ func TestBatchDeduplicationAndOutOfOrderPublication(t *testing.T) {
 	if err = s.Publish(ctx, newer, assessment); err != nil {
 		t.Fatal(err)
 	}
+	// A broker redelivery of the same event id is stopped by the inbox gate
+	// before the batch insert, so it must add nothing at all.
+	var count int
+	if err = db.QueryRow(ctx, `SELECT count(*) FROM outbox WHERE payload->>'job_id'=$1`, newer.JobID).Scan(&count); err != nil || count != 1 {
+		t.Fatalf("same-id retry outbox count=%d err=%v", count, err)
+	}
+	// An operator re-dispatch arrives with a fresh event id, so the inbox gate
+	// cannot recognise it. The batch already exists, and the re-dispatch must
+	// still emit a completion naming that stored batch so the job can reach its
+	// terminal state; a silent commit would repair nothing.
 	duplicate := newer
 	duplicate.ID = uuid.NewString()
 	if err = s.Publish(ctx, duplicate, assessment); err != nil {
@@ -65,9 +75,25 @@ func TestBatchDeduplicationAndOutOfOrderPublication(t *testing.T) {
 	if err != nil || len(batches) != 1 || batches[0].JobID != newer.JobID {
 		t.Fatalf("old batch superseded newest: %+v %v", batches, err)
 	}
-	var count int
-	if err = db.QueryRow(ctx, `SELECT count(*) FROM outbox WHERE payload->>'job_id'=$1`, newer.JobID).Scan(&count); err != nil || count != 1 {
-		t.Fatalf("outbox count=%d err=%v", count, err)
+	// A re-dispatched delivery must not be swallowed: it writes a second
+	// completion, and both completions name the one stored batch. An invented
+	// batch id or a second batches row would report a batch that does not exist.
+	var outboxRows, distinctBatchIDs, batchesRows int
+	if err = db.QueryRow(ctx, `SELECT count(*), count(DISTINCT payload->>'batch_id') FROM outbox WHERE payload->>'job_id'=$1`, newer.JobID).Scan(&outboxRows, &distinctBatchIDs); err != nil {
+		t.Fatal(err)
+	}
+	if outboxRows != 2 || distinctBatchIDs != 1 {
+		t.Fatalf("outbox rows=%d distinct batch ids=%d, want 2 rows naming one batch", outboxRows, distinctBatchIDs)
+	}
+	var storedBatchID string
+	if err = db.QueryRow(ctx, `SELECT id::text FROM batches WHERE job_id=$1`, newer.JobID).Scan(&storedBatchID); err != nil {
+		t.Fatal(err)
+	}
+	if err = db.QueryRow(ctx, `SELECT count(*) FROM outbox WHERE payload->>'job_id'=$1 AND payload->>'batch_id'=$2`, newer.JobID, storedBatchID).Scan(&outboxRows); err != nil || outboxRows != 2 {
+		t.Fatalf("completions naming the stored batch=%d err=%v", outboxRows, err)
+	}
+	if err = db.QueryRow(ctx, `SELECT count(*) FROM batches WHERE job_id=$1`, newer.JobID).Scan(&batchesRows); err != nil || batchesRows != 1 {
+		t.Fatalf("batches rows=%d err=%v", batchesRows, err)
 	}
 	if batches[0].RiskLevel != "alto" {
 		t.Fatalf("risk level is %q, want the persisted %q", batches[0].RiskLevel, "alto")
@@ -148,6 +174,70 @@ func TestPublishRefusesAMissingReferencePermanently(t *testing.T) {
 				t.Fatalf("batches stored=%d want=0 for a refused reference", stored)
 			}
 		})
+	}
+}
+
+// TestJobFailureEventBuildsTheOutboxRecord pins the cross-service
+// terminal-failure report a give-up produces: the new wire type, the job and
+// trace ids, the classified reason and the attempt count. The generated id is the
+// event id, exactly as the batch publication event does it. The test is pure, so
+// it runs without a database.
+func TestJobFailureEventBuildsTheOutboxRecord(t *testing.T) {
+	delivery := v1.Event{JobID: uuid.NewString(), TraceID: uuid.NewString()}
+	report := jobFailureEvent(delivery, "retries_exhausted", 5)
+	if report.Type != v1.JobFailedType || report.JobID != delivery.JobID || report.TraceID != delivery.TraceID || report.FailureReason != "retries_exhausted" || report.Attempts != 5 {
+		t.Fatalf("report=%+v", report)
+	}
+	if id, err := uuid.Parse(report.ID); err != nil || id == uuid.Nil {
+		t.Fatalf("report id %q is not a UUID: %v", report.ID, err)
+	}
+	payload, err := json.Marshal(report)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(payload, &fields); err != nil {
+		t.Fatal(err)
+	}
+	if string(fields["type"]) != `"risk.job.failed.v1"` || string(fields["failure_reason"]) != `"retries_exhausted"` || string(fields["attempts"]) != `5` {
+		t.Fatalf("report wire shape: %s", payload)
+	}
+}
+
+// TestRecordJobFailureWritesTheReportIntoTheOutbox protects the durable half of a
+// give-up: the report is inserted into this service's own outbox and picked up by
+// the existing relay, never published from the consumer hot path. It needs a
+// migrated disposable risk database.
+func TestRecordJobFailureWritesTheReportIntoTheOutbox(t *testing.T) {
+	if testing.Short() || os.Getenv("TEST_DATABASE_URL") == "" {
+		t.Skip("requires migrated disposable risk database")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	db, err := pgxpool.New(ctx, os.Getenv("TEST_DATABASE_URL"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	s := Store{DB: db}
+	delivery := v1.Event{JobID: uuid.NewString(), TraceID: uuid.NewString()}
+	if err := s.RecordJobFailure(ctx, delivery, "permanent_error", 1); err != nil {
+		t.Fatal(err)
+	}
+	var routingKey string
+	var payload []byte
+	if err := db.QueryRow(ctx, `SELECT routing_key,payload FROM outbox WHERE payload->>'job_id'=$1`, delivery.JobID).Scan(&routingKey, &payload); err != nil {
+		t.Fatal(err)
+	}
+	if routingKey != v1.JobFailedType {
+		t.Fatalf("routing_key=%q want %q", routingKey, v1.JobFailedType)
+	}
+	var report v1.Event
+	if err := json.Unmarshal(payload, &report); err != nil {
+		t.Fatal(err)
+	}
+	if report.Type != v1.JobFailedType || report.JobID != delivery.JobID || report.TraceID != delivery.TraceID || report.FailureReason != "permanent_error" || report.Attempts != 1 {
+		t.Fatalf("report=%+v", report)
 	}
 }
 

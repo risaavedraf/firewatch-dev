@@ -1,0 +1,86 @@
+# Prometheus alerting rules for FireWatch.
+#
+# The thresholds are the ones agreed for the production version and are recorded
+# as OBJECTIVES, not measurements: the benchmark that would turn them into
+# measurements (front 6, S2) has not run yet. Every rule names the concrete action
+# an operator takes, so an alert is never a bare number without a response
+# (ALR-I2, ALR-V3). A sustained window ("for") is used everywhere, because a single
+# slow request is not a trend.
+groups:
+  - name: firewatch-service
+    rules:
+      - alert: FireWatchHighLatencyP95
+        # Agreed objective: p95 < 500 ms under load. If RPS is flat while p95
+        # rises, the cause is not load, so the action below deliberately checks
+        # the query path before scaling.
+        expr: histogram_quantile(0.95, sum(rate(firewatch_http_request_duration_seconds_bucket[5m])) by (le, job)) > 0.5
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "p95 latency above 500 ms on {{ $labels.job }}"
+          action: "Investigate before scaling: check code, PostGIS query time (firewatch_db_pool_*), network and memory. A p95 rise without an RPS rise is not a capacity problem."
+
+      - alert: FireWatchHighErrorRate
+        # Agreed objective: 5xx error rate < 1%.
+        expr: sum(rate(firewatch_http_errors_total[5m])) by (job) / clamp_min(sum(rate(firewatch_http_requests_total[5m])) by (job), 1) > 0.01
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "5xx error rate above 1% on {{ $labels.job }}"
+          action: "Investigate the failing route. Tell a dependency failure apart from a code defect: /v1/risk/status and /v1/jobs/status name database_unavailable or broker_unavailable."
+
+      - alert: FireWatchDeadLetterBacklog
+        # Any dead letter means the consumer discarded work; readiness is already
+        # degraded and this makes it actionable.
+        expr: firewatch_dead_letter_depth > 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Dead-letter backlog of {{ $value }} on {{ $labels.job }}"
+          action: "Inspect the dead-letter queue (risk.jobs.v1.dead or jobs.results.v1.dead). The terminal failure is propagated to the job row as failed with its reason; reclaim the job with the admin replay action if it is recoverable, otherwise fix the cause before re-driving."
+
+      - alert: FireWatchStuckJobs
+        # A queued job older than the 15-minute data cycle means no answer reached
+        # it: a consumer died, or its delivery dead-lettered without the row being
+        # updated. It is a warning, never a failure verdict: the job stays queued
+        # and is never marked failed by a clock. The threshold is twice the cycle
+        # so a slow but healthy queue does not fire it.
+        expr: firewatch_queued_job_age_seconds > 1200
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Oldest queued job has waited {{ $value }}s on {{ $labels.job }}"
+          action: "Check the jobs consumer and both dead-letter queues for a delivery tied to the job, and re-drive one you find. The admin replay accepts only a job already marked failed, so a job that is still queued with no traceable delivery has no replay path today: record it and escalate. Do not delete the job or force it terminal."
+
+      - alert: FireWatchBrokerUnavailable
+        expr: firewatch_broker_ready == 0
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Broker unreachable from {{ $labels.job }}"
+          action: "Check RabbitMQ. Reads stay available and new jobs stay queued in PostgreSQL, so this is degraded, not down."
+
+      - alert: FireWatchDatabasePoolSaturated
+        expr: firewatch_db_pool_acquired_conns >= firewatch_db_pool_max_conns
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Database pool saturated on {{ $labels.job }}"
+          action: "Investigate slow queries (PostGIS) and pool sizing. A saturated pool is a symptom; raising the limit without finding the slow query only defers the failure."
+
+  - name: firewatch-availability
+    rules:
+      - alert: FireWatchTargetDown
+        expr: up{job=~"jobs|risk|gateway"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Scrape target {{ $labels.job }} is down"
+          action: "Check the pod and its readiness. For jobs/risk, /health/ready routes on the bounded database ping alone."

@@ -63,6 +63,68 @@ func TestScenarioEventRoundTrip(t *testing.T) {
 	}
 }
 
+// TestJobFailedEventCarriesTheTerminalReport pins the cross-service failure
+// report's wire shape: the new type and the two additive optional fields travel
+// together, and both stable reason codes survive the round trip unchanged.
+func TestJobFailedEventCarriesTheTerminalReport(t *testing.T) {
+	if v1.JobFailedType != "risk.job.failed.v1" {
+		t.Fatalf("JobFailedType = %q, want %q", v1.JobFailedType, "risk.job.failed.v1")
+	}
+	for _, reason := range []string{"permanent_error", "retries_exhausted"} {
+		t.Run(reason, func(t *testing.T) {
+			original := v1.Event{ID: "event", Type: v1.JobFailedType, TraceID: "trace", JobID: "job", FailureReason: reason, Attempts: 5}
+			payload, err := json.Marshal(original)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var fields map[string]json.RawMessage
+			if err := json.Unmarshal(payload, &fields); err != nil {
+				t.Fatal(err)
+			}
+			if string(fields["failure_reason"]) != `"`+reason+`"` {
+				t.Fatalf("incorrect failure_reason wire shape: %s", payload)
+			}
+			if string(fields["attempts"]) != `5` {
+				t.Fatalf("incorrect attempts wire shape: %s", payload)
+			}
+			var decoded v1.Event
+			if err := json.Unmarshal(payload, &decoded); err != nil {
+				t.Fatal(err)
+			}
+			if !reflect.DeepEqual(original, decoded) {
+				t.Fatalf("failure round trip changed event: %+v", decoded)
+			}
+		})
+	}
+}
+
+// TestLegacyEventOmitsTheTerminalFailureFields proves the two new fields are
+// additive and optional: a message that carries neither keeps exactly the shape
+// it had before they were introduced.
+func TestLegacyEventOmitsTheTerminalFailureFields(t *testing.T) {
+	legacy := v1.Event{ID: "event", Type: v1.JobRequestedType, JobID: "job", ZoneID: "valparaiso-demo"}
+	payload, err := json.Marshal(legacy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(payload, &fields); err != nil {
+		t.Fatal(err)
+	}
+	for _, key := range []string{"failure_reason", "attempts"} {
+		if _, ok := fields[key]; ok {
+			t.Fatalf("legacy event unexpectedly contains %s: %s", key, payload)
+		}
+	}
+	var decoded v1.Event
+	if err := json.Unmarshal(payload, &decoded); err != nil {
+		t.Fatal(err)
+	}
+	if decoded.FailureReason != "" || decoded.Attempts != 0 {
+		t.Fatal("legacy decode invented terminal-failure metadata")
+	}
+}
+
 func TestSyntheticScenarioWireEnumIsStableAndIndependent(t *testing.T) {
 	want := []string{"mild", "mixed", "dry-windy", "missing-humidity", "stale", "partial-retrieval"}
 	got := v1.SyntheticScenarioIDs()

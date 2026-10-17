@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -10,6 +11,7 @@ import (
 
 	"firewatch.local/jobs/internal/handler"
 	"firewatch.local/jobs/internal/messaging"
+	"github.com/jackc/pgx/v5"
 )
 
 func TestStatusEvaluator(t *testing.T) {
@@ -115,6 +117,66 @@ func TestDLQConfiguration(t *testing.T) {
 	}
 	if got, err := parseDLQReadyMaxDepth(""); err != nil || got != 0 {
 		t.Fatalf("depth=%d err=%v", got, err)
+	}
+}
+
+// stubRow is one scan result, so the queued-age read is testable without a
+// database.
+type stubRow struct {
+	waited *float64
+	err    error
+}
+
+func (r stubRow) Scan(dest ...any) error {
+	if r.err != nil {
+		return r.err
+	}
+	*(dest[0].(**float64)) = r.waited
+	return nil
+}
+
+// stubQuerier records the query and context it was asked for and returns a
+// canned row.
+type stubQuerier struct {
+	sql string
+	ctx context.Context
+	row stubRow
+}
+
+func (q *stubQuerier) QueryRow(ctx context.Context, sql string, _ ...any) pgx.Row {
+	q.sql, q.ctx = sql, ctx
+	return q.row
+}
+
+// TestQueuedAgeSecondsIsBoundedAndHonest pins the stuck-job signal: a readable
+// wait is reported in seconds, no queued job and a failed read both report
+// QueuedAgeUnknown, and the query is bounded to a single queued row under a
+// deadline. It never marks a job failed.
+func TestQueuedAgeSecondsIsBoundedAndHonest(t *testing.T) {
+	value := 91.5
+	for _, tc := range []struct {
+		name   string
+		waited *float64
+		err    error
+		want   float64
+	}{
+		{"a queued job's wait is reported", &value, nil, 91.5},
+		{"no queued job is unknown", nil, nil, messaging.QueuedAgeUnknown},
+		{"a failed read is unknown", nil, errors.New("read failed"), messaging.QueuedAgeUnknown},
+		{"a driver no-rows is unknown", nil, pgx.ErrNoRows, messaging.QueuedAgeUnknown},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			q := &stubQuerier{row: stubRow{waited: tc.waited, err: tc.err}}
+			if got := queuedAgeSeconds(context.Background(), q); got != tc.want {
+				t.Fatalf("queuedAgeSeconds=%v want %v", got, tc.want)
+			}
+			if !strings.Contains(q.sql, "state='queued'") || !strings.Contains(q.sql, "LIMIT 1") {
+				t.Fatalf("the queued-age query is not bounded to a single queued row: %q", q.sql)
+			}
+			if _, ok := q.ctx.Deadline(); !ok {
+				t.Fatal("the queued-age query is not bounded by a deadline")
+			}
+		})
 	}
 }
 

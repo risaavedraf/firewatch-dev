@@ -11,6 +11,7 @@ import (
 
 	"firewatch.local/risk/internal/handler"
 	"firewatch.local/risk/internal/messaging"
+	"firewatch.local/risk/internal/metrics"
 )
 
 func TestStatusEvaluator(t *testing.T) {
@@ -191,11 +192,26 @@ func TestMetricsKeepsReportingBrokerAndDeadLetterTruth(t *testing.T) {
 	broker.Published.Store(3)
 	broker.Processed.Store(2)
 	broker.Rejected.Store(1)
+	// One high-risk outcome and one other level, to prove the model counters share
+	// the body and report both the named total and the labeled distribution.
+	outcomes := &metrics.RiskOutcomes{}
+	outcomes.Observe("alto")
+	outcomes.Observe("bajo")
+	// One success and one server error, so the HTTP classes, the error series and
+	// the latency histogram are all exercised through the real handler.
+	httpMetrics := &metrics.HTTPMetrics{}
+	httpMetrics.Observe(200, 15*time.Millisecond)
+	httpMetrics.Observe(503, 2*time.Second)
 	snapshot := func() messaging.DeadLetterSnapshot {
 		return messaging.DeadLetterSnapshot{Ready: false, Depth: 4, AgeSeconds: 12.5}
 	}
 	w := httptest.NewRecorder()
-	metricsHandler(snapshot, &requests, broker).ServeHTTP(w, httptest.NewRequest("GET", "/metrics", nil))
+	metricsHandler(snapshot, &requests, broker,
+		outcomes.Text,
+		httpMetrics.Text,
+		metrics.RuntimeText,
+		func() string { return metrics.PoolStats{Total: 4, Acquired: 1, Idle: 3, Max: 10}.Text() },
+	).ServeHTTP(w, httptest.NewRequest("GET", "/metrics", nil))
 	if got := w.Header().Get("Content-Type"); got != "text/plain; version=0.0.4" {
 		t.Fatalf("metrics content type is %q", got)
 	}
@@ -208,6 +224,17 @@ func TestMetricsKeepsReportingBrokerAndDeadLetterTruth(t *testing.T) {
 		"firewatch_events_rejected_total 1",
 		"firewatch_dead_letter_depth 4",
 		"firewatch_dead_letter_depth_age_seconds 12.5",
+		"firewatch_high_risk_predictions_total 1",
+		"firewatch_risk_predictions_total{level=\"alto\"} 1",
+		"firewatch_risk_predictions_total{level=\"bajo\"} 1",
+		"firewatch_risk_predictions_total{level=\"medio\"} 0",
+		"firewatch_risk_predictions_total{level=\"desconocido\"} 0",
+		"firewatch_http_responses_total{class=\"2xx\"} 1",
+		"firewatch_http_responses_total{class=\"5xx\"} 1",
+		"firewatch_http_errors_total 1",
+		"firewatch_http_request_duration_seconds_count 2",
+		"firewatch_process_goroutines ",
+		"firewatch_db_pool_total_conns 4",
 	} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("metrics body %q does not contain %q", body, want)

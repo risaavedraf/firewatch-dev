@@ -21,6 +21,7 @@ import (
 	"firewatch.local/jobs/migrations"
 	"github.com/coreos/go-oidc/v3/oidc"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -68,6 +69,7 @@ func run() error {
 			{version: 1, sql: migrations.Initial},
 			{version: 2, sql: migrations.Zones},
 			{version: 3, sql: migrations.SyntheticScenario},
+			{version: 4, sql: migrations.JobFailureState},
 		} {
 			var exists bool
 			if err = tx.QueryRow(migrationCtx, `SELECT EXISTS(SELECT 1 FROM schema_migrations WHERE version=$1)`, migration.version).Scan(&exists); err != nil {
@@ -124,7 +126,7 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	broker := &messaging.Broker{DB: db, URL: os.Getenv("AMQP_URL"), Handle: store.Complete}
+	broker := &messaging.Broker{DB: db, URL: os.Getenv("AMQP_URL"), Handle: store.Complete, Fail: store.Fail}
 	workerDone := make(chan struct{})
 	go func() { defer close(workerDone); broker.Run(ctx) }()
 	defer func() { stop(); <-workerDone }()
@@ -138,7 +140,7 @@ func run() error {
 	mux.HandleFunc("GET /metrics", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/plain; version=0.0.4")
 		s := snapshot()
-		fmt.Fprint(w, messaging.MetricsText(requests.Load(), s.Ready, broker.Published.Load(), broker.Processed.Load(), broker.Rejected.Load(), s.Depth, s.AgeSeconds))
+		fmt.Fprint(w, messaging.MetricsText(requests.Load(), s.Ready, broker.Published.Load(), broker.Processed.Load(), broker.Rejected.Load(), s.Depth, queuedAgeSeconds(r.Context(), db), s.AgeSeconds))
 	})
 	outer := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		requests.Add(1)
@@ -259,4 +261,28 @@ func respondStatus(w http.ResponseWriter, status int, s handler.Status) {
 	w.Header().Set("Cache-Control", "no-store")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(s)
+}
+
+// metricsQuerier is the read seam /metrics uses to measure the oldest queued job
+// without depending on the concrete pool. It exists so the age handling - a
+// value, a SQL NULL, or a failed read - is testable without a database.
+type metricsQuerier interface {
+	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
+}
+
+// queuedAgeSeconds reads how long the oldest queued job has waited, so a job that
+// never receives an answer stops being invisible without a clock ever marking
+// legitimate backlog as failed. The read is bounded: a short deadline and a
+// single-row query, so a slow or unavailable database cannot stall /metrics. No
+// queued job (SQL NULL) and a failed read both report QueuedAgeUnknown rather
+// than a young, healthy-looking zero.
+func queuedAgeSeconds(ctx context.Context, db metricsQuerier) float64 {
+	ctx, cancel := context.WithTimeout(ctx, time.Second)
+	defer cancel()
+	var waited *float64
+	err := db.QueryRow(ctx, `SELECT EXTRACT(EPOCH FROM now()-requested_at)::double precision FROM jobs WHERE state='queued' ORDER BY requested_at LIMIT 1`).Scan(&waited)
+	if err != nil || waited == nil {
+		return messaging.QueuedAgeUnknown
+	}
+	return *waited
 }

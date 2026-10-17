@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 
 	v1 "firewatch.local/contracts/events/v1"
 	observations "firewatch.local/contracts/observations/v1"
@@ -16,6 +17,13 @@ import (
 // be tested without a database.
 type BatchWriter interface {
 	Publish(ctx context.Context, request v1.Event, assessment repository.Assessment) error
+}
+
+// RiskObserver records the outcome of one published assessment. It is optional:
+// a nil observer disables recording, so the publication path has no hard
+// dependency on the metrics surface and its unit tests need no counter.
+type RiskObserver interface {
+	Observe(level classify.Level)
 }
 
 // permanentError declares that an error can never succeed on a retry. The
@@ -47,6 +55,9 @@ type Publisher struct {
 	Provider   source.Provider
 	Classifier classify.Classifier
 	Store      BatchWriter
+	// Outcomes records the level of every persisted assessment. It is optional:
+	// a nil observer means the outcome is logged but not counted.
+	Outcomes RiskObserver
 }
 
 // selectedProvider returns the provider that must serve one request.
@@ -163,7 +174,7 @@ func (p Publisher) Publish(ctx context.Context, request v1.Event) error {
 	// Validate above already proved its policy id and params hash are present. The
 	// address is taken of a local copy, never of a field of a temporary.
 	policy := assessment.Policy
-	return p.Store.Publish(ctx, request, repository.Assessment{
+	if err := p.Store.Publish(ctx, request, repository.Assessment{
 		ModelVersion: p.Classifier.ID(),
 		RiskLevel:    string(assessment.Level),
 		Factors:      assessment.Factors,
@@ -173,7 +184,56 @@ func (p Publisher) Publish(ctx context.Context, request v1.Event) error {
 		// provenance of the provider that contributed the data, never from a
 		// constant, so registering a real provider clears it automatically.
 		Demo: set.Provenance.Synthetic,
-	})
+	}); err != nil {
+		return err
+	}
+	// Logged and counted only AFTER persistence: a failed publication is retried
+	// whole, so recording before the store would report a level that publishing
+	// then discarded. Log, counter and the stored row therefore always describe
+	// the same set of persisted assessments.
+	slog.Info("risk_assessed", assessmentLog(descriptor, request, features, assessment)...)
+	if p.Outcomes != nil {
+		p.Outcomes.Observe(assessment.Level)
+	}
+	return nil
+}
+
+// assessmentLog renders one persisted assessment as structured log attributes:
+// the inputs the classifier actually saw, the level it produced, and the
+// identity needed to attribute them. It is the inputs/outputs half of the model
+// observability logging; ground truth (LOG-I3) is deliberately absent, because
+// the real observations are deferred and a placeholder would be a fabricated
+// label. When ground truth arrives it joins to these records by job_id.
+//
+// An absent input is logged as the string "unknown", never as 0: a missing
+// humidity reading and a humidity of zero are different facts, and the
+// substitution the classifier refuses must not be reintroduced by the log.
+func assessmentLog(descriptor observations.SourceDescriptor, request v1.Event, features classify.Features, assessment classify.Assessment) []any {
+	return []any{
+		"job_id", request.JobID,
+		"zone_id", request.ZoneID,
+		"provider_id", descriptor.ID,
+		"synthetic", descriptor.Synthetic,
+		"model_version", assessment.Policy.PolicyID,
+		"params_hash", assessment.Policy.ParamsHash,
+		"risk_level", string(assessment.Level),
+		"observed_at", features.ObservedAt,
+		"evaluated_at", features.EvaluatedAt,
+		"temperatura_c", featureLogValue(features.TemperatureC),
+		"humedad_relativa_pct", featureLogValue(features.RelativeHumidityPct),
+		"viento_kmh", featureLogValue(features.WindSpeedKmh),
+		"cobertura_vegetal_pct", featureLogValue(features.VegetationCoverPct),
+		"incendios_historicos", featureLogValue(features.HistoricalFires),
+	}
+}
+
+// featureLogValue renders a present feature as its value and an absent one as
+// "unknown", so the log never invents a reading the classifier never received.
+func featureLogValue(feature classify.Feature) any {
+	if !feature.Present {
+		return "unknown"
+	}
+	return feature.Value
 }
 
 // verifyAssessmentPolicy refuses a policy that claims a frozen identifier while

@@ -120,7 +120,9 @@ func classifyPublishError(err error) error {
 // The transaction shape is deliberate: the inbox row is the deduplication gate,
 // the batches insert is idempotent on job_id, and the outbox event is written in
 // the same transaction as the batch so a published event can never name a batch
-// that was not stored.
+// that was not stored. When the batch already exists the delivery is not
+// swallowed: it emits a completion for the stored batch (see
+// redispatchCompletion) so an operator re-dispatch can still settle the job.
 func (s Store) Publish(ctx context.Context, request v1.Event, assessment Assessment) error {
 	tx, err := s.DB.Begin(ctx)
 	if err != nil {
@@ -178,6 +180,25 @@ func (s Store) Publish(ctx context.Context, request v1.Event, assessment Assessm
 		return classifyPublishError(err)
 	}
 	if result.RowsAffected() == 0 {
+		// The batch is already stored for this job, so this delivery is an operator
+		// re-dispatch: it carries a fresh event id and the inbox gate above could not
+		// recognise it. Completing the job depends on the completion that names the
+		// stored batch, and a silent commit would repair nothing while the job stays
+		// stuck. The id is read rather than invented - a completion must never name a
+		// batch that was not stored - and a read that sees no row is returned as an
+		// error so the delivery is retried instead of committing an empty result.
+		var existingBatchID string
+		if err = tx.QueryRow(ctx, `SELECT id::text FROM batches WHERE job_id=$1`, request.JobID).Scan(&existingBatchID); err != nil {
+			return err
+		}
+		event := redispatchCompletion(request, existingBatchID)
+		body, err := json.Marshal(event)
+		if err != nil {
+			return err
+		}
+		if _, err = tx.Exec(ctx, `INSERT INTO outbox(id,routing_key,payload) VALUES($1,$2,$3)`, event.ID, event.Type, body); err != nil {
+			return err
+		}
 		return tx.Commit(ctx)
 	}
 	event := request
@@ -193,6 +214,59 @@ func (s Store) Publish(ctx context.Context, request v1.Event, assessment Assessm
 		return err
 	}
 	return tx.Commit(ctx)
+}
+
+// redispatchCompletion builds the risk.batch.published.v1 completion for a job
+// whose batch is already stored. It exists because an operator replay (S6)
+// republishes jobs.requested.v1 under a fresh event id: the inbox gate cannot
+// recognise it, the batch insert then affects zero rows, and without this event
+// the completion that settles the job is never sent. The completion names the
+// batch that already exists - minting a new id would report a batch that was
+// never stored - and copies the request envelope verbatim apart from the fresh
+// event id, the type, the batch id and the occurrence instant. It is pure and
+// split out so that shape is testable without a database.
+func redispatchCompletion(request v1.Event, existingBatchID string) v1.Event {
+	event := request
+	event.ID = uuid.NewString()
+	event.Type = v1.BatchPublishedType
+	event.BatchID = existingBatchID
+	event.OccurredAt = time.Now().UTC()
+	return event
+}
+
+// jobFailureEvent builds the risk.job.failed.v1 report for a give-up from the
+// delivery that failed. It carries the job id, the trace id, the classified
+// reason and the attempt count the consumer spent. It is pure and split out so the
+// record's shape is testable without a database; the generated id is used as both
+// the event id and the outbox row id, exactly as the batch publication event does
+// it.
+func jobFailureEvent(delivery v1.Event, reason string, attempts int) v1.Event {
+	return v1.Event{
+		ID:            uuid.NewString(),
+		Type:          v1.JobFailedType,
+		OccurredAt:    time.Now().UTC(),
+		TraceID:       delivery.TraceID,
+		JobID:         delivery.JobID,
+		FailureReason: reason,
+		Attempts:      attempts,
+	}
+}
+
+// RecordJobFailure writes the cross-service terminal-failure report into this
+// service's outbox. risk does not own the job row, so it reports the failure to
+// the jobs consumer instead of writing it. It is one INSERT into the same outbox
+// the batch publication uses, so the existing relay publishes it with publisher
+// confirms and mandatory routing and nothing is published from the consumer hot
+// path. A failed insert is the caller's to log, and it never invents evidence: the
+// dead letter stays the record.
+func (s Store) RecordJobFailure(ctx context.Context, delivery v1.Event, reason string, attempts int) error {
+	report := jobFailureEvent(delivery, reason, attempts)
+	body, err := json.Marshal(report)
+	if err != nil {
+		return err
+	}
+	_, err = s.DB.Exec(ctx, `INSERT INTO outbox(id,routing_key,payload) VALUES($1,$2,$3)`, report.ID, report.Type, body)
+	return err
 }
 
 // ZoneExists reports whether the zone catalogue holds code.

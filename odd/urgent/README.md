@@ -33,6 +33,22 @@ Son dos objetos distintos y uno no se convierte en el otro:
 
 Por eso puede ocurrir —y ocurre— que una prueba esté en PASS y su ID siga sin marcar. Estado remedido el **2026-10-14**: 132 IDs asignados, **0 marcados**, 55 casillas de verificación abiertas y, en el módulo `risk`, la suite completa reporta **293 PASS / 9 omitidos / 0 fallos** con `go vet` sin diagnósticos. Los 9 omitidos dependen de una base de datos y se ejecutan aparte en bases desechables aisladas; «suite en 0» no significa que esos 9 se hayan ejecutado. Las corridas históricas de bases desechables y del arnés E2E autenticado quedan como evidencia documental registrada, no reproducida en esta remedición.
 
+## Qué tenemos y qué falta (estado consolidado)
+
+Síntesis por área, para separar lo construido de lo planificado. La evidencia por ID vive en [tareas_verificacion_implementacion_IA.md](../../Referencias/tareas_verificacion_implementacion_IA.md) y en los registros `backend/docs/checklist-evidence-u*.md`; esta tabla no los reemplaza.
+
+| Área | Qué tenemos (con evidencia) | Qué falta o está solo parcial |
+|---|---|---|
+| **Backend / flujo asíncrono** | `gateway` (JWT RS256, CORS exacto, límite local), `jobs` (idempotencia, transacción job+audit+outbox) y `risk` (consumidor, clasificación, publicación de lote) cableados de extremo a extremo sobre RabbitMQ; relay con publisher confirms, DLQ, migraciones embebidas y PostGIS/GeoJSON | Ingesta real y ciclo de 15 min; servicio `prevention`; replay de DLQ |
+| **Clasificación** | Regla académica `academic-rule-v1` sobre entrada **sintética** (6 perfiles), con pruebas | Modelo real, validación científica, drift con ground truth, umbrales aprobados |
+| **Geoespacial / frontend** | Mapa de comunas de Valparaíso; app React 19 + TS + Vite (7 vistas, OIDC PKCE, servidor estático con CSP) | Login/logout real en navegador (ronda E2E no ejecutada); revisión móvil/accesibilidad |
+| **Contratos** | Eventos versionados con compuerta real de round-trip (`contracts/gen/events/v1`) | OpenAPI validado **solo sintácticamente**; pendiente decisión de contrato-como-verdad (hallazgo M6) |
+| **Observabilidad / operación** | `/metrics` por proceso, readiness y profundidad/edad de DLQ | OpenTelemetry (trazas distribuidas); Grafana (no existe), dashboards, alertas y contador `high_risk_predictions_total` (no existe); HPA/autoscaler, herramienta de carga y p95/SLO medidos |
+| **Seguridad / entrega** | Contenedores non-root, FS read-only, sin capabilities; secretos fuera del build; bodies/timeouts acotados; CI corriendo en verde en `main` (Jobs, Risk, Gateway y Backend integration) | Firma de imágenes, promoción de registry y rollout automatizado |
+| **Checklist IA (132 IDs)** | Suites en verde a nivel sintético (`risk`: 293 PASS / 9 omitidos / 0 fallos; `go vet` limpio) | **0 de 132 IDs marcados**, 55 casillas abiertas; U4: 10 parciales (solo sintético), 32 bloqueados; umbrales, responsables, datos reales y Go/No-Go sin firmar |
+
+Lectura clave: lo que funciona conserva la etiqueta **sintética/académica**; lo que falta no es un error, sino alcance no construido o no demostrado. La deriva de citas de la explicación del código está anotada en [code-explanation/README.md](../../backend/docs/code-explanation/README.md).
+
 ## Unidades ODD
 
 Cada ID del checklist fuente está asignado una sola vez. “Pendiente de verificación” significa que esta organización no comprobó ese requisito de forma individual; no equivale a afirmar que el código relacionado no exista. La evidencia debe registrarse y el estado debe actualizarse al ejecutar cada unidad.

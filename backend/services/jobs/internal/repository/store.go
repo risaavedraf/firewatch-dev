@@ -28,7 +28,7 @@ func canonicalEvaluatedAt(t *time.Time) *time.Time {
 
 // jobColumns is the single projection shared by Create and Get so the stored
 // metadata can never be read in one place and forgotten in the other.
-const jobColumns = `id::text,zone_id,state,batch_id::text,requested_at,scenario_id,evaluated_at`
+const jobColumns = `id::text,zone_id,state,batch_id::text,requested_at,scenario_id,evaluated_at,attempts,failure_reason,failed_at`
 
 type Job struct {
 	ID          string    `json:"id"`
@@ -40,6 +40,13 @@ type Job struct {
 	// omitted from the wire so a legacy job keeps exactly its previous shape.
 	ScenarioID  *string    `json:"scenario_id,omitempty"`
 	EvaluatedAt *time.Time `json:"evaluated_at,omitempty"`
+	// Durable terminal evidence. Attempts is the delivery budget the consumer
+	// spent and is always present (0 while queued or published), so it survives a
+	// consumer restart instead of living only in process memory. The failure
+	// fields are present only on a failed job.
+	Attempts      int        `json:"attempts"`
+	FailureReason *string    `json:"failure_reason,omitempty"`
+	FailedAt      *time.Time `json:"failed_at,omitempty"`
 }
 type Audit struct {
 	ActorID    string    `json:"actor_id"`
@@ -91,9 +98,9 @@ func (s Store) Create(ctx context.Context, actor, key, zone, trace string, scena
 	}
 	err = tx.QueryRow(ctx, `INSERT INTO jobs(id, actor_id, idempotency_key, zone_id, state, scenario_id, evaluated_at)
 		VALUES($1,$2,$3,$4,'queued',$5,$6) ON CONFLICT(actor_id,idempotency_key) DO NOTHING
-		RETURNING `+jobColumns, id, actor, key, zone, scenarioArg, evaluatedArg).Scan(&job.ID, &job.ZoneID, &job.State, &job.BatchID, &job.RequestedAt, &job.ScenarioID, &job.EvaluatedAt)
+		RETURNING `+jobColumns, id, actor, key, zone, scenarioArg, evaluatedArg).Scan(&job.ID, &job.ZoneID, &job.State, &job.BatchID, &job.RequestedAt, &job.ScenarioID, &job.EvaluatedAt, &job.Attempts, &job.FailureReason, &job.FailedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
-		err = tx.QueryRow(ctx, `SELECT `+jobColumns+` FROM jobs WHERE actor_id=$1 AND idempotency_key=$2`, actor, key).Scan(&job.ID, &job.ZoneID, &job.State, &job.BatchID, &job.RequestedAt, &job.ScenarioID, &job.EvaluatedAt)
+		err = tx.QueryRow(ctx, `SELECT `+jobColumns+` FROM jobs WHERE actor_id=$1 AND idempotency_key=$2`, actor, key).Scan(&job.ID, &job.ZoneID, &job.State, &job.BatchID, &job.RequestedAt, &job.ScenarioID, &job.EvaluatedAt, &job.Attempts, &job.FailureReason, &job.FailedAt)
 		if err != nil {
 			return Job{}, err
 		}
@@ -120,7 +127,7 @@ func (s Store) Create(ctx context.Context, actor, key, zone, trace string, scena
 
 func (s Store) Get(ctx context.Context, id string) (Job, error) {
 	var job Job
-	err := s.DB.QueryRow(ctx, `SELECT `+jobColumns+` FROM jobs WHERE id=$1`, id).Scan(&job.ID, &job.ZoneID, &job.State, &job.BatchID, &job.RequestedAt, &job.ScenarioID, &job.EvaluatedAt)
+	err := s.DB.QueryRow(ctx, `SELECT `+jobColumns+` FROM jobs WHERE id=$1`, id).Scan(&job.ID, &job.ZoneID, &job.State, &job.BatchID, &job.RequestedAt, &job.ScenarioID, &job.EvaluatedAt, &job.Attempts, &job.FailureReason, &job.FailedAt)
 	if err != nil {
 		return job, err
 	}
@@ -189,4 +196,120 @@ func (s Store) Complete(ctx context.Context, event v1.Event) error {
 		}
 	}
 	return tx.Commit(ctx)
+}
+
+// Fail records the terminal outcome of the job's own delivery: the state moves
+// to 'failed' with the persisted reason and the attempt count the consumer
+// spent, both durable on the row. Only a queued row transitions, so a duplicate
+// or reordered delivery can never rewrite a job that already reached a terminal
+// state. An unknown job id matches no row and is a no-op, not an error.
+func (s Store) Fail(ctx context.Context, id, reason string, attempts int) error {
+	_, err := s.DB.Exec(ctx, `UPDATE jobs SET state='failed',failure_reason=$2,failed_at=now(),attempts=$3 WHERE id=$1 AND state='queued'`, id, reason, attempts)
+	return err
+}
+
+// ErrJobNotReplayable means the job exists but is in a state no replay may
+// match: a published job already has its outcome, so the guarded replay
+// transition matched no row. The caller answers 409 rather than silently
+// accepting a second replay.
+var ErrJobNotReplayable = errors.New("job is not in a replayable state")
+
+// ErrReplayConfirmationRequired means the job is queued, and a queued job may
+// still be in flight, so a re-dispatch has to be confirmed explicitly by the
+// operator instead of being inferred from the state alone. The caller answers
+// 409 and writes nothing.
+var ErrReplayConfirmationRequired = errors.New("a queued job requires an explicit replay confirmation")
+
+// replayEvent builds the request event a replay enqueues. It is built FROM the
+// stored row and its STORED actor and zone — never from the operator who
+// triggered the replay — so the re-dispatched request still matches the job when
+// Complete compares actor_id and zone_id. Only the trace, the fresh event id and
+// the new occurrence come from the replay itself.
+func replayEvent(job Job, storedActor, trace string) v1.Event {
+	return requestEvent(job, storedActor, job.ZoneID, trace)
+}
+
+// replayGate decides whether a row in the given state may be replayed with the
+// confirmation the operator supplied. It is the recovery policy split out of the
+// transaction so its vocabulary is testable without a database, and it is the
+// same policy the guarded UPDATE enforces.
+//
+// A failed job is always replayable: a terminal state is real evidence that the
+// job is not running. A queued job is replayable only with the explicit
+// confirmation, because it may still be in flight and a blind re-dispatch would
+// run the same work twice. A published job is never replayable: it already has
+// its outcome.
+func replayGate(state string, confirmQueued bool) error {
+	switch state {
+	case "failed":
+		return nil
+	case "queued":
+		if !confirmQueued {
+			return ErrReplayConfirmationRequired
+		}
+		return nil
+	default:
+		return ErrJobNotReplayable
+	}
+}
+
+// Replay returns a failed job, or a queued one the operator confirmed, to queued
+// in one guarded transaction. The update matches a failed row, or a queued row
+// only when the re-dispatch was confirmed, so two concurrent replays cannot both
+// succeed: the loser matches no row and is answered 409.
+//
+// The row is reset and its side effects are written together, exactly as Create
+// does. attempts returns to 0 because a re-dispatch spends a fresh budget, while
+// requested_at is deliberately LEFT ALONE: it is the instant the observation was
+// requested, and rewriting it would claim a fresh observation for data nobody
+// observed again. A replayed job older than the freshness window therefore
+// produces a batch that is already stale, which is the honest answer.
+//
+// The outgoing jobs.requested.v1 event is rebuilt FROM the stored row with the
+// STORED actor and zone, so the re-dispatched request still matches the job the
+// way Complete expects; a fresh event id makes it a new dispatch rather than a
+// redelivery. The audit names the operator who triggered the replay. Duplicate
+// effects are prevented downstream by the existing inbox and batch uniqueness -
+// and, for a request whose batch already exists, by the completion re-emitted in
+// risk's Publish -, never by this write trusting itself.
+func (s Store) Replay(ctx context.Context, id, actor, trace string, confirmQueued bool) (Job, error) {
+	tx, err := s.DB.Begin(ctx)
+	if err != nil {
+		return Job{}, err
+	}
+	defer tx.Rollback(ctx)
+	var job Job
+	var jobActor string
+	err = tx.QueryRow(ctx, `UPDATE jobs SET state='queued',failure_reason=NULL,failed_at=NULL,attempts=0 WHERE id=$1 AND (state='failed' OR (state='queued' AND $2::boolean)) RETURNING actor_id::text, `+jobColumns, id, confirmQueued).Scan(&jobActor, &job.ID, &job.ZoneID, &job.State, &job.BatchID, &job.RequestedAt, &job.ScenarioID, &job.EvaluatedAt, &job.Attempts, &job.FailureReason, &job.FailedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		// The guarded update matched no row for one of three reasons. Read which,
+		// because an unknown job (404), a queued job whose re-dispatch was not
+		// confirmed (409 replay_confirmation_required) and a published job (409
+		// job_not_replayable) are different answers and must not be conflated.
+		var state string
+		switch stateErr := tx.QueryRow(ctx, `SELECT state FROM jobs WHERE id=$1`, id).Scan(&state); {
+		case errors.Is(stateErr, pgx.ErrNoRows):
+			return Job{}, pgx.ErrNoRows
+		case stateErr != nil:
+			return Job{}, stateErr
+		default:
+			return Job{}, replayGate(state, confirmQueued)
+		}
+	}
+	if err != nil {
+		return Job{}, err
+	}
+	job.EvaluatedAt = canonicalEvaluatedAt(job.EvaluatedAt)
+	event := replayEvent(job, jobActor, trace)
+	body, err := json.Marshal(event)
+	if err != nil {
+		return Job{}, err
+	}
+	if _, err = tx.Exec(ctx, `INSERT INTO outbox(id,routing_key,payload) VALUES($1,$2,$3)`, event.ID, event.Type, body); err != nil {
+		return Job{}, err
+	}
+	if _, err = tx.Exec(ctx, `INSERT INTO audit(actor_id,action,job_id,trace_id) VALUES($1,'job.requested',$2,$3)`, actor, job.ID, trace); err != nil {
+		return Job{}, err
+	}
+	return job, tx.Commit(ctx)
 }

@@ -51,7 +51,7 @@ Los estados siguientes provienen de **evidencia documental/reportada**, salvo la
 
 | Documento | Estado | Qué está entregado | Qué falta |
 | --- | --- | --- | --- |
-| [Plan de hardening backend](security/backend-hardening.md) | **Pendiente — implementación** | Plan y criterios de 12 unidades | BH-01–BH-11 pendientes; BH-12 diferida. El plan no acredita scans ni implementación |
+| [Plan de hardening backend](security/backend-hardening.md) | **Parcial — implementación en curso** | Plan y criterios de 12 unidades; **ejecutadas**: BH-01 (baseline de toolchain), BH-03 (tres capas de cuota del gateway), BH-07 (estado terminal, reporte cruzado del fallo y replay de operador, incluido el replay de un job `queued`), BH-08 (paridad del contrato, re-verificada) y BH-09 (pruebas negativas de autenticación, con la política ratificada por escrito); evidencia de los scans de dependencias de BH-02 | BH-02: inventario y scan de imágenes (exigen daemon de Docker y `trivy`); BH-04/05/06/11: entorno y accesos; BH-10: DB y broker aislados; BH-12: activación explícita; el escenario end-to-end de BH-07 y `-race` local. La rama `fix/backend-hardening-bh` está publicada como **PR #29 y pendiente de merge** (decisión humana) |
 
 ### Unidades de hardening
 
@@ -59,20 +59,42 @@ Cada unidad tiene un documento de planificación; su estado indica la **ejecuci�
 
 | Unidad | Estado | Qué falta |
 | --- | --- | --- |
-| [BH-01 — Toolchain y baseline](security/backend-hardening/01-toolchain-baseline.md) | **Pendiente** | Ejecutar y verificar la unidad |
-| [BH-02 — Vulnerabilidades e imágenes](security/backend-hardening/02-vulnerability-scans.md) | **Pendiente** | Ejecutar scans y registrar resultados |
-| [BH-03 — Cuotas gateway](security/backend-hardening/03-gateway-rate-limits.md) | **Pendiente** | Implementar y probar aislamiento de cuotas |
-| [BH-04 — Mínimo privilegio del broker](security/backend-hardening/04-broker-least-privilege.md) | **Pendiente** | Configurar y verificar permisos con autorización del entorno |
-| [BH-05 — Seguridad de transporte](security/backend-hardening/05-transport-security.md) | **Pendiente** | Implementar y verificar controles de transporte |
+| [BH-01 — Toolchain y baseline](security/backend-hardening/01-toolchain-baseline.md) | **Listo — verificado** | — (baseline registrado; la evidencia vive en el propio documento) |
+| [BH-02 — Vulnerabilidades e imágenes](security/backend-hardening/02-vulnerability-scans.md) | **Parcial** | `govulncheck` limpio en los 4 módulos; falta el inventario y el scan de imágenes (daemon de Docker + `trivy`) |
+| [BH-03 — Cuotas gateway](security/backend-hardening/03-gateway-rate-limits.md) | **Listo — verificado** | Tres capas (agregado pre-auth, por `sub`, anónimo compartido) implementadas y probadas; `-race` corre solo en CI |
+| [BH-04 — Mínimo privilegio del broker](security/backend-hardening/04-broker-least-privilege.md) | **Pendiente** | Decisión de entorno y accesos antes de configurar y verificar permisos |
+| [BH-05 — Seguridad de transporte](security/backend-hardening/05-transport-security.md) | **Pendiente** | Decisión de entorno antes de implementar y verificar los controles |
 | [BH-06 — Egress Kubernetes](security/backend-hardening/06-kubernetes-egress.md) | **Pendiente** | Resolver entorno/routing y verificar restricciones |
-| [BH-07 — Recuperación de jobs](security/backend-hardening/07-job-recovery.md) | **Pendiente** | Acordar política y verificar recuperación/retries |
-| [BH-08 — Errores OpenAPI](security/backend-hardening/08-openapi-errors.md) | **Pendiente** | Verificar paridad de errores con el contrato |
-| [BH-09 — Autenticación negativa](security/backend-hardening/09-authentication-tests.md) | **Pendiente** | Completar pruebas negativas de autenticación |
-| [BH-10 — Idempotencia concurrente](security/backend-hardening/10-concurrent-idempotency.md) | **Pendiente** | Pruebas concurrentes en entorno aislado |
-| [BH-11 — Seguridad de despliegue](security/backend-hardening/11-deployment-security-verification.md) | **Pendiente** | Verificar configuración y prerrequisitos de despliegue |
+| [BH-07 — Recuperación de jobs](security/backend-hardening/07-job-recovery.md) | **Listo — verificado**, con el escenario end-to-end pendiente | Estado terminal, reporte cruzado del fallo, replay de operador y replay de un job `queued` con confirmación explícita; falta el escenario con PostgreSQL y broker interrumpidos, y `-race` local |
+| [BH-08 — Errores OpenAPI](security/backend-hardening/08-openapi-errors.md) | **Listo — verificado y re-verificado** | Sin faltantes propios; la re-verificación fue en línea porque la admisión rechazó al verificador independiente |
+| [BH-09 — Autenticación negativa](security/backend-hardening/09-authentication-tests.md) | **Listo — verificado** | — (política de tokens ratificada por escrito el 2026-10-16) |
+| [BH-10 — Idempotencia concurrente](security/backend-hardening/10-concurrent-idempotency.md) | **Pendiente** | Pruebas concurrentes en entorno aislado (DB y broker propios) |
+| [BH-11 — Seguridad de despliegue](security/backend-hardening/11-deployment-security-verification.md) | **Pendiente** | Depende de BH-02/04/05/06; se valida al final |
 | [BH-12 — Errores centralizados](security/backend-hardening/12-centralized-error-handling.md) | **Pendiente — diferida** | Activación explícita antes de implementar |
 
-Los estados BH corresponden al plan registrado; no se infiere que cambios de otros trabajos cierren estas unidades sin actualizar sus criterios y evidencia.
+Los estados BH corresponden al plan registrado; no se infiere que cambios de otros trabajos cierren estas unidades sin actualizar sus criterios y evidencia. Fila y unidades actualizadas el 2026-10-16 con la ejecución de la sesión A: la evidencia por unidad está en cada documento y el estado consolidado en [`../plan-produccion/11-hardening-bh.md`](../plan-produccion/11-hardening-bh.md).
+
+## Producción
+
+Plan de producción en [`../plan-produccion/README.md`](../plan-produccion/README.md) (15 frentes, un documento por frente). Estado al 2026-10-16: **evidencia observada** en la sesión de cierre (suites locales y CI del PR #29) para los frentes 4, 10 y 11, y **reportada** por su sesión propietaria para 5 y 6. El inventario con qué desbloquea cada frente vive en [`../plan-produccion/README.md`](../plan-produccion/README.md) §10.
+
+| Frente | Estado | Qué falta |
+| --- | --- | --- |
+| [1 — Ingesta y scheduler](../plan-produccion/01-ingesta-scheduler.md) | **Pendiente** | Implementar el *seam* y conectar fuentes reales |
+| [2 — Servicio de inferencia](../plan-produccion/02-modelo-inferencia.md) | **Pendiente** | Implementar el *seam* y disponer de un modelo evaluable |
+| [3 — `prevention`](../plan-produccion/03-prevention.md) | **Pendiente** | Aprobar el alcance FWP03 antes de implementar |
+| [4 — Fallos terminales y replay](../plan-produccion/04-dlq-replay-terminal.md) | **Listo — verificado** | Escenario end-to-end (PostgreSQL + broker interrumpidos) y `-race` local |
+| [5 — Observabilidad](../plan-produccion/05-observabilidad.md) | **Parcial** | Medir; *ground truth*; instrumentar latencia y errores en `gateway` y `jobs`; enrutamiento de alertas |
+| [6 — Autoscaling, carga y SLO](../plan-produccion/06-autoscaling-carga-slo.md) | **Parcial** | Ejecutar la carga, verificar el HPA y medir el RTO |
+| [7 — Firma, registry y rollout](../plan-produccion/07-firma-registry-rollout.md) | **Pendiente** | Firma, promoción y despliegue verificado |
+| [8 — Gobierno y seguridad (U1)](../plan-produccion/08-gobierno-seguridad-u1.md) | **Pendiente** | Responsables y aprobación de controles |
+| [9 — Login browser/móvil/a11y](../plan-produccion/09-login-browser-a11y.md) | **Pendiente** | Recorrido navegador real, móvil y accesibilidad |
+| [10 — OpenAPI y contract tests](../plan-produccion/10-openapi-contract-tests.md) | **Listo — verificado** | Nada propio; la revisión independiente no corrió |
+| [11 — Hardening BH-01…BH-11](../plan-produccion/11-hardening-bh.md) | **Parcial — sesión A cerrada** | Las unidades BH de arriba |
+| [12 — Evaluación científica](../plan-produccion/12-evaluacion-cientifica.md) | **Bloqueado** | Datos reales, modelo y umbrales |
+| [13 — Go/No-Go](../plan-produccion/13-go-no-go.md) | **Bloqueado** | Evidencia de datos y modelo, y criterios firmados |
+| [14 — Motor de datos y continuidad](../plan-produccion/14-motor-datos-continuidad.md) | **Pendiente** | Decisión de motor productivo |
+| [15 — Procedencia geoespacial (DIFROL)](../plan-produccion/15-procedencia-geoespacial.md) | **Pendiente** | Validación DIFROL |
 
 ## Frontend
 

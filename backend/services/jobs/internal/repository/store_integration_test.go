@@ -11,6 +11,7 @@ import (
 
 	v1 "firewatch.local/contracts/events/v1"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -213,5 +214,206 @@ func TestSyntheticScenarioMetadataIsAssignedOnceAndSurvivesRetries(t *testing.T)
 	// its instant cannot be stored even by a direct write.
 	if _, err = db.Exec(ctx, `INSERT INTO jobs(id,actor_id,idempotency_key,zone_id,state,scenario_id) VALUES($1,$2,$3,'valparaiso-demo','queued','mild')`, uuid.NewString(), uuid.NewString(), uuid.NewString()); err == nil {
 		t.Fatal("pairing constraint accepted a scenario without an evaluation instant")
+	}
+}
+
+// TestReplayEventUsesTheStoredIdentity is the pure seam for the replay's side
+// effect: it pins that the re-dispatched request event is built from the stored
+// row and the STORED actor and zone, so the operator who triggered the replay
+// cannot change the identity Complete matches on. It needs no database; the
+// transactional write and the persisted rows are covered below and skip without
+// TEST_DATABASE_URL.
+func TestReplayEventUsesTheStoredIdentity(t *testing.T) {
+	instant := time.Date(2030, 1, 2, 3, 4, 5, 0, time.UTC)
+	job := Job{ID: "job", ZoneID: "valparaiso-demo", State: "queued", RequestedAt: instant, ScenarioID: stringPtr("dry-windy"), EvaluatedAt: &instant}
+	event := replayEvent(job, "stored-actor", "operator-trace")
+	if event.Type != v1.JobRequestedType || event.JobID != job.ID || event.ActorID != "stored-actor" || event.ZoneID != job.ZoneID || event.TraceID != "operator-trace" {
+		t.Fatalf("replay event identity: %+v", event)
+	}
+	if event.ID == "" {
+		t.Fatal("replay event must mint a fresh id")
+	}
+	if event.ScenarioID != "dry-windy" || event.EvaluatedAt == nil || !event.EvaluatedAt.Equal(instant) {
+		t.Fatalf("replay event metadata: %+v", event)
+	}
+}
+
+// TestReplayRestoresFailedJobAndEnqueuesOnce requires a real migrated database:
+// it proves the guarded transition, the cleared terminal fields, the new outbox
+// row and its audit record, and that a second replay is refused with no further
+// effect. It skips without TEST_DATABASE_URL, so the transaction, the SQL and the
+// persisted rows stay unproven in an environment without PostgreSQL — exactly the
+// database-side rules no pure seam can show.
+func TestReplayRestoresFailedJobAndEnqueuesOnce(t *testing.T) {
+	if testing.Short() || os.Getenv("TEST_DATABASE_URL") == "" {
+		t.Skip("requires migrated disposable jobs database")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	db, err := pgxpool.New(ctx, os.Getenv("TEST_DATABASE_URL"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	s := Store{DB: db}
+	actor, key, trace := uuid.NewString(), uuid.NewString(), uuid.NewString()
+	job, err := s.Create(ctx, actor, key, "valparaiso-demo", trace, "dry-windy")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = s.Fail(ctx, job.ID, "permanent_error", 5); err != nil {
+		t.Fatal(err)
+	}
+	failed, err := s.Get(ctx, job.ID)
+	if err != nil || failed.State != "failed" || failed.Attempts != 5 || failed.FailureReason == nil || failed.FailedAt == nil {
+		t.Fatalf("failed row=%+v err=%v", failed, err)
+	}
+	// The original request event is the only outbox row before the replay.
+	before := map[string]bool{}
+	rows, err := db.Query(ctx, `SELECT id::text FROM outbox WHERE payload->>'job_id'=$1`, job.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for rows.Next() {
+		var outboxID string
+		if err = rows.Scan(&outboxID); err != nil {
+			rows.Close()
+			t.Fatal(err)
+		}
+		before[outboxID] = true
+	}
+	rows.Close()
+	if len(before) != 1 {
+		t.Fatalf("outbox before=%v want exactly 1", before)
+	}
+
+	operator := "operator-subject"
+	replayed, err := s.Replay(ctx, job.ID, operator, trace, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if replayed.ID != job.ID || replayed.State != "queued" || replayed.Attempts != 0 || replayed.FailureReason != nil || replayed.FailedAt != nil {
+		t.Fatalf("replayed job=%+v", replayed)
+	}
+	stored, err := s.Get(ctx, job.ID)
+	if err != nil || stored.State != "queued" || stored.Attempts != 0 || stored.FailureReason != nil || stored.FailedAt != nil {
+		t.Fatalf("stored job=%+v err=%v", stored, err)
+	}
+	// Exactly one new outbox row: the outgoing request event rebuilt from the
+	// stored row with the STORED actor and zone, so it still matches Complete.
+	var newPayload []byte
+	rows, err = db.Query(ctx, `SELECT id::text,payload FROM outbox WHERE payload->>'job_id'=$1`, job.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	count := 0
+	for rows.Next() {
+		var outboxID string
+		var payload []byte
+		if err = rows.Scan(&outboxID, &payload); err != nil {
+			rows.Close()
+			t.Fatal(err)
+		}
+		count++
+		if !before[outboxID] {
+			newPayload = payload
+		}
+	}
+	rows.Close()
+	if count != 2 || newPayload == nil {
+		t.Fatalf("outbox after replay=%d new=%s", count, newPayload)
+	}
+	var event v1.Event
+	if err = json.Unmarshal(newPayload, &event); err != nil {
+		t.Fatal(err)
+	}
+	if event.Type != v1.JobRequestedType || event.JobID != job.ID || event.ActorID != actor || event.ZoneID != job.ZoneID || event.ScenarioID != "dry-windy" {
+		t.Fatalf("replay event=%+v", event)
+	}
+	// The audit names the operator and mirrors the action creation writes.
+	var operatorAudits int
+	if err = db.QueryRow(ctx, `SELECT count(*) FROM audit WHERE job_id=$1 AND action='job.requested' AND actor_id=$2`, job.ID, operator).Scan(&operatorAudits); err != nil {
+		t.Fatal(err)
+	}
+	if operatorAudits != 1 {
+		t.Fatalf("operator audits=%d want 1", operatorAudits)
+	}
+	// A losing or concurrent second replay is refused and enqueues nothing. The
+	// job is queued now, so re-dispatching it needs the operator's confirmation;
+	// an unconfirmed second replay is exactly that refusal.
+	if _, err = s.Replay(ctx, job.ID, operator, uuid.NewString(), false); !errors.Is(err, ErrReplayConfirmationRequired) {
+		t.Fatalf("second replay err=%v want ErrReplayConfirmationRequired", err)
+	}
+	var after int
+	if err = db.QueryRow(ctx, `SELECT count(*) FROM outbox WHERE payload->>'job_id'=$1`, job.ID).Scan(&after); err != nil || after != 2 {
+		t.Fatalf("outbox after second replay=%d err=%v want 2", after, err)
+	}
+	// An unknown id is distinguishable from a non-failed one.
+	if _, err = s.Replay(ctx, uuid.NewString(), operator, uuid.NewString(), false); !errors.Is(err, pgx.ErrNoRows) {
+		t.Fatalf("unknown id err=%v want pgx.ErrNoRows", err)
+	}
+}
+
+// TestReplayQueuedJobRequiresConfirmation requires a real migrated database: it
+// proves the confirmed queued transition, that an unconfirmed one writes nothing,
+// that the observation instant is left alone, and that a published job is still
+// refused. It skips without TEST_DATABASE_URL, so those database-side rules stay
+// unproven in an environment without PostgreSQL.
+func TestReplayQueuedJobRequiresConfirmation(t *testing.T) {
+	if testing.Short() || os.Getenv("TEST_DATABASE_URL") == "" {
+		t.Skip("requires migrated disposable jobs database")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	db, err := pgxpool.New(ctx, os.Getenv("TEST_DATABASE_URL"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	s := Store{DB: db}
+	actor, key, trace := uuid.NewString(), uuid.NewString(), uuid.NewString()
+	job, err := s.Create(ctx, actor, key, "valparaiso-demo", trace, "dry-windy")
+	if err != nil {
+		t.Fatal(err)
+	}
+	operator := "operator-subject"
+	// Unconfirmed: the queued job is left exactly as it was, and nothing is
+	// written - no outbox row and no audit record for the operator.
+	if _, err = s.Replay(ctx, job.ID, operator, uuid.NewString(), false); !errors.Is(err, ErrReplayConfirmationRequired) {
+		t.Fatalf("unconfirmed queued replay err=%v want ErrReplayConfirmationRequired", err)
+	}
+	var outboxRows, audits int
+	if err = db.QueryRow(ctx, `SELECT count(*) FROM outbox WHERE payload->>'job_id'=$1`, job.ID).Scan(&outboxRows); err != nil || outboxRows != 1 {
+		t.Fatalf("outbox after refused replay=%d err=%v want 1", outboxRows, err)
+	}
+	if err = db.QueryRow(ctx, `SELECT count(*) FROM audit WHERE job_id=$1 AND actor_id=$2`, job.ID, operator).Scan(&audits); err != nil || audits != 0 {
+		t.Fatalf("audits after refused replay=%d err=%v want 0", audits, err)
+	}
+	// Confirmed: the row is re-dispatched. The attempt budget restarts and the
+	// observation instant does NOT move, because nobody observed it again.
+	replayed, err := s.Replay(ctx, job.ID, operator, uuid.NewString(), true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if replayed.State != "queued" || replayed.Attempts != 0 || replayed.FailureReason != nil || replayed.FailedAt != nil {
+		t.Fatalf("replayed queued job=%+v", replayed)
+	}
+	if !replayed.RequestedAt.Equal(job.RequestedAt) || replayed.ScenarioID == nil || *replayed.ScenarioID != "dry-windy" {
+		t.Fatalf("replay moved the observation instant or lost the scenario: %+v want requested_at=%v", replayed, job.RequestedAt)
+	}
+	if err = db.QueryRow(ctx, `SELECT count(*) FROM outbox WHERE payload->>'job_id'=$1`, job.ID).Scan(&outboxRows); err != nil || outboxRows != 2 {
+		t.Fatalf("outbox after confirmed replay=%d err=%v want 2", outboxRows, err)
+	}
+	if err = db.QueryRow(ctx, `SELECT count(*) FROM audit WHERE job_id=$1 AND actor_id=$2`, job.ID, operator).Scan(&audits); err != nil || audits != 1 {
+		t.Fatalf("audits after confirmed replay=%d err=%v want 1", audits, err)
+	}
+	// The extension opened `queued`, not `published`: a completed job keeps its
+	// outcome and is still refused, with or without a confirmation.
+	completion := v1.Event{ID: uuid.NewString(), Type: v1.BatchPublishedType, JobID: job.ID, BatchID: uuid.NewString(), ActorID: actor, ZoneID: job.ZoneID, TraceID: trace}
+	if err = s.Complete(ctx, completion); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = s.Replay(ctx, job.ID, operator, uuid.NewString(), true); !errors.Is(err, ErrJobNotReplayable) {
+		t.Fatalf("replay of a published job err=%v want ErrJobNotReplayable", err)
 	}
 }

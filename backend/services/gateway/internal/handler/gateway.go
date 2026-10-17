@@ -10,10 +10,29 @@ import (
 	"net/http/httputil"
 	"net/url"
 	"strings"
-	"sync"
 	"time"
 
+	"firewatch.local/gateway/internal/limit"
 	"github.com/coreos/go-oidc/v3/oidc"
+)
+
+// Quota policy agreed on 2026-10-16 (BH-03). The aggregate bound is the
+// emergency per-replica ceiling that already existed; the subject and
+// anonymous bounds are the fair quotas layered on top of it.
+const (
+	aggregateRate  = 20
+	aggregateBurst = 40
+
+	subjectRate  = 5
+	subjectBurst = 10
+	// subjectBuckets caps how many verified subjects are tracked at once and
+	// subjectIdle evicts a subject's bucket after this long unused, so a stream
+	// of distinct subjects cannot grow memory without bound.
+	subjectBuckets = 4096
+	subjectIdle    = 5 * time.Minute
+
+	anonymousRate  = 1
+	anonymousBurst = 5
 )
 
 type Verifier interface {
@@ -38,9 +57,17 @@ func New(verifier Verifier, jobs, risk *url.URL, webOrigin string) http.Handler 
 	mux.Handle("/v1/jobs/", proxy(jobs))
 	mux.Handle("/v1/audit", proxy(jobs))
 	mux.Handle("/v1/risk/", proxy(risk))
-	// A global bound protects this initial deployment without trusting forwarded IPs.
-	var mu sync.Mutex
-	tokens, last := float64(40), time.Now()
+	// Three quota layers, per the agreed BH-03 policy: an emergency aggregate
+	// bound charged before authentication, a per-verified-subject bound, and one
+	// deliberately shared anonymous bound. Identity is the verified token
+	// subject only — no forwarded IP, no remote address, no trusted proxy.
+	aggregate := limit.NewBucket(limit.Policy{Rate: aggregateRate, Burst: aggregateBurst}, limit.SystemClock)
+	subject := limit.NewKeyed(limit.KeyedOptions{
+		Policy: limit.Policy{Rate: subjectRate, Burst: subjectBurst},
+		Max:    subjectBuckets,
+		Idle:   subjectIdle,
+	}, limit.SystemClock)
+	anonymous := limit.NewBucket(limit.Policy{Rate: anonymousRate, Burst: anonymousBurst}, limit.SystemClock)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
 		id := fmt.Sprintf("%x", randomID())
@@ -81,18 +108,10 @@ func New(verifier Verifier, jobs, risk *url.URL, webOrigin string) http.Handler 
 			w.WriteHeader(204)
 			return
 		}
-		mu.Lock()
-		now := time.Now()
-		tokens = min(40, tokens+now.Sub(last).Seconds()*20)
-		last = now
-		allowed := tokens >= 1
-		if allowed {
-			tokens--
-		}
-		mu.Unlock()
-		if !allowed {
-			w.Header().Set("Retry-After", "1")
-			failure(w, 429, "rate_limited")
+		// The aggregate bound is the only pre-authentication quota: it protects
+		// this deployment without trusting any caller-supplied identity.
+		if !aggregate.Allow() {
+			rateLimited(w)
 			return
 		}
 		if !strings.HasPrefix(r.URL.Path, "/v1/") {
@@ -101,14 +120,20 @@ func New(verifier Verifier, jobs, risk *url.URL, webOrigin string) http.Handler 
 		}
 		auth := strings.Fields(r.Header.Get("Authorization"))
 		if len(auth) != 2 || !strings.EqualFold(auth[0], "Bearer") {
-			failure(w, 401, "unauthorized")
+			rejectUnauthenticated(w, anonymous)
 			return
 		}
 		ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 		token, err := verifier.Verify(ctx, auth[1])
 		cancel()
 		if err != nil || token.Subject == "" {
-			failure(w, 401, "unauthorized")
+			rejectUnauthenticated(w, anonymous)
+			return
+		}
+		// The subject only exists after Verify, so this quota can only be
+		// charged here, after authentication.
+		if !subject.Allow(token.Subject) {
+			rateLimited(w)
 			return
 		}
 		r.Body = http.MaxBytesReader(w, r.Body, 8192)
@@ -127,4 +152,22 @@ func failure(w http.ResponseWriter, status int, code string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(map[string]string{"code": code, "request_id": w.Header().Get("X-Request-ID")})
+}
+
+// rateLimited answers 429 with the Retry-After header and rate_limited body
+// that BH-08 pins against the OpenAPI contract.
+func rateLimited(w http.ResponseWriter) {
+	w.Header().Set("Retry-After", "1")
+	failure(w, 429, "rate_limited")
+}
+
+// rejectUnauthenticated charges the single shared anonymous bucket for an
+// unauthenticated request; once that coarse bucket is exhausted the noise it
+// bounds is answered 429 instead of another 401.
+func rejectUnauthenticated(w http.ResponseWriter, anonymous *limit.Bucket) {
+	if !anonymous.Allow() {
+		rateLimited(w)
+		return
+	}
+	failure(w, 401, "unauthorized")
 }

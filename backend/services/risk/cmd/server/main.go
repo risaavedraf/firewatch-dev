@@ -18,6 +18,7 @@ import (
 	"firewatch.local/risk/internal/classify"
 	"firewatch.local/risk/internal/handler"
 	"firewatch.local/risk/internal/messaging"
+	"firewatch.local/risk/internal/metrics"
 	"firewatch.local/risk/internal/repository"
 	"firewatch.local/risk/internal/service"
 	"firewatch.local/risk/internal/source"
@@ -165,7 +166,10 @@ func run() error {
 	// demo flag to false: that flag is derived from the provider's provenance, so
 	// it is not hardcoded anywhere.
 	provider := source.NewFixtureProvider()
-	publisher := service.Publisher{Provider: provider, Classifier: active, Store: store}
+	// The model-outcome counters are shared between the publication path, which
+	// writes them, and /metrics, which reads them: one value, two surfaces.
+	outcomes := &metrics.RiskOutcomes{}
+	publisher := service.Publisher{Provider: provider, Classifier: active, Store: store, Outcomes: outcomes}
 	// Validate both bounds before starting any broker worker.
 	dlqReadyMaxDepth, err := parseDLQReadyMaxDepth(os.Getenv("DLQ_READY_MAX_DEPTH"))
 	if err != nil {
@@ -175,7 +179,10 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	broker := &messaging.Broker{DB: db, URL: os.Getenv("AMQP_URL"), Handle: publisher.Publish}
+	// ReportFailure records a give-up in this service's outbox so the jobs
+	// consumer can write the terminal state on the job's own row, which risk does
+	// not own. It reuses the store's outbox path; nothing is published here.
+	broker := &messaging.Broker{DB: db, URL: os.Getenv("AMQP_URL"), Handle: publisher.Publish, ReportFailure: store.RecordJobFailure}
 	workerDone := make(chan struct{})
 	go func() { defer close(workerDone); broker.Run(ctx) }()
 	defer func() { stop(); <-workerDone }()
@@ -186,7 +193,13 @@ func run() error {
 	mux.HandleFunc("GET /health/live", func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(204) })
 	mux.Handle("GET /health/ready", healthHandler(check))
 	var requests atomic.Uint64
-	mux.Handle("GET /metrics", metricsHandler(snapshot, &requests, broker))
+	httpMetrics := &metrics.HTTPMetrics{}
+	mux.Handle("GET /metrics", metricsHandler(snapshot, &requests, broker,
+		outcomes.Text,
+		httpMetrics.Text,
+		metrics.RuntimeText,
+		func() string { return poolText(db) },
+	))
 	outer := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		requests.Add(1)
 		id, err := uuid.Parse(r.Header.Get("X-Request-ID"))
@@ -197,7 +210,16 @@ func run() error {
 		r.Header.Set("X-Request-ID", id.String())
 		c, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 		defer cancel()
-		mux.ServeHTTP(w, r.WithContext(c))
+		started := time.Now()
+		recorder := &statusRecorder{ResponseWriter: w}
+		mux.ServeHTTP(recorder, r.WithContext(c))
+		// The status is the recorded one, or 200 when a handler returned without
+		// writing, which is the code net/http itself would send.
+		status := recorder.status
+		if status == 0 {
+			status = http.StatusOK
+		}
+		httpMetrics.Observe(status, time.Since(started))
 	})
 	srv := &http.Server{Addr: ":8080", Handler: outer, ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 10 * time.Second, WriteTimeout: 15 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 16384}
 	go func() {
@@ -292,12 +314,54 @@ func statusEvaluator(ping func(context.Context) error, snapshot func() messaging
 // dead-letter depth and age to stay visible here, where an operator can still see
 // them. It reads the broker readiness from the dead-letter snapshot, exactly as
 // the inline handler did before.
-func metricsHandler(snapshot func() messaging.DeadLetterSnapshot, requests *atomic.Uint64, broker *messaging.Broker) http.Handler {
+//
+// The delivery counters (messaging.MetricsText) stay pinned by their own test and
+// are rendered first and unchanged. The additional blocks - model outcomes, HTTP
+// traffic, process resources and the database pool - arrive as renderers, so the
+// risk service can grow its own signals without touching the jobs copy of
+// MetricsText and without a widening parameter list.
+func metricsHandler(snapshot func() messaging.DeadLetterSnapshot, requests *atomic.Uint64, broker *messaging.Broker, extra ...func() string) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/plain; version=0.0.4")
 		s := snapshot()
 		fmt.Fprint(w, messaging.MetricsText(requests.Load(), s.Ready, broker.Published.Load(), broker.Processed.Load(), broker.Rejected.Load(), s.Depth, s.AgeSeconds))
+		for _, render := range extra {
+			fmt.Fprint(w, render())
+		}
 	})
+}
+
+// statusRecorder captures the response status so the middleware can count
+// responses by class and time the request without changing any handler. A
+// handler that writes without calling WriteHeader reports 200, which is the code
+// net/http would send.
+type statusRecorder struct {
+	http.ResponseWriter
+	status int
+}
+
+func (r *statusRecorder) WriteHeader(code int) {
+	r.status = code
+	r.ResponseWriter.WriteHeader(code)
+}
+
+func (r *statusRecorder) Write(body []byte) (int, error) {
+	if r.status == 0 {
+		r.status = http.StatusOK
+	}
+	return r.ResponseWriter.Write(body)
+}
+
+// poolText renders the current database pool gauges. The pool is captured here,
+// where the database handle lives, so the metrics package stays database-free.
+func poolText(db *pgxpool.Pool) string {
+	stat := db.Stat()
+	return metrics.PoolStats{
+		Total:    stat.TotalConns(),
+		Acquired: stat.AcquiredConns(),
+		Idle:     stat.IdleConns(),
+		Max:      stat.MaxConns(),
+	}.Text()
 }
 
 // healthHandler serves /health/ready. The routing decision is the bounded

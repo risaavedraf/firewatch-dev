@@ -40,11 +40,11 @@ export type PermissionRow = {
 //   backend/services/risk/internal/handler/api.go:89 wraps the whole risk mux.
 //   backend/services/jobs/internal/handler/security.go:43-44 accepts ONLY "admin";
 //     line 49 answers a verified viewer with 403.
-//   backend/services/jobs/internal/handler/api.go:160 wraps the whole jobs mux:
+//   backend/services/jobs/internal/handler/api.go:236 wraps the whole jobs mux:
 //     jobs status, job creation, job read and /v1/audit.
-//   backend/services/gateway/internal/handler/gateway.go:39 only proxies
-//     /v1/audit and adds no role of its own; line 74 answers /health/ready before
-//     any bearer check; lines 96-105 require a verifiable bearer with a subject
+//   backend/services/gateway/internal/handler/gateway.go:58 only proxies
+//     /v1/audit and adds no role of its own; line 107 answers /health/ready before
+//     any bearer check; lines 121-131 require a verifiable bearer with a subject
 //     but decide no role.
 // eslint-disable-next-line react-refresh/only-export-components
 export const PERMISSION_MATRIX: readonly PermissionRow[] = [
@@ -52,15 +52,15 @@ export const PERMISSION_MATRIX: readonly PermissionRow[] = [
     capability: 'Disponibilidad del gateway · GET /health/ready',
     viewer: 'Sí: responde 204 sin comprobar token ni rol',
     admin: 'Sí: responde 204 sin comprobar token ni rol',
-    guards: ['backend/services/gateway/internal/handler/gateway.go:80'],
+    guards: ['backend/services/gateway/internal/handler/gateway.go:107'],
   },
   {
     capability: 'Autenticación de cualquier ruta /v1/* · bearer verificado en el gateway',
     viewer: 'Sí: exige un bearer verificable con sujeto; no decide ningún rol',
     admin: 'Sí: exige un bearer verificable con sujeto; no decide ningún rol',
     guards: [
-      'backend/services/gateway/internal/handler/gateway.go:102',
-      'backend/services/gateway/internal/handler/gateway.go:108',
+      'backend/services/gateway/internal/handler/gateway.go:121',
+      'backend/services/gateway/internal/handler/gateway.go:127',
     ],
   },
   {
@@ -123,9 +123,9 @@ export const PERMISSION_MATRIX: readonly PermissionRow[] = [
     viewer: 'No: 403 forbidden',
     admin: 'Sí',
     guards: [
-      'backend/services/jobs/internal/handler/api.go:52',
+      'backend/services/jobs/internal/handler/api.go:87',
       'backend/services/jobs/internal/handler/security.go:44',
-      'backend/services/jobs/internal/handler/api.go:160',
+      'backend/services/jobs/internal/handler/api.go:236',
     ],
   },
   {
@@ -133,7 +133,7 @@ export const PERMISSION_MATRIX: readonly PermissionRow[] = [
     viewer: 'No: 403 forbidden',
     admin: 'Sí',
     guards: [
-      'backend/services/jobs/internal/handler/api.go:135',
+      'backend/services/jobs/internal/handler/api.go:170',
       'backend/services/jobs/internal/handler/security.go:44',
     ],
   },
@@ -142,7 +142,7 @@ export const PERMISSION_MATRIX: readonly PermissionRow[] = [
     viewer: 'No: 403 forbidden',
     admin: 'Sí',
     guards: [
-      'backend/services/jobs/internal/handler/api.go:51',
+      'backend/services/jobs/internal/handler/api.go:86',
       'backend/services/jobs/internal/handler/security.go:44',
     ],
   },
@@ -151,9 +151,9 @@ export const PERMISSION_MATRIX: readonly PermissionRow[] = [
     viewer: 'No: 403 forbidden',
     admin: 'Sí',
     guards: [
-      'backend/services/jobs/internal/handler/api.go:152',
+      'backend/services/jobs/internal/handler/api.go:228',
       'backend/services/jobs/internal/handler/security.go:44',
-      'backend/services/gateway/internal/handler/gateway.go:39',
+      'backend/services/gateway/internal/handler/gateway.go:58',
     ],
   },
   {
