@@ -12,6 +12,14 @@ scrape_configs:
   - job_name: risk
     static_configs:
       - targets: ['risk:8080']
+  # The gateway exposes its own /metrics (latency, response classes, process
+  # signals) and the error alert is written against those families, so it is
+  # scraped like the other two services. Without this job its series exist and
+  # nobody collects them, and the gateway clause of FireWatchTargetDown can
+  # never fire.
+  - job_name: gateway
+    static_configs:
+      - targets: ['gateway:8080']
   - job_name: rabbitmq
     static_configs:
       - targets: ['rabbitmq:15692']

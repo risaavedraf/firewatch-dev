@@ -23,7 +23,15 @@ groups:
 
       - alert: FireWatchHighErrorRate
         # Agreed objective: 5xx error rate < 1%.
-        expr: sum(rate(firewatch_http_errors_total[5m])) by (job) / clamp_min(sum(rate(firewatch_http_requests_total[5m])) by (job), 1) > 0.01
+        #
+        # The denominator is every response the middleware recorded, summed
+        # over its classes, because that is the series all three scraped
+        # services emit: jobs and risk also publish
+        # firewatch_http_requests_total, but the gateway publishes the
+        # class-labelled responses counter only. Dividing by a series a service
+        # does not export leaves its ratio empty, which is the defect this
+        # expression closes.
+        expr: sum(rate(firewatch_http_errors_total[5m])) by (job) / clamp_min(sum(rate(firewatch_http_responses_total[5m])) by (job), 1) > 0.01
         for: 5m
         labels:
           severity: warning
