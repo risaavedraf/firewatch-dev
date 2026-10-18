@@ -1,11 +1,14 @@
--- 008: preventive actions and their attributable history.
+-- 009: preventive actions and their attributable history.
 --
 -- Forward-only and guarded: re-applying this file is a no-op, and nothing here
 -- backfills or destroys data.
 --
--- Version 8, not 1, is deliberate. The frozen contract names this migration
--- 008_preventive_actions.sql, and schema_migrations already holds 001..007 of the
--- risk database, so the preventive tables take the next version of that ledger.
+-- Version 9, not 1, is deliberate. This migration was written as 008 while the
+-- risk service added its own 008_firewatch_rule_v2.sql in parallel, and both
+-- files record their version in the SAME schema_migrations ledger of the shared
+-- database. Two migrations claiming one version would make the second one skip
+-- silently (the runner records versions, not filenames), so the preventive tables
+-- take version 9: the ledger already holds risk's 001..008.
 -- They are created inside their own PostgreSQL SCHEMA, `prevention`, which is
 -- what the contract names ("esquema PostgreSQL prevention"): the two tables are
 -- addressed as prevention.actions and prevention.action_history and are not

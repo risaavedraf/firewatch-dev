@@ -8,7 +8,7 @@ package migrations
 
 import _ "embed"
 
-//go:embed 008_preventive_actions.sql
+//go:embed 009_preventive_actions.sql
 var preventiveActions string
 
 // Migration is one forward-only schema migration.
@@ -22,13 +22,14 @@ type Migration struct {
 
 // All returns the known migrations in ascending version order.
 //
-// The single entry is version 8, not version 1: the frozen contract fixes this
-// file as 008_preventive_actions.sql and the ledger it is recorded in already
-// holds the seven risk migrations. The runner applies whatever is still pending
-// in schema_migrations and does nothing on a database that is already up to
-// date, so the shared ledger stays consistent whichever runner executes first.
+// The single entry is version 9, not version 1: this service's migration shares
+// the risk database's schema_migrations ledger, which already holds risk's
+// 001..008. Version 8 belongs to risk's 008_firewatch_rule_v2.sql, so claiming it
+// here would make one of the two migrations skip silently on the shared ledger.
+// The runner applies whatever is still pending in schema_migrations and does
+// nothing on a database that is already up to date.
 func All() []Migration {
 	return []Migration{
-		{Version: 8, Name: "preventive_actions", SQL: preventiveActions},
+		{Version: 9, Name: "preventive_actions", SQL: preventiveActions},
 	}
 }

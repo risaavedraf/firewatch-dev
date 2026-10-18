@@ -12,15 +12,16 @@ import (
 // status vocabulary appears in the CHECK constraint.
 var statusCheckLiteral = regexp.MustCompile(`'([a-z_]+)'`)
 
-// TestAllHasExactlyTheContractMigration pins the frozen contract's migration
-// identity: one migration, version 8, with a name and SQL.
+// TestAllHasExactlyTheContractMigration pins the migration identity: one
+// migration, version 9, with a name and SQL. Version 9 rather than 8 because the
+// shared schema_migrations ledger already holds risk's 008.
 func TestAllHasExactlyTheContractMigration(t *testing.T) {
 	all := All()
 	if len(all) != 1 {
 		t.Fatalf("the contract defines one migration, All() returned %d", len(all))
 	}
-	if all[0].Version != 8 {
-		t.Errorf("migration version is %d, the contract fixes 008_preventive_actions.sql", all[0].Version)
+	if all[0].Version != 9 {
+		t.Errorf("migration version is %d, the frozen version is 009_preventive_actions.sql (008 belongs to risk in the shared ledger)", all[0].Version)
 	}
 	if all[0].Name == "" {
 		t.Error("migration has an empty Name; a failure must be attributable")
