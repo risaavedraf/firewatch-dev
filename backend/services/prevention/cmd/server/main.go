@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"firewatch.local/prevention/internal/handler"
+	"firewatch.local/prevention/internal/metrics"
 	"firewatch.local/prevention/internal/repository"
 	"firewatch.local/prevention/migrations"
 	"github.com/coreos/go-oidc/v3/oidc"
@@ -73,7 +74,29 @@ func run() error {
 	mux.Handle("/v1/", handler.New(store, verifier))
 	mux.HandleFunc("GET /health/live", func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(204) })
 	mux.Handle("GET /health/ready", readyHandler(db.Ping))
+	// /metrics is answered here, next to the health checks and before any bearer
+	// check: a Prometheus scrape has no way to obtain a token, and monitoring must
+	// not consume the budgets that bound caller traffic.
+	httpMetrics := &metrics.HTTPMetrics{}
+	mux.Handle("GET /metrics", metricsHandler(httpMetrics.Text, metrics.RuntimeText))
 	outer := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		start := time.Now()
+		// Every response of this chain, including the health answers and the metric
+		// scrape itself, is timed and bucketed by class through one wrapper, so the
+		// rate and the p95 cover what callers actually experience. The sample for a
+		// scrape is recorded after its body is written, so it lands in the next
+		// scrape instead of inside the body being produced.
+		recorder := &statusRecorder{ResponseWriter: w}
+		w = recorder
+		defer func() {
+			status := recorder.status
+			if status == 0 {
+				// A handler that returned without writing is answered 200 by net/http,
+				// and the recorder reports the same code the caller receives.
+				status = http.StatusOK
+			}
+			httpMetrics.Observe(status, time.Since(start))
+		}()
 		id, err := uuid.Parse(r.Header.Get("X-Request-ID"))
 		if err != nil {
 			id = uuid.New()
@@ -196,4 +219,38 @@ func readyHandler(ping func(context.Context) error) http.Handler {
 		w.WriteHeader(code)
 		_ = json.NewEncoder(w).Encode(status)
 	})
+}
+
+// metricsHandler renders this service's Prometheus surface. The renderers are
+// passed in so the process signals are appended without this function knowing
+// which families exist, and a scrape carries no bearer token: the route is
+// answered before authentication, exactly like the health checks.
+func metricsHandler(render ...func() string) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/plain; version=0.0.4")
+		for _, part := range render {
+			fmt.Fprint(w, part())
+		}
+	})
+}
+
+// statusRecorder captures the status code a request was answered with, so the
+// middleware can count responses by class and time the request without changing
+// any handler. A handler that writes a body without calling WriteHeader reports
+// 200, which is the code net/http itself sends.
+type statusRecorder struct {
+	http.ResponseWriter
+	status int
+}
+
+func (r *statusRecorder) WriteHeader(code int) {
+	r.status = code
+	r.ResponseWriter.WriteHeader(code)
+}
+
+func (r *statusRecorder) Write(body []byte) (int, error) {
+	if r.status == 0 {
+		r.status = http.StatusOK
+	}
+	return r.ResponseWriter.Write(body)
 }
