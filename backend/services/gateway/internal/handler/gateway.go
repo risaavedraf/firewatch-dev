@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"firewatch.local/gateway/internal/limit"
+	"firewatch.local/gateway/internal/metrics"
 	"github.com/coreos/go-oidc/v3/oidc"
 )
 
@@ -79,8 +80,14 @@ func New(verifier Verifier, jobs, risk *url.URL, webOrigin string) http.Handler 
 		Idle:   subjectIdle,
 	}, limit.SystemClock)
 	anonymous := limit.NewBucket(limit.Policy{Rate: anonymousRate, Burst: anonymousBurst}, limit.SystemClock)
+	httpMetrics := &metrics.HTTPMetrics{}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
+		// Every response of this chain, including the error and health answers, is
+		// timed and bucketed by class through one wrapper. The real writer stays
+		// reachable through Unwrap, so the proxy's flush still works.
+		recorder := &statusRecorder{ResponseWriter: w}
+		w = recorder
 		// S4: one correlation id, one format. This is the canonical dashed UUID
 		// string the jobs and risk services emit: they parse the value forwarded
 		// here and write back id.String(), and the JSON error body, the exposed
@@ -95,7 +102,16 @@ func New(verifier Verifier, jobs, risk *url.URL, webOrigin string) http.Handler 
 		w.Header().Set("Cache-Control", "no-store")
 		w.Header().Set("Content-Security-Policy", "default-src 'none'; style-src 'self'; script-src 'self'; connect-src 'self' http://localhost:8081; img-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'")
 		defer func() {
-			slog.Info("request", "request_id", id, "method", r.Method, "duration_ms", time.Since(start).Milliseconds())
+			duration := time.Since(start)
+			slog.Info("request", "request_id", id, "method", r.Method, "duration_ms", duration.Milliseconds())
+			// Observed after the response is written, so a scrape never renders its
+			// own request inside the body it is producing; that sample lands in the
+			// next scrape, exactly like every other request.
+			status := recorder.status
+			if status == 0 {
+				status = http.StatusOK
+			}
+			httpMetrics.Observe(status, duration)
 		}()
 		// CORS is fail-closed: an unset origin never matches, and the request
 		// origin is compared exactly, so it is never echoed back unvalidated.
@@ -124,6 +140,16 @@ func New(verifier Verifier, jobs, risk *url.URL, webOrigin string) http.Handler 
 		}
 		if r.URL.Path == "/health/live" || r.URL.Path == "/health/ready" {
 			w.WriteHeader(204)
+			return
+		}
+		// /metrics is answered here, next to the health checks and before any
+		// quota or bearer check, for two reasons: a Prometheus scrape has no way to
+		// obtain a token, and monitoring must not consume the budgets that bound
+		// caller traffic. The body never includes the scrape that produced it.
+		if r.URL.Path == "/metrics" {
+			w.Header().Set("Content-Type", "text/plain; version=0.0.4")
+			fmt.Fprint(w, httpMetrics.Text())
+			fmt.Fprint(w, metrics.RuntimeText())
 			return
 		}
 		// The aggregate bound is the only pre-authentication quota: it protects
