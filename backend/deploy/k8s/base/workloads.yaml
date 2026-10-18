@@ -128,6 +128,51 @@ spec:
           livenessProbe:
             httpGet: {path: /health/live, port: http}
 ---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: prevention
+spec:
+  replicas: 2
+  selector:
+    matchLabels: {app: prevention}
+  template:
+    metadata:
+      labels: {app: prevention}
+    spec:
+      serviceAccountName: firewatch-app
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        seccompProfile: {type: RuntimeDefault}
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels: {app: prevention}
+      containers:
+        - name: prevention
+          image: firewatch/prevention:replace-before-deploy
+          # The contract fixes this service's own port; it is not 8080.
+          ports: [{name: http, containerPort: 8084}]
+          envFrom:
+            - configMapRef: {name: firewatch-config}
+            - secretRef: {name: prevention-runtime}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: [ALL]}
+          resources:
+            requests: {cpu: 100m, memory: 64Mi}
+            limits: {cpu: '1', memory: 256Mi}
+          readinessProbe:
+            httpGet: {path: /health/ready, port: http}
+          livenessProbe:
+            httpGet: {path: /health/live, port: http}
+---
 apiVersion: v1
 kind: Service
 metadata: {name: gateway}
@@ -148,6 +193,13 @@ metadata: {name: risk}
 spec:
   selector: {app: risk}
   ports: [{name: http, port: 8080, targetPort: http}]
+---
+apiVersion: v1
+kind: Service
+metadata: {name: prevention}
+spec:
+  selector: {app: prevention}
+  ports: [{name: http, port: 8084, targetPort: http}]
 ---
 apiVersion: policy/v1
 kind: PodDisruptionBudget
@@ -172,3 +224,11 @@ spec:
   minAvailable: 1
   selector:
     matchLabels: {app: risk}
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata: {name: prevention}
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels: {app: prevention}
