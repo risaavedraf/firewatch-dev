@@ -24,6 +24,10 @@ type Repository interface {
 	// geometry; a non-nil bbox asks for the ones intersecting it. An empty
 	// result is a valid answer, not an error.
 	ListZones(ctx context.Context, bbox *repository.BBox) ([]repository.Zone, error)
+	// ListModels reads the model registry for the version panel.
+	ListModels(ctx context.Context) ([]repository.ModelVersion, error)
+	// ActivateModel makes one version active and records its approval atomically.
+	ActivateModel(ctx context.Context, version string) (repository.ModelVersion, error)
 }
 
 // DescriptorProvider is the read-only description surface of the active publisher provider.
@@ -32,11 +36,19 @@ type DescriptorProvider interface {
 }
 
 func New(store Repository, verifier Verifier, providers ...DescriptorProvider) http.Handler {
-	return NewWithStatus(store, verifier, nil, providers...)
+	return NewWithCycle(store, verifier, nil, nil, providers...)
 }
 
 // NewWithStatus preserves the descriptor-only New API and its provider identity.
 func NewWithStatus(store Repository, verifier Verifier, check StatusCheck, providers ...DescriptorProvider) http.Handler {
+	return NewWithCycle(store, verifier, check, nil, providers...)
+}
+
+// NewWithCycle is the full constructor: it adds the 15 minute cycle to the read
+// routes. A nil runner keeps every existing route working and makes the manual
+// trigger answer cycle_unavailable, so a deployment that does not schedule a
+// cycle is still valid. The sources route (sources.go) carries the freshness.
+func NewWithCycle(store Repository, verifier Verifier, check StatusCheck, runner CycleRunner, providers ...DescriptorProvider) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /v1/risk/status", statusHandler(check))
 	get := func(latest bool) http.HandlerFunc {
@@ -81,11 +93,16 @@ func NewWithStatus(store Repository, verifier Verifier, check StatusCheck, provi
 	mux.HandleFunc("GET /v1/risk/history", get(false))
 	mux.HandleFunc("GET /v1/risk/zones", listZones(store))
 	mux.HandleFunc("GET /v1/risk/synthetic-scenarios", listSyntheticScenarios())
+	// Model registry: the list is a read route; activation is admin-only through
+	// requireAdmin, defined in security.go.
+	mux.HandleFunc("GET /v1/models", listModels(store))
+	mux.HandleFunc("POST /v1/models/{version}/activate", requireAdmin(activateModel(store)))
+	mux.HandleFunc("POST /v1/risk/cycle/run", requireAdmin(cycleRun(runner)))
 	var provider DescriptorProvider
 	if len(providers) == 1 {
 		provider = providers[0]
 	}
-	mux.HandleFunc("GET /v1/risk/sources", sources(provider))
+	mux.HandleFunc("GET /v1/risk/sources", sourcesWithCycle(provider, runner))
 	return Authorize(verifier, mux)
 }
 

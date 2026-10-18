@@ -60,6 +60,16 @@ func ParamsHash(params map[string]string) string {
 // operator change with no literal, is invisible to it (see Params).
 const AcademicRuleV1ParamsHash = "e17aaa5600eb67c9a91340e90057aec100f4e80ef0895662f373cffee66564c7"
 
+// FirewatchRuleV2ParamsHash is the frozen fingerprint of the effective parameter
+// set of firewatch-rule-v2, i.e. ParamsHash(DefaultFirewatchRuleV2Params().Parameters()).
+//
+// It is the golden guard of the second rule version. A second version exists
+// precisely so a behaviour change is a new, immutable identity rather than an
+// edit of the frozen academic-rule-v1: the migration records this fingerprint,
+// the registry refuses to attach the identifier to any other parameter set, and
+// TestFirewatchRuleV2ParametersAreFrozen fails if the numbers move.
+const FirewatchRuleV2ParamsHash = "59259c4c0c470e5a0d512fe09f6c748c38fd29f9bc5d760d49754555c66e699b"
+
 // Params is the complete, ordered set of numeric parameters that define the
 // behaviour of academic-rule-v1.
 //
@@ -129,6 +139,37 @@ func DefaultAcademicRuleV1Params() Params {
 		WeightHistorical:    0.15,
 		BandBajoMax:         0.34,
 		BandMedioMax:        0.67,
+	}
+}
+
+// DefaultFirewatchRuleV2Params returns the frozen default parameter set of
+// firewatch-rule-v2.
+//
+// It is a distinct, versioned parameter set on purpose: v2 is a second rule, not
+// a re-tuning of v1. Its numbers live only here, so a change moves
+// FirewatchRuleV2ParamsHash and forces a new version instead of silently
+// redefining a stored level. It shares the Params struct so the canonical map and
+// its fingerprint are derived by the same mechanical rule as v1.
+func DefaultFirewatchRuleV2Params() Params {
+	return Params{
+		MaxStalenessSeconds: 10800,
+		TemperatureLowC:     20,
+		TemperatureHighC:    34,
+		HumidityDryPct:      25,
+		HumidityWetPct:      55,
+		WindLowKmh:          15,
+		WindHighKmh:         55,
+		VegetationSparsePct: 15,
+		VegetationDensePct:  75,
+		HistoricalFiresLow:  0,
+		HistoricalFiresHigh: 6,
+		WeightTemperature:   0.30,
+		WeightHumidity:      0.30,
+		WeightWind:          0.20,
+		WeightVegetation:    0.10,
+		WeightHistorical:    0.10,
+		BandBajoMax:         0.30,
+		BandMedioMax:        0.60,
 	}
 }
 

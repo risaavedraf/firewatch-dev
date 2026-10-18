@@ -10,11 +10,16 @@ import (
 
 	"firewatch.local/contracts/geo"
 	observations "firewatch.local/contracts/observations/v1"
+	"firewatch.local/risk/internal/cycle"
 )
 
 type sourcesResponse struct {
 	Geography geographySource               `json:"geography"`
 	RiskInput observations.SourceDescriptor `json:"risk_input"`
+	// Sources is the per-source cycle state and freshness. It is always present
+	// and never null: with no runner configured it is an empty list, so the UI
+	// renders "no sources" without a special case.
+	Sources []cycle.SourceStatus `json:"sources"`
 }
 
 type geographySource struct {
@@ -80,10 +85,19 @@ func parseGeography(artifact, boundaries []byte) (geographySource, error) {
 }
 
 func sources(provider DescriptorProvider) http.HandlerFunc {
-	return sourcesFrom(provider, geo.ComunasProvenanceJSON, geo.ComunasGeoJSON)
+	return sourcesWithCycle(provider, nil)
+}
+
+// sourcesWithCycle serves the descriptor and the per-source cycle freshness.
+func sourcesWithCycle(provider DescriptorProvider, runner CycleRunner) http.HandlerFunc {
+	return sourcesFromWithCycle(provider, runner, geo.ComunasProvenanceJSON, geo.ComunasGeoJSON)
 }
 
 func sourcesFrom(provider DescriptorProvider, artifact, boundaries []byte) http.HandlerFunc {
+	return sourcesFromWithCycle(provider, nil, artifact, boundaries)
+}
+
+func sourcesFromWithCycle(provider DescriptorProvider, runner CycleRunner, artifact, boundaries []byte) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		geography, err := parseGeography(artifact, boundaries)
 		if err != nil {
@@ -99,6 +113,12 @@ func sourcesFrom(provider DescriptorProvider, artifact, boundaries []byte) http.
 			fail(w, http.StatusServiceUnavailable, "risk_source_unavailable")
 			return
 		}
-		respond(w, http.StatusOK, sourcesResponse{Geography: geography, RiskInput: descriptor})
+		statuses := []cycle.SourceStatus{}
+		if runner != nil {
+			if reported := runner.Statuses(); reported != nil {
+				statuses = reported
+			}
+		}
+		respond(w, http.StatusOK, sourcesResponse{Geography: geography, RiskInput: descriptor, Sources: statuses})
 	}
 }

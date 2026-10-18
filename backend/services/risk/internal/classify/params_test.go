@@ -552,16 +552,17 @@ func structuralViolations(name string, src []byte) ([]numericViolation, error) {
 }
 
 // defaultsCompositeRanges returns the range of the single composite literal that
-// DefaultAcademicRuleV1Params is allowed to return, plus a violation for every
+// each Default*Params function is allowed to return, plus a violation for every
 // occurrence whose body is not exactly that. The composite literal is the ONLY
-// place params.go may spell behaviour numbers, because those values ARE the
-// hashed parameters.
+// place a params file may spell behaviour numbers, because those values ARE the
+// hashed parameters. Every rule version gets its own Default*Params function, so
+// adding a version does not widen the exemption to any other function.
 func defaultsCompositeRanges(file *ast.File, fset *token.FileSet) ([]sourceRange, []numericViolation) {
 	var ranges []sourceRange
 	var violations []numericViolation
 	for _, decl := range file.Decls {
 		function, ok := decl.(*ast.FuncDecl)
-		if !ok || function.Body == nil || function.Name.Name != "DefaultAcademicRuleV1Params" {
+		if !ok || function.Body == nil || !isDefaultParamsFunction(function.Name.Name) {
 			continue
 		}
 		composite, ok := singleReturnComposite(function.Body)
@@ -569,13 +570,21 @@ func defaultsCompositeRanges(file *ast.File, fset *token.FileSet) ([]sourceRange
 			violations = append(violations, numericViolation{
 				position: fset.Position(function.Body.Pos()),
 				literal:  "(body)",
-				reason:   "DefaultAcademicRuleV1Params must be exactly one return statement whose single result is one composite literal: any other statement is a place to hide behaviour outside the hashed parameters",
+				reason:   function.Name.Name + " must be exactly one return statement whose single result is one composite literal: any other statement is a place to hide behaviour outside the hashed parameters",
 			})
 			continue
 		}
 		ranges = append(ranges, sourceRange{start: composite.Pos(), end: composite.End()})
 	}
 	return ranges, violations
+}
+
+// isDefaultParamsFunction reports whether a function is one of the versioned
+// parameter-set constructors whose single composite return is the only place
+// behaviour numbers may be spelled. It matches DefaultAcademicRuleV1Params and
+// DefaultFirewatchRuleV2Params alike, and nothing else.
+func isDefaultParamsFunction(name string) bool {
+	return strings.HasPrefix(name, "Default") && strings.HasSuffix(name, "Params")
 }
 
 // singleReturnComposite reports whether body is exactly `return <composite

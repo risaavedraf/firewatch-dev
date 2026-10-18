@@ -347,6 +347,49 @@ func TestPublishRefusesAnIncompleteRetrieval(t *testing.T) {
 	}
 }
 
+// TestPublishRefusesAProviderThatReturnedInvalidRecords protects S1's
+// "validate before use": a retrieval whose records fail the per-record rules
+// must not reach classification or storage, and the refusal must name the cause
+// so an operator can attribute it. The chosen provider is synthetic and the
+// retrieval is complete, so validation is the only guard that can refuse it.
+func TestPublishRefusesAProviderThatReturnedInvalidRecords(t *testing.T) {
+	descriptor := stubDescriptor(true)
+	records := source.FixtureRecords()
+	// One record with no unit is a missing required field; the other four stay
+	// valid, so the refusal is attributable to a single record.
+	records[0].Unit = ""
+	set := observations.ObservationSet{
+		Records:    records,
+		Provenance: source.ProvenanceFrom(descriptor),
+	}
+	set.Provenance.RetrievedAt = source.SampleInstant
+	set.Provenance.Complete = true
+	writer := &stubWriter{}
+	classifier := &countingClassifier{assessment: classify.Assessment{Level: classify.LevelMedio, Rationale: "stub"}}
+	err := (Publisher{
+		Provider:   stubProvider{descriptor: descriptor, set: set},
+		Classifier: classifier,
+		Store:      writer,
+	}).Publish(context.Background(), sampleRequest())
+
+	if err == nil {
+		t.Fatal("a retrieval with an invalid record was published")
+	}
+	if writer.calls != 0 {
+		t.Fatalf("the writer was reached %d times for an invalid retrieval", writer.calls)
+	}
+	if classifier.calls != 0 {
+		t.Fatalf("the classifier was reached %d times for an invalid retrieval", classifier.calls)
+	}
+	if !strings.Contains(err.Error(), string(source.CauseMissing)) || !strings.Contains(err.Error(), "unit") {
+		t.Fatalf("the refusal reason %q does not name the missing unit", err)
+	}
+	var permanent interface{ Permanent() bool }
+	if errors.As(err, &permanent) && permanent.Permanent() {
+		t.Fatalf("an invalid retrieval was classified as permanent: %v", err)
+	}
+}
+
 // countingClassifier records whether the classifier was reached, so the ordering
 // of the publication path's guards can be asserted and not only its outcome.
 type countingClassifier struct {

@@ -233,7 +233,8 @@ func FrozenPolicyFingerprints() map[string]string {
 // the frozen-params test pins, so the identity check and the parameter guard
 // cannot disagree. The accessor returns a copy, so no caller can mutate it.
 var frozenPolicyFingerprints = map[string]string{
-	AcademicRuleV1ID: AcademicRuleV1ParamsHash,
+	AcademicRuleV1ID:  AcademicRuleV1ParamsHash,
+	FirewatchRuleV2ID: FirewatchRuleV2ParamsHash,
 }
 
 // ExpectedPolicyHash reports the frozen policy fingerprint for a classifier
