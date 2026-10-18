@@ -52,6 +52,20 @@ type matrixStore struct {
 	lastTransTo  string
 	lastActorSub string
 	traceSeen    string
+
+	// evidenceSufficient mirrors the guard the real store evaluates inside the
+	// row-locked transaction: accepting an action is refused unless the current
+	// evidence snapshot carries a sufficient human review.
+	evidenceSufficient bool
+
+	addEvidenceCalls     int
+	reviewCalls          int
+	linkCalls            int
+	lastEvidenceInput    repository.NewEvidence
+	lastReviewInput      repository.NewReview
+	lastReviewEvidenceID int64
+	lastLinkJobID        string
+	lastLinkLinkedBy     string
 }
 
 func (s *matrixStore) List(_ context.Context, communityCode, status string) ([]repository.Action, error) {
@@ -85,7 +99,9 @@ func (s *matrixStore) Get(_ context.Context, id string) (repository.Detail, erro
 }
 
 // Transition mirrors the store's guarded transaction: refuse without writing, or
-// advance and append exactly one history row.
+// advance and append exactly one history row. Accepting an action additionally
+// consults the same sufficiency fact the real store reads, so the route table
+// below exercises the guard instead of a mock's optimism.
 func (s *matrixStore) Transition(_ context.Context, id, to, actorSub, note string) (repository.Action, error) {
 	s.transitions++
 	s.lastTransID, s.lastTransTo, s.lastActorSub = id, to, actorSub
@@ -96,6 +112,9 @@ func (s *matrixStore) Transition(_ context.Context, id, to, actorSub, note strin
 	if !state.CanTransition(s.status, state.State(to)) {
 		return repository.Action{}, repository.ErrInvalidTransition
 	}
+	if state.State(to) == state.Aceptada && !s.evidenceSufficient {
+		return repository.Action{}, repository.ErrEvidenceInsufficient
+	}
 	from := s.status
 	s.status = state.State(to)
 	s.history = append(s.history, repository.History{
@@ -104,6 +123,37 @@ func (s *matrixStore) Transition(_ context.Context, id, to, actorSub, note strin
 	})
 	s.action.ID, s.action.Status = id, to
 	return s.action, nil
+}
+
+// The three evidence methods record what the route passed and answer a fixture.
+// The route tests assert the transport half; the SQL rules are covered by the
+// repository integration tests when a disposable database is present.
+func (s *matrixStore) AddEvidence(_ context.Context, id string, input repository.NewEvidence) (repository.Evidence, error) {
+	s.addEvidenceCalls++
+	s.lastEvidenceInput = input
+	if s.err != nil {
+		return repository.Evidence{}, s.err
+	}
+	return repository.Evidence{ID: 1, ActionID: id, Criterion: input.Criterion, References: input.References, CreatedBy: input.CreatedBy}, nil
+}
+
+func (s *matrixStore) ReviewEvidence(_ context.Context, id string, evidenceID int64, input repository.NewReview) (repository.EvidenceReview, error) {
+	s.reviewCalls++
+	s.lastReviewEvidenceID = evidenceID
+	s.lastReviewInput = input
+	if s.err != nil {
+		return repository.EvidenceReview{}, s.err
+	}
+	return repository.EvidenceReview{ID: 1, ActionID: id, EvidenceID: evidenceID, Decision: input.Decision, ReviewerSub: input.ReviewerSub, Note: input.Note}, nil
+}
+
+func (s *matrixStore) LinkReassessment(_ context.Context, id, jobID, linkedBy string) (repository.Reassessment, error) {
+	s.linkCalls++
+	s.lastLinkJobID, s.lastLinkLinkedBy = jobID, linkedBy
+	if s.err != nil {
+		return repository.Reassessment{}, s.err
+	}
+	return repository.Reassessment{ID: 1, ActionID: id, JobID: jobID, BatchID: "batch-1", Version: "academic-rule-v1", RiskLevel: "medio", ZoneID: "valparaiso-demo", Synthetic: true, LinkedBy: linkedBy}, nil
 }
 
 // signingFixture publishes one RS256 key, exactly as the production verifier does.
@@ -227,7 +277,7 @@ func TestTransitionRouteMatchesTheFrozenContract(t *testing.T) {
 		for _, to := range states {
 			name := fmt.Sprintf("%s_to_%s", from, to)
 			t.Run(name, func(t *testing.T) {
-				store := &matrixStore{status: from, action: repository.Action{ID: fixedActionID, Status: string(from)}}
+				store := &matrixStore{status: from, action: repository.Action{ID: fixedActionID, Status: string(from)}, evidenceSufficient: true}
 				h, signer := app(t, store)
 				w := requestWith(t, h, http.MethodPost,
 					"/v1/prevention/actions/"+fixedActionID+"/transitions",

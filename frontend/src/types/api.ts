@@ -179,4 +179,48 @@ export interface ActionHistoryEntry {
 
 export interface PreventiveActionDetail extends PreventiveAction {
   history: ActionHistoryEntry[];
+  // The S2 append-only collections. The server always sends them on the detail
+  // route (never on the list route).
+  evidence: PreventiveEvidence[];
+  evidence_reviews: PreventiveEvidenceReview[];
+  reassessments: PreventiveReassessment[];
+  // Server-computed: the CURRENT evidence snapshot carries a sufficient human
+  // review. The transition route remains the authority on acceptance.
+  evidence_sufficient: boolean;
+}
+
+export interface PreventiveEvidence {
+  id?: number;
+  action_id?: string;
+  criterion: string;
+  references: string[];
+  created_by?: string;
+  created_at?: string;
+}
+
+export interface PreventiveEvidenceReview {
+  id?: number;
+  action_id?: string;
+  evidence_id: number;
+  decision: string;
+  reviewer_sub?: string;
+  note?: string;
+  reviewed_at?: string;
+}
+
+export interface PreventiveReassessment {
+  id?: number;
+  action_id?: string;
+  job_id: string;
+  batch_id: string;
+  version: string;
+  risk_level: string;
+  zone_id: string;
+  synthetic: boolean;
+  // Always false: a synthetic classification is never causal proof of risk
+  // reduction.
+  causal_proof: boolean;
+  batch_published_at?: string;
+  linked_by?: string;
+  linked_at?: string;
 }

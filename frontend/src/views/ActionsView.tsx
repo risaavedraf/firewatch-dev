@@ -1,19 +1,35 @@
-import { useEffect, useState, type FormEvent } from 'react';
+import { useEffect, useRef, useState, type FormEvent } from 'react';
 
 import { idleCopy } from '../app/sessionCopy';
 import { useSessionState } from '../app/store';
 import { PanelHeading, StatusCopy } from '../components/ui';
+import { timing } from '../config';
 import {
+  createJob,
   createPreventiveAction,
+  job as readJob,
+  linkPreventiveReassessment,
   preventiveAction,
   preventiveActions,
+  recordPreventiveEvidence,
+  reviewPreventiveEvidence,
+  scenarios,
   transitionPreventiveAction,
   type Failure,
   type Outcome,
 } from '../core/api';
 import { getSessionSnapshot, subscribeSession } from '../core/session';
-import { actionStatusLabel, declaresAdminRole, transitionAffordances } from '../domain';
-import type { PreventiveAction, PreventiveActionDetail } from '../types/api';
+import {
+  actionStatusLabel,
+  declaresAdminRole,
+  evidenceDecisionLabel,
+  isEvidenceReference,
+  parseEvidenceReferences,
+  REASSESSMENT_DISCLAIMER,
+  sufficiencyCopy,
+  transitionAffordances,
+} from '../domain';
+import type { PreventiveAction, PreventiveActionDetail, Scenario } from '../types/api';
 
 // S3 / T12 — the preventive-action view, built against the frozen contract in
 // `odd/tasks/presentation-client-ready.md` §«Contrato congelado de prevention».
@@ -59,6 +75,9 @@ const LIST_ACTION = 'listar las acciones preventivas';
 const CREATE_ACTION = 'crear la acción preventiva';
 const DETAIL_ACTION = 'consultar el detalle de la acción';
 const TRANSITION_ACTION = 'aplicar la transición';
+const EVIDENCE_ACTION = 'registrar la evidencia';
+const REVIEW_ACTION = 'registrar la revisión de suficiencia';
+const REASSESS_ACTION = 'vincular la reevaluación sintética';
 
 interface FormState {
   communityCode: string;
@@ -78,6 +97,40 @@ const EMPTY_FORM: FormState = {
   dueDate: '',
 };
 
+// The synthetic-reassessment cycle the view renders. A job is requested through
+// the existing authenticated submission, polled with the same bounded timing, and
+// only a REAL published batch is linked. A failure keeps the job id so the link
+// can be retried without requesting a second job, and the view never claims an
+// association the server did not confirm. `actionId` is the action that
+// originated the cycle: the cycle is local observation only and belongs to that
+// action, so it is cleared when another action is selected and can never be
+// retried or rendered against that other action.
+type ReassessmentPhase = 'idle' | 'submitting' | 'polling' | 'linking' | 'linked' | 'failed';
+
+interface ReassessmentState {
+  phase: ReassessmentPhase;
+  message: string;
+  jobId: string;
+  actionId: string;
+  retryable: boolean;
+}
+
+const IDLE_REASSESSMENT: ReassessmentState = {
+  phase: 'idle',
+  message: '',
+  jobId: '',
+  actionId: '',
+  retryable: false,
+};
+
+// A 128-bit key from the platform CSPRNG, sent as the Idempotency-Key. It avoids
+// `crypto.randomUUID` so the same helper works under the test crypto stub.
+function idempotencyKey(): string {
+  const bytes = new Uint8Array(16);
+  crypto.getRandomValues(bytes);
+  return [...bytes].map(byte => byte.toString(16).padStart(2, '0')).join('');
+}
+
 function nonempty(value: unknown): value is string {
   return typeof value === 'string' && value.trim() !== '';
 }
@@ -95,6 +148,32 @@ function failureMessage(failure: Failure, action: string): string {
   switch (failure.reason) {
     case 'invalid_transition':
       return `La API rechazó la transición (${detail}). La acción no cambió de estado.`;
+    case 'insufficient_evidence':
+      return `La API rechazó la transición (${detail}): la evidencia vigente no tiene una revisión humana suficiente. La acción no cambió de estado ni de historial.`;
+    case 'stale_evidence':
+      return `La API rechazó la revisión (${detail}): la instantánea de evidencia dejó de ser la vigente. Revisa la evidencia actual antes de decidir.`;
+    case 'invalid_evidence_state':
+      return `La API rechazó la escritura de evidencia (${detail}): la acción es terminal y su evidencia quedó congelada.`;
+    case 'evidence_not_found':
+      return `La API no encontró la instantánea de evidencia (${detail}).`;
+    case 'invalid_evidence_id':
+      return `El identificador de la instantánea de evidencia no es válido (${detail}).`;
+    case 'invalid_evidence_request':
+      return `La API rechazó la evidencia (${detail}); el criterio debe ser no vacío y cada referencia una URL http o https sin credenciales.`;
+    case 'invalid_review_request':
+      return `La API rechazó la revisión (${detail}); la decisión debe ser suficiente o insuficiente.`;
+    case 'invalid_reassessment_request':
+      return `La API rechazó la reevaluación (${detail}); solo se envía el job_id que produjo el servidor.`;
+    case 'reassessment_unavailable':
+      return `La API aún no encuentra un lote publicado para el trabajo (${detail}). Puedes reintentar la vinculación; no se registró ninguna asociación.`;
+    case 'reassessment_not_synthetic':
+      return `La API rechazó la vinculación (${detail}): el lote no es una clasificación sintética y esta función solo admite reevaluaciones sintéticas.`;
+    case 'reassessment_commune_mismatch':
+      return `La API rechazó la vinculación (${detail}): el lote pertenece a otra comunidad.`;
+    case 'reassessment_not_new':
+      return `La API rechazó la vinculación (${detail}): el lote es anterior a la evidencia o a su última revisión, así que no puede presentarse como posterior.`;
+    case 'reassessment_already_linked':
+      return `La API rechazó la vinculación (${detail}): ese trabajo ya está vinculado.`;
     case 'invalid_transition_request':
       return `La API rechazó la transición (${detail}): el estado destino no está declarado por el contrato. La acción no cambió de estado.`;
     case 'invalid_action_request':
@@ -200,6 +279,47 @@ export function ActionsView() {
   const [revision, setRevision] = useState(0);
   const [detailRevision, setDetailRevision] = useState(0);
   const [busy, setBusy] = useState(false);
+  const [evidenceCriterion, setEvidenceCriterion] = useState('');
+  const [evidenceReferences, setEvidenceReferences] = useState('');
+  const [reviewNote, setReviewNote] = useState('');
+  const [catalogue, setCatalogue] = useState<readonly Scenario[] | null>(null);
+  const [scenarioId, setScenarioId] = useState('');
+  const [reassessment, setReassessment] = useState<ReassessmentState>(IDLE_REASSESSMENT);
+
+  // The reassessment cycle is fenced by a sequence number, one abortable
+  // controller and the originating action id, so an answer for a previous action
+  // or a closed session can never overwrite the current state.
+  const mountedRef = useRef(true);
+  const reassessmentSequence = useRef(0);
+  const reassessmentController = useRef<AbortController | null>(null);
+  // The action that owns the in-flight cycle, and the action currently selected.
+  // The refs are read from async callbacks, where the rendered state is stale.
+  const reassessmentAction = useRef('');
+  const selectedIdRef = useRef(selectedId);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      reassessmentSequence.current += 1;
+      reassessmentController.current?.abort();
+    };
+  }, []);
+
+  // Selecting another action clears the local reassessment cycle and fences its
+  // late callbacks. This is local observation only: it never cancels the server
+  // job or the link already requested for the originating action. The cycle is
+  // not restored when the user returns to that action, exactly because it was
+  // never a server guarantee; the detail will show whatever the server linked.
+  useEffect(() => {
+    selectedIdRef.current = selectedId;
+    if (reassessmentAction.current === '' || reassessmentAction.current === selectedId) return;
+    reassessmentSequence.current += 1;
+    reassessmentController.current?.abort();
+    reassessmentController.current = null;
+    reassessmentAction.current = '';
+    setReassessment(IDLE_REASSESSMENT);
+  }, [selectedId]);
 
   // The list, re-read on every session, filter and revision change. A refused
   // token closes the session from inside the transport, so the refusal is
@@ -256,6 +376,10 @@ export function ActionsView() {
       subscribeSession(() => {
         if (getSessionSnapshot().status === 'signed-in') return;
         const reason = getSessionSnapshot().reason;
+        reassessmentSequence.current += 1;
+        reassessmentController.current?.abort();
+        reassessmentController.current = null;
+        reassessmentAction.current = '';
         setList(IDLE_LIST);
         setSelectedId('');
         setDetail(null);
@@ -265,6 +389,12 @@ export function ActionsView() {
         setStatusFilter('');
         setApplied({ communityCode: '', status: '' });
         setBusy(false);
+        setEvidenceCriterion('');
+        setEvidenceReferences('');
+        setReviewNote('');
+        setCatalogue(null);
+        setScenarioId('');
+        setReassessment(IDLE_REASSESSMENT);
         if (reason !== 'rejected') setNotice('');
       }),
     [],
@@ -273,6 +403,24 @@ export function ActionsView() {
   function reload(): void {
     setRevision(value => value + 1);
   }
+
+  // The synthetic-scenario catalogue is fetched once per connection and is only
+  // an optional convenience: an unavailable catalogue leaves the picker empty and
+  // the request simply omits scenario_id, exactly like JobsView.
+  useEffect(() => {
+    if (!signedIn) return undefined;
+    const controller = new AbortController();
+    let active = true;
+    void (async () => {
+      const outcome = await scenarios(controller.signal);
+      if (!active) return;
+      setCatalogue(outcome.ok ? outcome.data : null);
+    })();
+    return () => {
+      active = false;
+      controller.abort();
+    };
+  }, [signedIn]);
 
   function applyFilters(event: FormEvent<HTMLFormElement>): void {
     event.preventDefault();
@@ -331,6 +479,187 @@ export function ActionsView() {
     })();
   }
 
+  function submitEvidence(event: FormEvent<HTMLFormElement>): void {
+    event.preventDefault();
+    if (!signedIn || !admin || busy || selectedId === '') return;
+    const criterion = evidenceCriterion.trim();
+    const references = parseEvidenceReferences(evidenceReferences);
+    if (criterion === '') {
+      setNotice('Registra el criterio de suficiencia antes de guardar la evidencia.');
+      return;
+    }
+    if (references.length === 0) {
+      setNotice('Registra al menos un enlace de evidencia (una URL http o https por línea).');
+      return;
+    }
+    const invalid = references.find(reference => !isEvidenceReference(reference));
+    if (invalid !== undefined) {
+      setNotice(
+        `El enlace «${invalid}» no es una referencia válida: debe ser http o https, con host y sin credenciales incrustadas. El servidor lo revalidará.`,
+      );
+      return;
+    }
+    setBusy(true);
+    setNotice('');
+    void (async () => {
+      const outcome = await recordPreventiveEvidence(selectedId, { criterion, references });
+      setBusy(false);
+      if (!outcome.ok) {
+        setNotice(failureMessage(outcome.failure, EVIDENCE_ACTION));
+        return;
+      }
+      setEvidenceCriterion('');
+      setEvidenceReferences('');
+      setReviewNote('');
+      setNotice(
+        `Evidencia registrada (instantánea ${outcome.data.id}). Una aprobación anterior queda obsoleta hasta que se revise esta instantánea.`,
+      );
+      setDetailRevision(value => value + 1);
+      reload();
+    })();
+  }
+
+  function submitReview(decision: 'suficiente' | 'insuficiente'): void {
+    if (!signedIn || !admin || busy || selectedId === '' || currentEvidence === null) return;
+    setBusy(true);
+    setNotice('');
+    void (async () => {
+      const outcome = await reviewPreventiveEvidence(selectedId, currentEvidence.id ?? 0, {
+        decision,
+        note: reviewNote,
+      });
+      setBusy(false);
+      if (!outcome.ok) {
+        setNotice(failureMessage(outcome.failure, REVIEW_ACTION));
+        return;
+      }
+      setReviewNote('');
+      setNotice(
+        `Decisión registrada por el servidor: la evidencia vigente quedó como ${evidenceDecisionLabel(outcome.data.decision)}.`,
+      );
+      setDetailRevision(value => value + 1);
+      reload();
+    })();
+  }
+
+  async function linkReassessment(jobId: string, actionId: string, sequence: number): Promise<void> {
+    setReassessment({
+      phase: 'linking',
+      message: 'Lote publicado; vinculando la reevaluación…',
+      jobId,
+      actionId,
+      retryable: false,
+    });
+    const outcome = await linkPreventiveReassessment(actionId, { jobId });
+    // The link belongs to the originating action and was already requested from
+    // the server. Only its LOCAL observation is fenced: a late answer for another
+    // action must not render here, and it must not refresh the newly selected
+    // action's detail either.
+    if (!mountedRef.current || sequence !== reassessmentSequence.current || reassessmentAction.current !== actionId) return;
+    if (!outcome.ok) {
+      setReassessment({ phase: 'failed', message: failureMessage(outcome.failure, REASSESS_ACTION), jobId, actionId, retryable: true });
+      return;
+    }
+    setReassessment({
+      phase: 'linked',
+      message: `Reevaluación vinculada al lote ${outcome.data.batch_id} · versión ${outcome.data.version} · riesgo ${outcome.data.risk_level}.`,
+      jobId,
+      actionId,
+      retryable: false,
+    });
+    // Refresh the detail only while the originating action is still the selected
+    // one, so a late success never re-reads or repaints another action.
+    if (selectedIdRef.current !== actionId) return;
+    setDetailRevision(value => value + 1);
+    reload();
+  }
+
+  async function trackReassessment(jobId: string, actionId: string): Promise<void> {
+    const sequence = reassessmentSequence.current + 1;
+    reassessmentSequence.current = sequence;
+    reassessmentAction.current = actionId;
+    const controller = new AbortController();
+    reassessmentController.current = controller;
+    const owns = (): boolean =>
+      mountedRef.current && sequence === reassessmentSequence.current && reassessmentAction.current === actionId;
+    setReassessment({
+      phase: 'polling',
+      message: 'Trabajo sintético solicitado; esperando a que el servidor publique el lote…',
+      jobId,
+      actionId,
+      retryable: false,
+    });
+    for (let attempt = 0; attempt < timing.maxPollAttempts; attempt += 1) {
+      const read = await readJob(jobId, controller.signal);
+      if (!owns()) return;
+      if (!read.ok) {
+        if (read.failure.kind === 'unauthorized') return;
+        setReassessment({ phase: 'failed', message: failureMessage(read.failure, REASSESS_ACTION), jobId, actionId, retryable: true });
+        return;
+      }
+      if (read.data.state === 'published' && typeof read.data.batch_id === 'string' && read.data.batch_id !== '') {
+        await linkReassessment(jobId, actionId, sequence);
+        return;
+      }
+      await new Promise(resolve => setTimeout(resolve, timing.pollIntervalMs));
+    }
+    if (!owns()) return;
+    setReassessment({
+      phase: 'failed',
+      message:
+        'El trabajo no publicó un lote dentro del plazo. Puedes reintentar la vinculación sin volver a solicitarlo; no se registró ninguna asociación.',
+      jobId,
+      actionId,
+      retryable: true,
+    });
+  }
+
+  function startReassessment(): void {
+    if (!signedIn || !admin || busy || selected === null) return;
+    reassessmentController.current?.abort();
+    const controller = new AbortController();
+    reassessmentController.current = controller;
+    const actionId = selected.id;
+    const zoneId = selected.community_code;
+    // The cycle is bound to the action selected at this instant. A later create
+    // response is only observed while that same action still owns the cycle.
+    reassessmentAction.current = actionId;
+    setNotice('');
+    setReassessment({
+      phase: 'submitting',
+      message: 'Solicitando un trabajo de riesgo sintético para la comunidad de la acción…',
+      jobId: '',
+      actionId,
+      retryable: false,
+    });
+    void (async () => {
+      const outcome = await createJob(
+        { zoneId, scenarioId: scenarioId !== '' ? scenarioId : undefined, idempotencyKey: idempotencyKey() },
+        controller.signal,
+      );
+      if (!mountedRef.current || reassessmentAction.current !== actionId) return;
+      if (!outcome.ok) {
+        setReassessment({ phase: 'failed', message: failureMessage(outcome.failure, REASSESS_ACTION), jobId: '', actionId, retryable: true });
+        return;
+      }
+      await trackReassessment(outcome.data.id, actionId);
+    })();
+  }
+
+  function retryReassessment(): void {
+    if (!signedIn || !admin || selected === null) return;
+    // The retry belongs to the action that started the cycle and must be the one
+    // currently selected; a retained job is never sent to another action.
+    const actionId = reassessment.actionId;
+    if (actionId === '' || actionId !== selected.id) return;
+    if (reassessment.jobId === '') {
+      startReassessment();
+      return;
+    }
+    reassessmentController.current?.abort();
+    void trackReassessment(reassessment.jobId, selected.id);
+  }
+
   // Only the detail of the action currently selected is shown: a late answer for
   // a previous selection is a mismatch, not the new action's detail.
   const selected = detail !== null && detail.action !== null && detail.action.id === selectedId ? detail.action : null;
@@ -341,6 +670,17 @@ export function ActionsView() {
         ? detail?.message ?? ''
         : 'Consultando el detalle y el historial…';
   const transitions = selected === null ? [] : transitionAffordances(selected.status, session.roles, signedIn);
+  // The S2 facts the detail route reports. `currentEvidence` is the newest
+  // snapshot; the review controls act on exactly that one, never on an older one.
+  const evidence = selected?.evidence ?? [];
+  const currentEvidence = evidence.length > 0 ? evidence[evidence.length - 1] : null;
+  const evidenceSufficient = selected?.evidence_sufficient === true;
+  const acceptanceBlocked = !evidenceSufficient && transitions.some(item => item.to === 'aceptada');
+  // The reassessment panel shows only the cycle that belongs to the selected
+  // action. A cycle for another action is already cleared on selection, and this
+  // binding makes the rendered state independent of that timing.
+  const reassessmentForSelected =
+    selected !== null && reassessment.actionId === selected.id ? reassessment : IDLE_REASSESSMENT;
 
   const roleNote = !signedIn
     ? 'Conecta una sesión para operar: la página no concede permisos.'
@@ -541,6 +881,239 @@ export function ActionsView() {
             </table>
           </div>
 
+          <h4>Evidencia y suficiencia</h4>
+          <p id="actions-sufficiency" className="status-copy" role="status" aria-live="polite">
+            {selected !== null ? sufficiencyCopy(evidenceSufficient) : ''}
+          </p>
+          <div className="table-wrap">
+            <table id="action-evidence">
+              <caption className="sr-only">Instantáneas de evidencia registradas para la acción</caption>
+              <thead>
+                <tr>
+                  <th scope="col">Criterio</th>
+                  <th scope="col">Referencias</th>
+                  <th scope="col">Registrada por</th>
+                  <th scope="col">Fecha</th>
+                </tr>
+              </thead>
+              <tbody id="action-evidence-rows">
+                {evidence.length === 0 ? (
+                  <tr>
+                    <td colSpan={4}>
+                      Todavía no hay evidencia registrada. Un administrador define el criterio de suficiencia y registra
+                      las referencias; la decisión de suficiencia la registra una persona autorizada.
+                    </td>
+                  </tr>
+                ) : (
+                  evidence.map((item, index) => (
+                    <tr key={item.id ?? `evidence-${index}`}>
+                      <td>{field(item.criterion)}</td>
+                      <td>
+                        {item.references.length === 0 ? (
+                          'Sin referencias'
+                        ) : (
+                          <ul className="reference-list">
+                            {item.references.map(reference => (
+                              <li key={reference}>
+                                {isEvidenceReference(reference) ? (
+                                  <a href={reference} target="_blank" rel="noreferrer noopener">
+                                    {reference}
+                                  </a>
+                                ) : (
+                                  <span>{reference}</span>
+                                )}
+                              </li>
+                            ))}
+                          </ul>
+                        )}
+                      </td>
+                      <td>{field(item.created_by)}</td>
+                      <td>{field(item.created_at)}</td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+
+          <h4>Revisión humana de suficiencia</h4>
+          <div className="table-wrap">
+            <table id="action-evidence-reviews">
+              <caption className="sr-only">Decisiones humanas registradas sobre la evidencia</caption>
+              <thead>
+                <tr>
+                  <th scope="col">Instantánea</th>
+                  <th scope="col">Decisión</th>
+                  <th scope="col">Revisor</th>
+                  <th scope="col">Nota</th>
+                  <th scope="col">Fecha</th>
+                </tr>
+              </thead>
+              <tbody id="action-evidence-review-rows">
+                {(selected?.evidence_reviews ?? []).length === 0 ? (
+                  <tr>
+                    <td colSpan={5}>
+                      Todavía no hay decisiones registradas. La decisión es humana y el servidor guarda el revisor
+                      verificado y la fecha.
+                    </td>
+                  </tr>
+                ) : (
+                  (selected?.evidence_reviews ?? []).map((item, index) => (
+                    <tr key={item.id ?? `review-${index}`}>
+                      <td>{item.evidence_id}</td>
+                      <td>{evidenceDecisionLabel(item.decision)}</td>
+                      <td>{field(item.reviewer_sub)}</td>
+                      <td>{field(item.note)}</td>
+                      <td>{field(item.reviewed_at)}</td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+
+          <form className="actions-form actions-evidence-form" onSubmit={submitEvidence}>
+            <label htmlFor="evidence-criterion">
+              Criterio de suficiencia
+              <textarea
+                id="evidence-criterion"
+                value={evidenceCriterion}
+                disabled={!admin || busy}
+                onChange={event => setEvidenceCriterion(event.target.value)}
+              />
+            </label>
+            <label htmlFor="evidence-references">
+              Referencias de evidencia (una URL http o https por línea, sin credenciales)
+              <textarea
+                id="evidence-references"
+                value={evidenceReferences}
+                disabled={!admin || busy}
+                onChange={event => setEvidenceReferences(event.target.value)}
+              />
+            </label>
+            <button id="record-evidence" className="primary-button" type="submit" disabled={!admin || busy}>
+              Registrar evidencia
+            </button>
+          </form>
+
+          <label className="filter-label" htmlFor="review-note">
+            Nota de la revisión
+            <input
+              id="review-note"
+              type="text"
+              value={reviewNote}
+              disabled={!admin || busy || currentEvidence === null}
+              onChange={event => setReviewNote(event.target.value)}
+            />
+          </label>
+          <div className="actions-review" id="action-review-controls">
+            <button
+              id="review-suficiente"
+              type="button"
+              className="secondary-button"
+              disabled={!admin || busy || currentEvidence === null}
+              onClick={() => submitReview('suficiente')}
+            >
+              Suficiente
+            </button>
+            <button
+              id="review-insuficiente"
+              type="button"
+              className="secondary-button"
+              disabled={!admin || busy || currentEvidence === null}
+              onClick={() => submitReview('insuficiente')}
+            >
+              Insuficiente
+            </button>
+            <p className="panel-note" id="actions-review-note">
+              {currentEvidence === null
+                ? 'Registra al menos una instantánea de evidencia antes de revisar.'
+                : `La decisión se registrará sobre la instantánea vigente ${currentEvidence.id}. El servidor fija el revisor y la fecha.`}
+            </p>
+          </div>
+
+          <h4>Reevaluación sintética</h4>
+          <p className="panel-note" id="action-reassessment-disclaimer">
+            {REASSESSMENT_DISCLAIMER}
+          </p>
+          <label className="filter-label" htmlFor="reassessment-scenario">
+            Escenario sintético (opcional)
+            <select
+              id="reassessment-scenario"
+              value={scenarioId}
+              disabled={!admin || busy}
+              onChange={event => setScenarioId(event.target.value)}
+            >
+              <option value="">Perfil heredado del servidor</option>
+              {(catalogue ?? []).map(scenario => (
+                <option key={scenario.id} value={scenario.id}>
+                  {scenario.id}
+                </option>
+              ))}
+            </select>
+          </label>
+          <div className="actions-reassessment" id="action-reassessment-controls">
+            <button
+              id="request-reassessment"
+              type="button"
+              className="secondary-button"
+              disabled={!admin || busy || reassessmentForSelected.phase === 'submitting' || reassessmentForSelected.phase === 'polling' || reassessmentForSelected.phase === 'linking'}
+              onClick={startReassessment}
+            >
+              Solicitar reevaluación
+            </button>
+            {reassessmentForSelected.retryable ? (
+              <button
+                id="retry-reassessment"
+                type="button"
+                className="secondary-button"
+                disabled={!admin || busy}
+                onClick={retryReassessment}
+              >
+                Reintentar vinculación
+              </button>
+            ) : null}
+          </div>
+          <p id="reassessment-status" className="status-copy" role="status" aria-live="polite">
+            {reassessmentForSelected.message}
+          </p>
+          <div className="table-wrap">
+            <table id="action-reassessments">
+              <caption className="sr-only">Reevaluaciones sintéticas vinculadas a la acción</caption>
+              <thead>
+                <tr>
+                  <th scope="col">Lote</th>
+                  <th scope="col">Trabajo</th>
+                  <th scope="col">Versión</th>
+                  <th scope="col">Riesgo</th>
+                  <th scope="col">Publicado</th>
+                  <th scope="col">Vinculado por</th>
+                </tr>
+              </thead>
+              <tbody id="action-reassessment-rows">
+                {(selected?.reassessments ?? []).length === 0 ? (
+                  <tr>
+                    <td colSpan={6}>
+                      Todavía no hay reevaluaciones vinculadas. Una reevaluación solo se guarda cuando un trabajo real
+                      publica su lote y el servidor valida el lote, la comunidad y la versión.
+                    </td>
+                  </tr>
+                ) : (
+                  (selected?.reassessments ?? []).map((item, index) => (
+                    <tr key={item.id ?? `reassessment-${index}`}>
+                      <td>{field(item.batch_id)}</td>
+                      <td>{field(item.job_id)}</td>
+                      <td>{field(item.version)}</td>
+                      <td>{field(item.risk_level)}</td>
+                      <td>{field(item.batch_published_at)}</td>
+                      <td>{field(item.linked_by)}</td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+
           <h4>Transiciones</h4>
           <label className="filter-label" htmlFor="transition-note">
             Nota de la transición
@@ -565,7 +1138,8 @@ export function ActionsView() {
                   type="button"
                   className="secondary-button"
                   data-transition-to={item.to}
-                  disabled={!item.enabled || busy}
+                  disabled={!item.enabled || busy || (item.to === 'aceptada' && !evidenceSufficient)}
+                  aria-describedby={item.to === 'aceptada' && !evidenceSufficient ? 'actions-acceptance-note' : undefined}
                   onClick={() => applyTransition(item.to)}
                 >
                   {item.label}
@@ -573,6 +1147,12 @@ export function ActionsView() {
               ))
             )}
           </div>
+          {acceptanceBlocked ? (
+            <p className="panel-note" id="actions-acceptance-note">
+              Aceptar requiere una revisión de suficiencia vigente sobre la evidencia actual; el servidor rechazará la
+              transición mientras no exista.
+            </p>
+          ) : null}
         </article>
       ) : null}
 

@@ -20,6 +20,9 @@ import type {
   Job,
   PreventiveAction,
   PreventiveActionDetail,
+  PreventiveEvidence,
+  PreventiveEvidenceReview,
+  PreventiveReassessment,
   RiskBatch,
   Scenario,
   ServiceSnapshot,
@@ -65,6 +68,9 @@ type RequestKind =
   | 'preventiveAction'
   | 'createPreventiveAction'
   | 'transitionPreventiveAction'
+  | 'recordPreventiveEvidence'
+  | 'reviewPreventiveEvidence'
+  | 'linkPreventiveReassessment'
   | 'models';
 
 // The sequence is per kind on purpose: `latest` and `history` are issued
@@ -556,7 +562,64 @@ function isActionHistoryEntry(value: unknown): value is ActionHistoryEntry {
 
 function isPreventiveActionDetail(value: unknown): value is PreventiveActionDetail {
   if (!record(value)) return false;
-  return isPreventiveAction(value) && Array.isArray(value.history) && value.history.every(isActionHistoryEntry);
+  if (!isPreventiveAction(value) || !Array.isArray(value.history) || !value.history.every(isActionHistoryEntry)) {
+    return false;
+  }
+  // The S2 collections are required on the detail route. A detail without them is
+  // a contract change, and the page must fail closed instead of assuming an empty
+  // sufficiency state the server never sent.
+  if (!Array.isArray(value.evidence) || !value.evidence.every(isPreventiveEvidence)) return false;
+  if (!Array.isArray(value.evidence_reviews) || !value.evidence_reviews.every(isPreventiveEvidenceReview)) return false;
+  if (!Array.isArray(value.reassessments) || !value.reassessments.every(isPreventiveReassessment)) return false;
+  return typeof value.evidence_sufficient === 'boolean';
+}
+
+// The S2 records have their own closed shapes. Each validator fails closed so a
+// malformed snapshot, review or reassessment is never rendered as if the server
+// had produced it.
+function isPreventiveEvidence(value: unknown): value is PreventiveEvidence {
+  if (!record(value)) return false;
+  if (!nonempty(value.criterion)) return false;
+  if (!Array.isArray(value.references) || value.references.length === 0) return false;
+  if (!value.references.every(reference => typeof reference === 'string' && nonempty(reference))) return false;
+  return (
+    optionalNumber(value.id) &&
+    optionalString(value.action_id) &&
+    optionalString(value.created_by) &&
+    optionalString(value.created_at)
+  );
+}
+
+function isPreventiveEvidenceReview(value: unknown): value is PreventiveEvidenceReview {
+  if (!record(value)) return false;
+  if (!nonempty(value.decision)) return false;
+  if (typeof value.evidence_id !== 'number' || !Number.isInteger(value.evidence_id) || value.evidence_id <= 0) {
+    return false;
+  }
+  return (
+    optionalNumber(value.id) &&
+    optionalString(value.action_id) &&
+    optionalString(value.reviewer_sub) &&
+    optionalString(value.note) &&
+    optionalString(value.reviewed_at)
+  );
+}
+
+function isPreventiveReassessment(value: unknown): value is PreventiveReassessment {
+  if (!record(value)) return false;
+  if (!nonempty(value.job_id) || !nonempty(value.batch_id) || !nonempty(value.version)) return false;
+  if (!nonempty(value.risk_level) || !nonempty(value.zone_id)) return false;
+  if (typeof value.synthetic !== 'boolean') return false;
+  // A synthetic classification is never causal proof of risk reduction. A `true`
+  // here is a contract change, so it is refused instead of rendered as a claim.
+  if (value.causal_proof !== false) return false;
+  return (
+    optionalNumber(value.id) &&
+    optionalString(value.action_id) &&
+    optionalString(value.batch_published_at) &&
+    optionalString(value.linked_by) &&
+    optionalString(value.linked_at)
+  );
 }
 
 export async function preventiveActions(
@@ -659,6 +722,96 @@ export async function transitionPreventiveAction(
     return failureOutcome(failureSpec('malformed', 'invalid_shape', result.status, result.requestId));
   }
   if (result.body.id !== id) {
+    return failureOutcome(failureSpec('malformed', 'action_mismatch', result.status, result.requestId));
+  }
+  return { ok: true, data: result.body };
+}
+
+export interface PreventiveEvidenceInput {
+  readonly criterion: string;
+  readonly references: readonly string[];
+}
+
+// Appends one evidence snapshot. The body carries exactly the two documented
+// fields; a reference is a citation and is never fetched.
+export async function recordPreventiveEvidence(
+  id: string,
+  input: PreventiveEvidenceInput,
+  signal?: AbortSignal,
+): Promise<Outcome<PreventiveEvidence>> {
+  const result = await requestJson(
+    'recordPreventiveEvidence',
+    `${gatewayOrigin}${preventiveActionRoute(id)}/evidence`,
+    {
+      method: 'POST',
+      body: JSON.stringify({ criterion: input.criterion, references: input.references }),
+      headers: { 'Content-Type': 'application/json' },
+      authenticated: true,
+    },
+    signal,
+  );
+  if (result.state !== 'ok') return resultFailure<PreventiveEvidence>(result);
+  if (!isPreventiveEvidence(result.body)) {
+    return failureOutcome(failureSpec('malformed', 'invalid_shape', result.status, result.requestId));
+  }
+  if (result.body.action_id !== undefined && result.body.action_id !== id) {
+    return failureOutcome(failureSpec('malformed', 'action_mismatch', result.status, result.requestId));
+  }
+  return { ok: true, data: result.body };
+}
+
+// Appends one human decision about one named snapshot. The reviewer and the date
+// are server-set; the transport never sends an identity.
+export async function reviewPreventiveEvidence(
+  id: string,
+  evidenceId: number,
+  input: { decision: string; note?: string },
+  signal?: AbortSignal,
+): Promise<Outcome<PreventiveEvidenceReview>> {
+  const result = await requestJson(
+    'reviewPreventiveEvidence',
+    `${gatewayOrigin}${preventiveActionRoute(id)}/evidence/${encodeURIComponent(String(evidenceId))}/reviews`,
+    {
+      method: 'POST',
+      body: JSON.stringify({ decision: input.decision, note: input.note ?? '' }),
+      headers: { 'Content-Type': 'application/json' },
+      authenticated: true,
+    },
+    signal,
+  );
+  if (result.state !== 'ok') return resultFailure<PreventiveEvidenceReview>(result);
+  if (!isPreventiveEvidenceReview(result.body)) {
+    return failureOutcome(failureSpec('malformed', 'invalid_shape', result.status, result.requestId));
+  }
+  if (result.body.evidence_id !== evidenceId) {
+    return failureOutcome(failureSpec('malformed', 'evidence_mismatch', result.status, result.requestId));
+  }
+  return { ok: true, data: result.body };
+}
+
+// Persists the link to one real published batch. The client names only the job;
+// batch, version, risk level and the synthetic flag are server-derived.
+export async function linkPreventiveReassessment(
+  id: string,
+  input: { jobId: string },
+  signal?: AbortSignal,
+): Promise<Outcome<PreventiveReassessment>> {
+  const result = await requestJson(
+    'linkPreventiveReassessment',
+    `${gatewayOrigin}${preventiveActionRoute(id)}/reassessments`,
+    {
+      method: 'POST',
+      body: JSON.stringify({ job_id: input.jobId }),
+      headers: { 'Content-Type': 'application/json' },
+      authenticated: true,
+    },
+    signal,
+  );
+  if (result.state !== 'ok') return resultFailure<PreventiveReassessment>(result);
+  if (!isPreventiveReassessment(result.body)) {
+    return failureOutcome(failureSpec('malformed', 'invalid_shape', result.status, result.requestId));
+  }
+  if (result.body.action_id !== undefined && result.body.action_id !== id) {
     return failureOutcome(failureSpec('malformed', 'action_mismatch', result.status, result.requestId));
   }
   return { ok: true, data: result.body };
