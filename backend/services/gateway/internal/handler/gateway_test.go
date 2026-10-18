@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -22,7 +23,8 @@ func newTestGateway(t *testing.T, webOrigin string) http.Handler {
 	t.Helper()
 	jobs, _ := url.Parse("http://jobs.invalid")
 	risk, _ := url.Parse("http://risk.invalid")
-	return New(verifier{}, jobs, risk, webOrigin)
+	prevention, _ := url.Parse("http://prevention.invalid")
+	return New(verifier{}, jobs, risk, prevention, webOrigin)
 }
 
 type verifier struct{}
@@ -52,7 +54,7 @@ func TestGatewayFiltersIdentityHeadersAndInternalRoutes(t *testing.T) {
 	for _, tc := range []struct {
 		path, token string
 		want        int
-	}{{"/v1/jobs", "valid", 202}, {"/v1/jobs", "invalid", 401}, {"/metrics", "valid", 404}, {"/health/live", "", 204}, {"/health/ready", "", 204}} {
+	}{{"/v1/jobs", "valid", 202}, {"/v1/jobs", "invalid", 401}, {"/metrics", "valid", 200}, {"/health/live", "", 204}, {"/health/ready", "", 204}} {
 		r := httptest.NewRequest("GET", tc.path, nil)
 		r.Header.Set("Authorization", "Bearer "+tc.token)
 		r.Header.Set("X-User-ID", "root")
@@ -60,7 +62,7 @@ func TestGatewayFiltersIdentityHeadersAndInternalRoutes(t *testing.T) {
 		r.Header.Set("X-Forwarded-For", "127.0.0.1")
 		r.Header.Set("X-Request-ID", "spoofed")
 		w := httptest.NewRecorder()
-		New(verifier{}, u, u, "").ServeHTTP(w, r)
+		New(verifier{}, u, u, u, "").ServeHTTP(w, r)
 		if w.Code != tc.want {
 			t.Errorf("%s got %d want %d", tc.path, w.Code, tc.want)
 		}
@@ -251,7 +253,7 @@ func TestGatewayCarriesCORSOnUpstreamFailureFromConfiguredOrigin(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
 	target, _ := url.Parse(upstream.URL)
 	upstream.Close()
-	app := New(verifier{}, target, target, allowedOrigin)
+	app := New(verifier{}, target, target, target, allowedOrigin)
 
 	request := httptest.NewRequest(http.MethodGet, "/v1/jobs", nil)
 	request.Header.Set("Origin", allowedOrigin)
@@ -274,7 +276,7 @@ func TestGatewayPreflightsDoNotConsumeTheRateLimitBudget(t *testing.T) {
 	}))
 	defer upstream.Close()
 	target, _ := url.Parse(upstream.URL)
-	app := New(verifier{}, target, target, allowedOrigin)
+	app := New(verifier{}, target, target, target, allowedOrigin)
 
 	for burst := 0; burst < 200; burst++ {
 		request := httptest.NewRequest(http.MethodOptions, "/v1/jobs", nil)
@@ -415,7 +417,7 @@ func TestGatewayIsolatesAuthenticatedActorQuotas(t *testing.T) {
 	}))
 	defer upstream.Close()
 	target, _ := url.Parse(upstream.URL)
-	app := New(subjectVerifier{}, target, target, "")
+	app := New(subjectVerifier{}, target, target, target, "")
 
 	call := func(token string) int {
 		request := httptest.NewRequest(http.MethodGet, "/v1/jobs", nil)
@@ -451,7 +453,7 @@ func TestGatewayAggregateBoundRejectsWithRetryAfter(t *testing.T) {
 	}))
 	defer upstream.Close()
 	target, _ := url.Parse(upstream.URL)
-	app := New(subjectVerifier{}, target, target, "")
+	app := New(subjectVerifier{}, target, target, target, "")
 
 	var limited *httptest.ResponseRecorder
 	for i := 0; limited == nil && i < 500; i++ {
@@ -534,7 +536,7 @@ func TestGatewayHealthAndPreflightConsumeNoQuota(t *testing.T) {
 	}))
 	defer upstream.Close()
 	target, _ := url.Parse(upstream.URL)
-	app := New(subjectVerifier{}, target, target, allowedOrigin)
+	app := New(subjectVerifier{}, target, target, target, allowedOrigin)
 
 	for i := 0; i < 200; i++ {
 		preflight := httptest.NewRequest(http.MethodOptions, "/v1/jobs", nil)
@@ -622,7 +624,7 @@ func TestGatewayExposesExactlyOneCorrelationIDFromUpstreamResponses(t *testing.T
 			}))
 			defer upstream.Close()
 			target, _ := url.Parse(upstream.URL)
-			app := New(verifier{}, target, target, allowedOrigin)
+			app := New(verifier{}, target, target, target, allowedOrigin)
 
 			request := httptest.NewRequest(http.MethodGet, "/v1/audit", nil)
 			request.Header.Set("Origin", allowedOrigin)
@@ -679,5 +681,516 @@ func TestGatewayErrorBodyCarriesTheSameCorrelationIDAsTheHeader(t *testing.T) {
 	}
 	if body.RequestID != values[0] {
 		t.Errorf("body request_id got %q and header got %q, want the same literal", body.RequestID, values[0])
+	}
+}
+
+// S3 (T10): the gateway exposes its own /metrics. jobs and risk already do, and
+// the agreed p95 and error-rate alert rules are written against exactly these
+// series, so a gateway without them is the one hop of the request path that is
+// invisible when the page is slow or failing.
+//
+// The scrape carries no bearer token on purpose: a Prometheus job has no way to
+// obtain one, and /metrics is answered before the aggregate and anonymous
+// quotas so monitoring cannot be rate limited by, or push real traffic into,
+// the budgets those quotas bound.
+func TestGatewayExposesOperationalMetrics(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// The gateway does not author this 5xx: an upstream failure is the case
+		// the error series has to catch, so the class is read from the status
+		// actually written, not from what a handler decided.
+		if r.URL.Path == "/v1/audit" {
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+		w.WriteHeader(http.StatusAccepted)
+	}))
+	defer upstream.Close()
+	target, _ := url.Parse(upstream.URL)
+	app := New(verifier{}, target, target, target, allowedOrigin)
+
+	for _, tc := range []struct {
+		path, token string
+		want        int
+	}{
+		{"/v1/jobs", "valid", http.StatusAccepted},
+		{"/v1/audit", "valid", http.StatusInternalServerError},
+		{"/v1/jobs", "", http.StatusUnauthorized},
+		{"/v1/unknown", "valid", http.StatusNotFound},
+		{"/health/live", "", http.StatusNoContent},
+	} {
+		request := httptest.NewRequest(http.MethodGet, tc.path, nil)
+		if tc.token != "" {
+			request.Header.Set("Authorization", "Bearer "+tc.token)
+		}
+		if got := serve(app, request); got != tc.want {
+			t.Fatalf("%s got %d want %d", tc.path, got, tc.want)
+		}
+	}
+
+	scrape := httptest.NewRecorder()
+	app.ServeHTTP(scrape, httptest.NewRequest(http.MethodGet, "/metrics", nil))
+	if scrape.Code != http.StatusOK {
+		t.Fatalf("/metrics got %d want %d", scrape.Code, http.StatusOK)
+	}
+	if got := scrape.Header().Get("Content-Type"); got != "text/plain; version=0.0.4" {
+		t.Fatalf("/metrics Content-Type got %q want %q", got, "text/plain; version=0.0.4")
+	}
+	body := scrape.Body.String()
+	for _, want := range []string{
+		// Responses by class: the error classes are the "errors by class" signal.
+		"firewatch_http_responses_total{class=\"2xx\"} 2",
+		"firewatch_http_responses_total{class=\"3xx\"} 0",
+		"firewatch_http_responses_total{class=\"4xx\"} 2",
+		"firewatch_http_responses_total{class=\"5xx\"} 1",
+		"firewatch_http_errors_total 1",
+		// The latency histogram, cumulative and with the Prometheus sum/count pair.
+		"firewatch_http_request_duration_seconds_bucket{le=\"0.005\"} ",
+		"firewatch_http_request_duration_seconds_bucket{le=\"+Inf\"} 5",
+		"firewatch_http_request_duration_seconds_sum ",
+		"firewatch_http_request_duration_seconds_count 5",
+		// The process/runtime signals.
+		"firewatch_process_goroutines ",
+		"firewatch_process_cpu_seconds_total ",
+		"firewatch_process_memory_bytes ",
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("/metrics body %q does not contain %q", body, want)
+		}
+	}
+}
+
+// S3 (T10): a scrape must not be the thing that trips the rate limiter. The
+// anonymous and aggregate budgets exist to bound caller traffic; consuming them
+// with monitoring would let a busy Prometheus silence the page.
+func TestGatewayMetricsScrapeConsumesNoQuota(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusAccepted)
+	}))
+	defer upstream.Close()
+	target, _ := url.Parse(upstream.URL)
+	app := New(subjectVerifier{}, target, target, target, "")
+
+	for scrape := 0; scrape < 100; scrape++ {
+		response := httptest.NewRecorder()
+		app.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/metrics", nil))
+		if response.Code != http.StatusOK {
+			t.Fatalf("scrape %d got %d want %d", scrape, response.Code, http.StatusOK)
+		}
+	}
+
+	authenticated := httptest.NewRequest(http.MethodGet, "/v1/jobs", nil)
+	authenticated.Header.Set("Authorization", "Bearer actor-x")
+	if got := serve(app, authenticated); got != http.StatusAccepted {
+		t.Fatalf("authenticated request after a scrape burst got %d, want %d", got, http.StatusAccepted)
+	}
+	anonymous := httptest.NewRequest(http.MethodGet, "/v1/risk/latest", nil)
+	if got := serve(app, anonymous); got != http.StatusUnauthorized {
+		t.Fatalf("first anonymous request got %d, want %d", got, http.StatusUnauthorized)
+	}
+}
+
+// The middleware reads the status off a recorder wrapper. That reading has to
+// match the code net/http actually sends: a handler that writes a body without
+// calling WriteHeader answers 200, and a wrapper that reported 0 there would
+// silently drop that response out of the classes.
+func TestStatusRecorderReportsTheCodeNetHTTPSends(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		write func(http.ResponseWriter)
+		want  int
+	}{
+		{"explicit status", func(w http.ResponseWriter) { w.WriteHeader(http.StatusNoContent) }, http.StatusNoContent},
+		{"implicit 200", func(w http.ResponseWriter) { _, _ = w.Write([]byte("ok")) }, http.StatusOK},
+		{"nothing written", func(http.ResponseWriter) {}, http.StatusOK},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			recorder := &statusRecorder{ResponseWriter: httptest.NewRecorder()}
+			tc.write(recorder)
+			status := recorder.status
+			if status == 0 {
+				status = http.StatusOK
+			}
+			if status != tc.want {
+				t.Fatalf("recorded status %d want %d", status, tc.want)
+			}
+		})
+	}
+}
+
+// httputil.ReverseProxy flushes through http.NewResponseController, which only
+// finds the real writer if the wrapper lets it through. A wrapper that hid the
+// underlying ResponseWriter would turn every flush into an error and stall the
+// proxied responses the page waits on.
+func TestStatusRecorderKeepsTheWriterReachable(t *testing.T) {
+	inner := httptest.NewRecorder()
+	if err := http.NewResponseController(&statusRecorder{ResponseWriter: inner}).Flush(); err != nil {
+		t.Fatalf("flush through the recorder: %v", err)
+	}
+	if !inner.Flushed {
+		t.Fatal("the recorder swallowed the flush the reverse proxy relies on")
+	}
+}
+
+// T21: /v1/prevention/ is a route of its own to the prevention service, exactly
+// as /v1/jobs and /v1/risk are for theirs. All four frozen contract routes live
+// below that one prefix, so the single registration has to forward all four —
+// and none of them may be answered by jobs or risk, whose 404 would look like a
+// missing endpoint to the page.
+func TestGatewayRoutesEveryPreventionRouteToItsOwnUpstream(t *testing.T) {
+	const actionID = "0f0a0e4e-4b3c-4f8e-9a1d-6c2b8d5e7a90"
+
+	jobsHits, riskHits := 0, 0
+	jobsUpstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		jobsHits++
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer jobsUpstream.Close()
+	riskUpstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		riskHits++
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer riskUpstream.Close()
+
+	// Every request mints its own correlation id, so the upstream reports back
+	// what it was sent and this test matches it against the response.
+	forwarded := make(chan string, 8)
+	reached := make(chan string, 8)
+	preventionUpstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		reached <- r.Method + " " + r.URL.RequestURI()
+		if got := r.Header.Get("Authorization"); got != "Bearer valid" {
+			t.Errorf("prevention upstream got Authorization %q want the caller's bearer token", got)
+		}
+		if r.Header.Get("X-User-ID") != "" || r.Header.Get("X-User-Role") != "" || r.Header.Get("X-Forwarded-For") != "" {
+			t.Error("untrusted identity forwarded to prevention")
+		}
+		forwarded <- r.Header.Get("X-Request-ID")
+		// prevention re-stamps X-Request-ID on its responses, like jobs and risk.
+		w.Header().Set("X-Request-ID", asCanonicalUUID(r.Header.Get("X-Request-ID")))
+		w.WriteHeader(http.StatusCreated)
+	}))
+	defer preventionUpstream.Close()
+
+	jobsURL, _ := url.Parse(jobsUpstream.URL)
+	riskURL, _ := url.Parse(riskUpstream.URL)
+	preventionURL, _ := url.Parse(preventionUpstream.URL)
+	app := New(verifier{}, jobsURL, riskURL, preventionURL, allowedOrigin)
+
+	want := []string{
+		"GET /v1/prevention/actions?community_code=valparaiso-demo&status=propuesta",
+		"POST /v1/prevention/actions",
+		"GET /v1/prevention/actions/" + actionID,
+		"POST /v1/prevention/actions/" + actionID + "/transitions",
+	}
+	for index, tc := range []struct {
+		method, path, body string
+	}{
+		{http.MethodGet, "/v1/prevention/actions?community_code=valparaiso-demo&status=propuesta", ""},
+		{http.MethodPost, "/v1/prevention/actions", `{"community_code":"valparaiso-demo","title":"Cortafuegos"}`},
+		{http.MethodGet, "/v1/prevention/actions/" + actionID, ""},
+		{http.MethodPost, "/v1/prevention/actions/" + actionID + "/transitions", `{"to":"asignada","note":"turno noche"}`},
+	} {
+		var body io.Reader
+		if tc.body != "" {
+			body = strings.NewReader(tc.body)
+		}
+		request := httptest.NewRequest(tc.method, tc.path, body)
+		request.Header.Set("Origin", allowedOrigin)
+		request.Header.Set("Authorization", "Bearer valid")
+		request.Header.Set("X-User-ID", "root")
+		request.Header.Set("X-User-Role", "admin")
+		request.Header.Set("X-Forwarded-For", "127.0.0.1")
+		request.Header.Set("X-Request-ID", "spoofed")
+		response := httptest.NewRecorder()
+		app.ServeHTTP(response, request)
+
+		if response.Code != http.StatusCreated {
+			t.Errorf("%s %s got %d want %d: the route must reach prevention", tc.method, tc.path, response.Code, http.StatusCreated)
+			continue
+		}
+		// The response posture of the existing routes holds on this route too:
+		// CORS for the configured origin, and exactly one correlation id, the
+		// gateway's own rather than the one the upstream re-stamped.
+		if got := response.Header().Get("Access-Control-Allow-Origin"); got != allowedOrigin {
+			t.Errorf("%s %s Access-Control-Allow-Origin got %q want %q", tc.method, tc.path, got, allowedOrigin)
+		}
+		if exposed := response.Header().Get("Access-Control-Expose-Headers"); !headerAllowed(exposed, "X-Request-ID") {
+			t.Errorf("%s %s Access-Control-Expose-Headers got %q want it to expose X-Request-ID", tc.method, tc.path, exposed)
+		}
+		values := response.Header().Values("X-Request-ID")
+		if len(values) != 1 {
+			t.Errorf("%s %s X-Request-ID got %d values %q want exactly one", tc.method, tc.path, len(values), values)
+			continue
+		}
+		if !canonicalUUIDPattern.MatchString(values[0]) {
+			t.Errorf("%s %s X-Request-ID got %q want the canonical dashed UUID jobs and risk emit", tc.method, tc.path, values[0])
+		}
+		if sent := <-forwarded; asCanonicalUUID(sent) != values[0] {
+			t.Errorf("%s %s forwarded X-Request-ID %q and answered %q want the gateway's own id", tc.method, tc.path, sent, values[0])
+		}
+		if got := <-reached; got != want[index] {
+			t.Errorf("prevention upstream saw %q want %q", got, want[index])
+		}
+	}
+	if jobsHits != 0 || riskHits != 0 {
+		t.Errorf("prevention traffic reached another service: jobs %d risk %d want 0 and 0", jobsHits, riskHits)
+	}
+}
+
+// T21 regression guard: a fourth proxy must not move traffic that already had a
+// route. jobs keeps /v1/jobs and /v1/audit, risk keeps /v1/risk/, and the new
+// upstream answers none of them.
+func TestGatewayKeepsExistingRoutesOnTheirUpstreams(t *testing.T) {
+	jobsPaths := make(chan string, 4)
+	jobsUpstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		jobsPaths <- r.URL.Path
+		w.WriteHeader(http.StatusAccepted)
+	}))
+	defer jobsUpstream.Close()
+	riskPaths := make(chan string, 4)
+	riskUpstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		riskPaths <- r.URL.Path
+		w.WriteHeader(http.StatusAccepted)
+	}))
+	defer riskUpstream.Close()
+	preventionHits := 0
+	preventionUpstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		preventionHits++
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer preventionUpstream.Close()
+
+	jobsURL, _ := url.Parse(jobsUpstream.URL)
+	riskURL, _ := url.Parse(riskUpstream.URL)
+	preventionURL, _ := url.Parse(preventionUpstream.URL)
+	app := New(verifier{}, jobsURL, riskURL, preventionURL, allowedOrigin)
+
+	serveWithBearer := func(path string) int {
+		request := httptest.NewRequest(http.MethodGet, path, nil)
+		request.Header.Set("Authorization", "Bearer valid")
+		return serve(app, request)
+	}
+	for _, path := range []string{"/v1/jobs", "/v1/audit"} {
+		if got := serveWithBearer(path); got != http.StatusAccepted {
+			t.Errorf("%s got %d want %d", path, got, http.StatusAccepted)
+		}
+		if got := <-jobsPaths; got != path {
+			t.Errorf("jobs upstream saw %q want %q", got, path)
+		}
+	}
+	for _, path := range []string{"/v1/risk/latest", "/v1/risk/sources"} {
+		if got := serveWithBearer(path); got != http.StatusAccepted {
+			t.Errorf("%s got %d want %d", path, got, http.StatusAccepted)
+		}
+		if got := <-riskPaths; got != path {
+			t.Errorf("risk upstream saw %q want %q", got, path)
+		}
+	}
+	if preventionHits != 0 {
+		t.Errorf("prevention upstream saw %d requests for jobs or risk paths want 0", preventionHits)
+	}
+}
+
+// T21 (scope addition): the model panel reads the active version through this
+// gateway, because the page's CSP allows only this origin. `GET /v1/models` and
+// the admin activation below `POST /v1/models/{version}/activate` are therefore
+// routes of the risk service here, and they must reach risk and neither of the
+// other two upstreams — a 404 from the wrong service would look to the page
+// like a panel that does not exist.
+func TestGatewayRoutesModelRoutesToRisk(t *testing.T) {
+	const version = "firewatch-rule-v2"
+
+	riskSeen := make(chan string, 4)
+	riskUpstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		riskSeen <- r.Method + " " + r.URL.RequestURI()
+		if got := r.Header.Get("Authorization"); got != "Bearer valid" {
+			t.Errorf("risk upstream got Authorization %q want the caller's bearer token", got)
+		}
+		if r.Header.Get("X-User-ID") != "" || r.Header.Get("X-User-Role") != "" {
+			t.Error("untrusted identity forwarded to risk")
+		}
+		// risk re-stamps X-Request-ID on its responses, like jobs does.
+		w.Header().Set("X-Request-ID", asCanonicalUUID(r.Header.Get("X-Request-ID")))
+		w.WriteHeader(http.StatusAccepted)
+	}))
+	defer riskUpstream.Close()
+	jobsHits, preventionHits := 0, 0
+	jobsUpstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		jobsHits++
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer jobsUpstream.Close()
+	preventionUpstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		preventionHits++
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer preventionUpstream.Close()
+
+	jobsURL, _ := url.Parse(jobsUpstream.URL)
+	riskURL, _ := url.Parse(riskUpstream.URL)
+	preventionURL, _ := url.Parse(preventionUpstream.URL)
+	app := New(verifier{}, jobsURL, riskURL, preventionURL, allowedOrigin)
+
+	for _, tc := range []struct{ method, path, body string }{
+		{http.MethodGet, "/v1/models", ""},
+		{http.MethodPost, "/v1/models/" + version + "/activate", `{"note":"demo"}`},
+	} {
+		var body io.Reader
+		if tc.body != "" {
+			body = strings.NewReader(tc.body)
+		}
+		request := httptest.NewRequest(tc.method, tc.path, body)
+		request.Header.Set("Origin", allowedOrigin)
+		request.Header.Set("Authorization", "Bearer valid")
+		request.Header.Set("X-Request-ID", "spoofed")
+		response := httptest.NewRecorder()
+		app.ServeHTTP(response, request)
+
+		if response.Code != http.StatusAccepted {
+			t.Errorf("%s %s got %d want %d: the route must reach risk", tc.method, tc.path, response.Code, http.StatusAccepted)
+			continue
+		}
+		if got := <-riskSeen; got != tc.method+" "+tc.path {
+			t.Errorf("risk upstream saw %q want %q", got, tc.method+" "+tc.path)
+		}
+		if got := response.Header().Get("Access-Control-Allow-Origin"); got != allowedOrigin {
+			t.Errorf("%s %s Access-Control-Allow-Origin got %q want %q", tc.method, tc.path, got, allowedOrigin)
+		}
+		values := response.Header().Values("X-Request-ID")
+		if len(values) != 1 || !canonicalUUIDPattern.MatchString(values[0]) {
+			t.Errorf("%s %s X-Request-ID got %q want exactly one canonical dashed UUID", tc.method, tc.path, values)
+		}
+	}
+
+	// Triangulation: a path that merely starts like the routes above is not a
+	// route, and the bearer gate still comes first.
+	if got := serveAuthenticated(app, "/v1/models-archive"); got != http.StatusNotFound {
+		t.Errorf("/v1/models-archive got %d want %d", got, http.StatusNotFound)
+	}
+	anonymous := httptest.NewRequest(http.MethodGet, "/v1/models", nil)
+	if got := serve(app, anonymous); got != http.StatusUnauthorized {
+		t.Errorf("unauthenticated /v1/models got %d want %d", got, http.StatusUnauthorized)
+	}
+	if len(riskSeen) != 0 {
+		t.Errorf("risk upstream saw %d extra requests want 0", len(riskSeen))
+	}
+	if jobsHits != 0 || preventionHits != 0 {
+		t.Errorf("model traffic reached another service: jobs %d prevention %d want 0 and 0", jobsHits, preventionHits)
+	}
+}
+
+// T21: the risk proxy is the subtree pattern /v1/risk/, so every route below
+// that prefix is already forwarded — including the manual cycle trigger of T3,
+// which no separate registration has to cover.
+func TestGatewayRiskPrefixAlreadyCoversTheCycleRunRoute(t *testing.T) {
+	riskSeen := make(chan string, 2)
+	riskUpstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		riskSeen <- r.Method + " " + r.URL.Path
+		w.WriteHeader(http.StatusAccepted)
+	}))
+	defer riskUpstream.Close()
+	preventionHits := 0
+	preventionUpstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		preventionHits++
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer preventionUpstream.Close()
+
+	jobsURL, _ := url.Parse("http://jobs.invalid")
+	riskURL, _ := url.Parse(riskUpstream.URL)
+	preventionURL, _ := url.Parse(preventionUpstream.URL)
+	app := New(verifier{}, jobsURL, riskURL, preventionURL, "")
+
+	request := httptest.NewRequest(http.MethodPost, "/v1/risk/cycle/run", strings.NewReader(`{}`))
+	request.Header.Set("Authorization", "Bearer valid")
+	response := httptest.NewRecorder()
+	app.ServeHTTP(response, request)
+	if response.Code != http.StatusAccepted {
+		t.Fatalf("POST /v1/risk/cycle/run got %d want %d: it must reach risk", response.Code, http.StatusAccepted)
+	}
+	if got := <-riskSeen; got != "POST /v1/risk/cycle/run" {
+		t.Errorf("risk upstream saw %q want %q", got, "POST /v1/risk/cycle/run")
+	}
+	if preventionHits != 0 {
+		t.Errorf("prevention upstream saw %d cycle-run requests want 0", preventionHits)
+	}
+}
+
+// serveAuthenticated drives one authenticated GET through the gateway.
+func serveAuthenticated(app http.Handler, path string) int {
+	request := httptest.NewRequest(http.MethodGet, path, nil)
+	request.Header.Set("Authorization", "Bearer valid")
+	return serve(app, request)
+}
+func TestGatewayKeepsPreventionRoutePostureOnGatewayErrors(t *testing.T) {
+	app := newTestGateway(t, allowedOrigin)
+
+	unauthorized := httptest.NewRecorder()
+	unauthorizedRequest := httptest.NewRequest(http.MethodGet, "/v1/prevention/actions?community_code=valparaiso-demo", nil)
+	unauthorizedRequest.Header.Set("Origin", allowedOrigin)
+	app.ServeHTTP(unauthorized, unauthorizedRequest)
+	if unauthorized.Code != http.StatusUnauthorized {
+		t.Fatalf("unauthenticated /v1/prevention/actions got %d want %d", unauthorized.Code, http.StatusUnauthorized)
+	}
+	if got := unauthorized.Header().Get("Access-Control-Allow-Origin"); got != allowedOrigin {
+		t.Errorf("401 on the prevention route must carry the configured origin, got %q", got)
+	}
+	if exposed := unauthorized.Header().Get("Access-Control-Expose-Headers"); !headerAllowed(exposed, "X-Request-ID") {
+		t.Errorf("401 on the prevention route Access-Control-Expose-Headers got %q want it to expose X-Request-ID", exposed)
+	}
+	var body struct {
+		RequestID string `json:"request_id"`
+	}
+	if err := json.NewDecoder(unauthorized.Body).Decode(&body); err != nil {
+		t.Fatalf("decode the 401 body of the prevention route: %v", err)
+	}
+	if want := unauthorized.Header().Get("X-Request-ID"); body.RequestID != want {
+		t.Errorf("401 body request_id got %q and header got %q, want the same literal", body.RequestID, want)
+	}
+
+	preflight := httptest.NewRequest(http.MethodOptions, "/v1/prevention/actions", nil)
+	preflight.Header.Set("Origin", allowedOrigin)
+	preflight.Header.Set("Access-Control-Request-Method", http.MethodPost)
+	preflight.Header.Set("Access-Control-Request-Headers", "authorization, content-type")
+	preflightResponse := httptest.NewRecorder()
+	app.ServeHTTP(preflightResponse, preflight)
+	if preflightResponse.Code != http.StatusNoContent {
+		t.Fatalf("preflight of the prevention route got %d want %d", preflightResponse.Code, http.StatusNoContent)
+	}
+	// The allow-list is the same literal every other route answers with: the new
+	// route did not grow a CORS list of its own.
+	for header, want := range map[string]string{
+		"Access-Control-Allow-Origin":  allowedOrigin,
+		"Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+		"Access-Control-Allow-Headers": "Authorization, Content-Type, Idempotency-Key",
+		"Access-Control-Max-Age":       "600",
+		"Vary":                         "Origin",
+	} {
+		if got := preflightResponse.Header().Get(header); got != want {
+			t.Errorf("preflight of the prevention route %s got %q want %q", header, got, want)
+		}
+	}
+
+	unreachable := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	target, _ := url.Parse(unreachable.URL)
+	unreachable.Close()
+	jobs, _ := url.Parse("http://jobs.invalid")
+	risk, _ := url.Parse("http://risk.invalid")
+	broken := New(verifier{}, jobs, risk, target, allowedOrigin)
+	request := httptest.NewRequest(http.MethodPost, "/v1/prevention/actions", strings.NewReader(`{"title":"Cortafuegos"}`))
+	request.Header.Set("Origin", allowedOrigin)
+	request.Header.Set("Authorization", "Bearer valid")
+	response := httptest.NewRecorder()
+	broken.ServeHTTP(response, request)
+	if response.Code != http.StatusBadGateway {
+		t.Fatalf("unreachable prevention got %d want %d", response.Code, http.StatusBadGateway)
+	}
+	if !strings.Contains(response.Body.String(), "upstream_unavailable") {
+		t.Errorf("502 body got %q want it to contain %q", response.Body.String(), "upstream_unavailable")
+	}
+	if got := response.Header().Get("Access-Control-Allow-Origin"); got != allowedOrigin {
+		t.Errorf("502 on the prevention route must carry the configured origin, got %q", got)
+	}
+	if got := response.Header().Get("X-Request-ID"); got == "" {
+		t.Error("502 on the prevention route must carry the correlation id it exposes")
 	}
 }

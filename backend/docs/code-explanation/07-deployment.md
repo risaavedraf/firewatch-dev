@@ -32,7 +32,7 @@ El contexto de 10 s del wrapper no mata mágicamente un handler que ignore cance
 | Variables / consumidor | Validación local | Alcance |
 | --- | --- | --- |
 | OIDC_ISSUER, OIDC_JWKS_URL, OIDC_AUDIENCE / todos | URL/host/esquema; HTTPS fuera development; audiencia requerida | Biblioteca comprueba token con RS256 configurado; realm real no inspeccionado |
-| JOBS_URL, RISK_URL / gateway | `required` y URL HTTP/HTTPS, panic si inválida | HTTP interno permitido incluso fuera development |
+| JOBS_URL, RISK_URL, PREVENTION_URL / gateway | `required` y URL HTTP/HTTPS, panic si inválida | HTTP interno permitido incluso fuera development |
 | DATABASE_URL / jobs/risk | pgxpool.ParseConfig; no vacío en runtime | TLS DB no exigido explícitamente por run; depende de URL suministrada |
 | AMQP_URL / jobs/risk | No vacío antes de worker | No valida amqps en run; Dial y reconexión gestionan errores |
 | APP_ENV / todos | Solo string development permite OIDC HTTP | No es selección automática de infraestructura ni garantía de producción |

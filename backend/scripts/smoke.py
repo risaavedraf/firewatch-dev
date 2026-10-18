@@ -125,9 +125,18 @@ def main():
             compose("start", "rabbitmq")
         recovered = await_job(admin, queued)
         compose("restart", "jobs", "risk")
+        # `latest` legitimately moves on across a restart: `risk` publishes its
+        # first cycle batch for the zone as soon as it starts, so the batch this
+        # step is about is asserted where the restart must have preserved it —
+        # the history — while `latest` is asserted to answer one current batch.
+        # Asserting the recovered id as `latest` would demand that no newer batch
+        # exist, which the immediate startup cycle contradicts by design.
         def persisted():
+            status, history = request(API + "/v1/risk/history?zone_id=valparaiso-demo", token=viewer)
+            if status != 200 or not any(b["id"] == recovered["batch_id"] for b in history):
+                return False
             status, current = request(API + "/v1/risk/latest?zone_id=valparaiso-demo", token=viewer)
-            return status == 200 and current["id"] == recovered["batch_id"]
+            return status == 200 and current["data_status"] == "current"
         wait_for(persisted)
         print("PASS: broker outage, durable outbox recovery, last-valid-batch reads and app restart persistence")
 

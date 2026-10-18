@@ -17,6 +17,7 @@ import (
 
 	"firewatch.local/jobs/internal/handler"
 	"firewatch.local/jobs/internal/messaging"
+	"firewatch.local/jobs/internal/metrics"
 	"firewatch.local/jobs/internal/repository"
 	"firewatch.local/jobs/migrations"
 	"github.com/coreos/go-oidc/v3/oidc"
@@ -137,11 +138,12 @@ func run() error {
 	mux.HandleFunc("GET /health/live", func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(204) })
 	mux.Handle("GET /health/ready", healthHandler(check))
 	var requests atomic.Uint64
-	mux.HandleFunc("GET /metrics", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "text/plain; version=0.0.4")
-		s := snapshot()
-		fmt.Fprint(w, messaging.MetricsText(requests.Load(), s.Ready, broker.Published.Load(), broker.Processed.Load(), broker.Rejected.Load(), s.Depth, queuedAgeSeconds(r.Context(), db), s.AgeSeconds))
-	})
+	// The HTTP layer and the process are this service's own signals; the broker and
+	// dead-letter counters stay in messaging.MetricsText and are rendered first,
+	// unchanged, so nothing that was already exported is lost.
+	httpMetrics := &metrics.HTTPMetrics{}
+	queuedAge := func(ctx context.Context) float64 { return queuedAgeSeconds(ctx, db) }
+	mux.Handle("GET /metrics", metricsHandler(snapshot, &requests, broker, queuedAge, httpMetrics.Text, metrics.RuntimeText))
 	outer := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		requests.Add(1)
 		id, err := uuid.Parse(r.Header.Get("X-Request-ID"))
@@ -152,7 +154,16 @@ func run() error {
 		r.Header.Set("X-Request-ID", id.String())
 		c, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 		defer cancel()
-		mux.ServeHTTP(w, r.WithContext(c))
+		started := time.Now()
+		// One wrapper times and classifies every response of this service, including
+		// its errors and /metrics itself, without a handler changing.
+		recorder := &statusRecorder{ResponseWriter: w}
+		mux.ServeHTTP(recorder, r.WithContext(c))
+		status := recorder.status
+		if status == 0 {
+			status = http.StatusOK
+		}
+		httpMetrics.Observe(status, time.Since(started))
 	})
 	srv := &http.Server{Addr: ":8080", Handler: outer, ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 10 * time.Second, WriteTimeout: 15 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 16384}
 	go func() {
@@ -261,6 +272,48 @@ func respondStatus(w http.ResponseWriter, status int, s handler.Status) {
 	w.Header().Set("Cache-Control", "no-store")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(s)
+}
+
+// metricsHandler renders the Prometheus text body of /metrics. It is a named seam
+// so the surface can be exercised without run(). The delivery and dead-letter
+// counters (messaging.MetricsText) are rendered first and unchanged - they are
+// what the dead-letter and stuck-job alert rules are written against - and the
+// additional blocks arrive as renderers, so this service can grow its own
+// signals without widening the parameter list or touching the pinned delivery
+// format.
+//
+// queuedAge is injected rather than read from a pool here for the same reason:
+// the read is bounded and can fail, and that behaviour is tested on its own.
+func metricsHandler(snapshot func() messaging.DeadLetterSnapshot, requests *atomic.Uint64, broker *messaging.Broker, queuedAge func(context.Context) float64, extra ...func() string) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/plain; version=0.0.4")
+		s := snapshot()
+		fmt.Fprint(w, messaging.MetricsText(requests.Load(), s.Ready, broker.Published.Load(), broker.Processed.Load(), broker.Rejected.Load(), s.Depth, queuedAge(r.Context()), s.AgeSeconds))
+		for _, render := range extra {
+			fmt.Fprint(w, render())
+		}
+	})
+}
+
+// statusRecorder captures the response status so the middleware can count
+// responses by class and time the request without changing any handler. A
+// handler that writes a body without calling WriteHeader reports 200, which is
+// the code net/http would send.
+type statusRecorder struct {
+	http.ResponseWriter
+	status int
+}
+
+func (r *statusRecorder) WriteHeader(code int) {
+	r.status = code
+	r.ResponseWriter.WriteHeader(code)
+}
+
+func (r *statusRecorder) Write(body []byte) (int, error) {
+	if r.status == 0 {
+		r.status = http.StatusOK
+	}
+	return r.ResponseWriter.Write(body)
 }
 
 // metricsQuerier is the read seam /metrics uses to measure the oldest queued job

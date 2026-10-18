@@ -47,7 +47,7 @@ export const NOT_IMPLEMENTED: readonly UnimplementedCapability[] = [
   {
     capability: 'Revisar e incorporar registros, y hallazgos de calidad',
     reason:
-      'GET /v1/risk/sources publica la procedencia y la integridad reales; no existe un catálogo de acciones ni de hallazgos.',
+      'GET /v1/risk/sources publica la procedencia y la integridad reales; no existe un catálogo de hallazgos de calidad. Las acciones preventivas viven ahora en su propia vista (#actions).',
     location: 'Fuentes y procedencia',
   },
   {

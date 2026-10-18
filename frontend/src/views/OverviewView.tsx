@@ -30,15 +30,17 @@ import {
 import { idleCopy } from '../app/sessionCopy';
 import { MapPanel, type MapLoadState, type ZoneLevelLookup } from '../components/map/MapPanel';
 import { DataList, Metric, PanelHeading, StatusCopy, UnimplementedNote } from '../components/ui';
-import { history, latest, zones, type Failure, type Outcome } from '../core/api';
+import { history, latest, modelVersions, zones, type Failure, type Outcome } from '../core/api';
 import type { SessionState } from '../core/session';
 import {
   computeFactorBars,
+  evaluateActiveModel,
   evaluateValidity,
   latestOutcome,
   levelLabel,
   presentBatch,
   validityLabel,
+  type ActiveModel,
 } from '../domain';
 import type { RiskBatch, ZoneCollection, ZoneFeature } from '../types/api';
 
@@ -208,6 +210,7 @@ export function OverviewView() {
 
   const [catalogue, setCatalogue] = useState<CatalogueState | null>(null);
   const [read, setRead] = useState<ReadState | null>(null);
+  const [activeModel, setActiveModel] = useState<ActiveModel | null>(null);
   const [sessionClosed, setSessionClosed] = useState(false);
   // Whether a real session was ever established. It separates "never connected"
   // (the count is still unknown, `—`) from "the session was closed" (the count
@@ -265,6 +268,25 @@ export function OverviewView() {
     };
   }, [signedIn, selectedZone]);
 
+  // T13 — the active model version, read from the model registry. The read is
+  // independent of the zone chain: a registry that is unreachable or does not
+  // report an active version is stated, never replaced with the batch's version
+  // as if it were the active one.
+  useEffect(() => {
+    if (!signedIn) return undefined;
+    const controller = new AbortController();
+    let active = true;
+    void (async () => {
+      const outcome = await modelVersions(controller.signal);
+      if (!active) return;
+      setActiveModel(outcome.ok ? evaluateActiveModel(outcome.data) : evaluateActiveModel(null));
+    })();
+    return () => {
+      active = false;
+      controller.abort();
+    };
+  }, [signedIn]);
+
   // Ending a session clears everything the private view was describing. The
   // shared zone state is cleared here as well so the view stays honest even when
   // it is mounted without the session binding installed at application start.
@@ -278,6 +300,7 @@ export function OverviewView() {
     clearZoneState();
     setCatalogue(null);
     setRead(null);
+    setActiveModel(null);
     setSessionClosed(true);
   }, [signedIn]);
 
@@ -375,6 +398,21 @@ export function OverviewView() {
   // After a batch settles, a field the service omitted is labelled in place.
   const batchField = (value: string | undefined): string => (batchData === null ? 'Sin consultar' : orUninformed(value));
 
+  // T13 — the active model version and its `synthetic` mark. The mark is shown
+  // only when the registry declares it: an undeclared mark is its own state, and
+  // an unreachable registry is stated instead of a plausible version.
+  const modelBadge =
+    activeModel === null
+      ? 'SIN CONSULTAR'
+      : !activeModel.available
+        ? 'NO DISPONIBLE'
+        : activeModel.synthetic === true
+          ? 'SINTÉTICO'
+          : activeModel.synthetic === false
+            ? 'NO SINTÉTICO'
+            : 'NO DECLARADO';
+  const modelStatusText = activeModel === null ? 'Sin consultar el registro de modelos.' : activeModel.label;
+
   return (
     <section className="view" id="overview" data-view="overview" aria-labelledby="overview-title">
       <div className="intro-row">
@@ -418,6 +456,39 @@ export function OverviewView() {
           note="Cuenta solo las comunas cuyo último lote ya se leyó en esta sesión: la API responde por zona y no existe endpoint agregado."
         />
       </section>
+
+      <article className="panel model-panel" id="model-panel" aria-labelledby="model-panel-title">
+        <PanelHeading
+          eyebrow="MODELO EN USO"
+          titleId="model-panel-title"
+          title="Versión de modelo activa"
+          badge={
+            <span className="neutral-tag" id="model-synthetic">
+              {modelBadge}
+            </span>
+          }
+        />
+        <StatusCopy id="model-status">{modelStatusText}</StatusCopy>
+        <dl className="data-list compact">
+          <div>
+            <dt>Versión activa (registro)</dt>
+            <dd id="model-active-version">
+              {activeModel !== null && activeModel.available ? activeModel.version : 'No informada'}
+            </dd>
+          </div>
+          <div>
+            <dt>Versión del último lote</dt>
+            <dd>{batchField(batchData?.model_version)}</dd>
+          </div>
+        </dl>
+        <p className="panel-note">
+          La marca sintética se reproduce tal como el servicio la declara. Una versión sin marca declarada se muestra
+          como no declarada; la página no la supone no sintética. Activar una versión mueve el registro, no el
+          clasificador que está en uso: el servicio fija su versión con <code>MODEL_ID</code> al arrancar, así que
+          adoptar la activa exige fijar ese valor y recrear el servicio; la versión elegida debe existir en el
+          registro con su huella congelada o el arranque falla cerrado.
+        </p>
+      </article>
 
       <section className="dashboard-grid" aria-label="Estado del riesgo y ubicación">
         <MapPanel

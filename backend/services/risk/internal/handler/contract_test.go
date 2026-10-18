@@ -8,7 +8,11 @@ import (
 	"net/http/httptest"
 	"path/filepath"
 	"testing"
+	"time"
 
+	"firewatch.local/risk/internal/cycle"
+	"firewatch.local/risk/internal/repository"
+	"firewatch.local/risk/internal/source"
 	"github.com/getkin/kin-openapi/openapi3"
 	"github.com/google/uuid"
 )
@@ -97,6 +101,51 @@ func request(t *testing.T, handler http.Handler, token, target string) *httptest
 	w := httptest.NewRecorder()
 	handler.ServeHTTP(w, r)
 	return w
+}
+
+// TestRiskContractNewSurfacesMatchTheContract validates the responses added for
+// the cycle and the model registry against the published schema, so the document
+// cannot drift from what the handlers emit.
+func TestRiskContractNewSurfacesMatchTheContract(t *testing.T) {
+	contract := loadContract(t)
+	hash := "59259c4c0c470e5a0d512fe09f6c748c38fd29f9bc5d760d49754555c66e699b"
+	approved := time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC)
+	age := 30.0
+	last, next := approved, approved.Add(15*time.Minute)
+	store := &fakeStore{models: []repository.ModelVersion{
+		{Version: "academic-rule-v1", Kind: "rule", ParamsHash: &hash, ApprovedAt: &approved, Active: true, Metrics: json.RawMessage(`{}`)},
+		{Version: "demo-fixture-v1", Kind: "placeholder", Active: false, Metrics: json.RawMessage(`{}`)},
+	}}
+	runner := &fakeCycle{
+		statuses: []cycle.SourceStatus{{SourceID: "fixture-sample", LastRunAt: &last, NextRunAt: &next, Complete: true, AgeSeconds: &age}},
+		result: cycle.RunResult{
+			SourceID:   "fixture-sample",
+			StartedAt:  approved,
+			FinishedAt: approved,
+			Complete:   true,
+			Zones:      []cycle.ZoneResult{{ZoneID: "valparaiso-demo", Published: true}},
+		},
+	}
+	base, token := authorizedServerWith(t, "admin", store, runner, describedSource{source.NewFixtureProvider().Describe()})
+	app := withCorrelationID(base)
+
+	for _, target := range []string{"/v1/models", "/v1/risk/sources"} {
+		w := request(t, app, token, target)
+		if w.Code != http.StatusOK {
+			t.Fatalf("%s got %d: %s", target, w.Code, w.Body.String())
+		}
+		assertResponseMatchesContract(t, contract, target, http.MethodGet, w)
+	}
+
+	r := httptest.NewRequest(http.MethodPost, "/v1/risk/cycle/run", nil)
+	r.Header.Set("Authorization", "Bearer "+token)
+	r.Header.Set("X-Request-ID", uuid.NewString())
+	w := httptest.NewRecorder()
+	app.ServeHTTP(w, r)
+	if w.Code != http.StatusOK {
+		t.Fatalf("cycle run got %d: %s", w.Code, w.Body.String())
+	}
+	assertResponseMatchesContract(t, contract, "/v1/risk/cycle/run", http.MethodPost, w)
 }
 
 // S3: "dependencia no disponible" — a storage failure is answered 503 with the

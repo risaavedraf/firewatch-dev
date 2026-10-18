@@ -15,6 +15,7 @@ export type IconName =
   | 'audit'
   | 'permissions'
   | 'pending'
+  | 'actions'
   | 'search'
   | 'refresh'
   | 'zones'
@@ -61,6 +62,7 @@ const ICONS: Record<IconName, ReactNode> = {
     </>
   ),
   refresh: <path d="M4 10a8 8 0 1 1 1 8M4 3v7h7" />,
+  actions: <path d="M9 5h10M9 12h10M9 19h10M4 5l1 1 2-2M4 12l1 1 2-2M4 19l1 1 2-2" />,
   zones: <path d="m3 5 6-2 6 2 6-2v16l-6 2-6-2-6 2V5Zm6-2v16m6-14v16" />,
   batches: <path d="M3 11a9 9 0 1 1 2 7M3 4v7h7m2-5v6l4 2" />,
   attention: <path d="m12 3 8 3v6c0 5-8 9-8 9s-8-4-8-9V6l8-3Zm-4 9 3 3 5-6" />,

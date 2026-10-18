@@ -1,12 +1,12 @@
 # Demo local: pila actualizada + selector de escenarios — FireWatch
 
-Owner: sesión `01a13a74` (orquestadora de la ruta completa). Continúa el handoff `odd/temp/handoff-ruta-completa-demo.md` (origen `01a13724`, unidad backend cerrada).
+Owner: sesión `01a13a74` (orquestadora de la ruta completa). Continúa el handoff de origen `01a13724` (unidad backend cerrada), retirado del repositorio el 2026-10-17; sus citas verbatim se conservan en las specs de abajo.
 Objetivo: llevar el backend sintético ya verificado al entorno local del usuario y hacer que el escenario se seleccione **desde la página**.
 Restricciones duras: no tocar `.env*`, despliegue, `docker-compose.yml`, credenciales, volúmenes existentes ni la migración inmutable `001`; respaldo previo obligatorio (ya hecho); los servicios locales se actualizan **en conjunto**; no reescribir bitácoras históricas ni rutas antiguas; no modificar las superficies reservadas de la sesión `01a13736`.
 
 ## Specs
 
-- **S1 — Ruta completa.** Handoff §0, verbatim: "Continuar la orquestación de la ruta completa: llevar lo ya verificado en un entorno desechable al entorno local del usuario y hacer que el escenario se seleccione desde la página."
+- **S1 — Ruta completa.** Handoff retirado (2026-10-17) §0, verbatim: "Continuar la orquestación de la ruta completa: llevar lo ya verificado en un entorno desechable al entorno local del usuario y hacer que el escenario se seleccione desde la página."
 - **S2 — Autorización de la pila local.** Respuesta del usuario, verbatim: "Sí: respaldo y actualizo la pila". Alcance declarado por el handoff: "el usuario aprobó la ruta mínima (actualizar la pila)". Destino del respaldo elegido por el usuario: "Fuera del proyecto en C:\Users\rikar\firewatch-backups". El handoff fija el requisito de orden: "Respaldar los volúmenes antes de migrar".
 - **S3 — Autorización del selector.** Respuesta del usuario, verbatim: "Sí, en la página actual (vanilla JS)". Levanta la reserva S4 de la sesión `01a13736` **solo** para este cambio acotado; React/PWA sigue sin autorizar.
 - **S4 — Orden pedido por el usuario.** Verbatim: "antes de continuar con avances, termina ese y continuamos nosotros va?" Cumplido por la sesión `01a13a83` (baseline `0e39900`).

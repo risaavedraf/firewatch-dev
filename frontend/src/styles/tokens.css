@@ -22,7 +22,12 @@
   --canvas: #f5f5ef;
   --paper: #fffefa;
   --ink: #233b39;
-  --muted: #65756e;
+  /* Darkened from the ported #65756e for WCAG AA. The measured browser check
+     put the ported value at 4.44:1 on the canvas, 4.39:1 on the table-header
+     surface and 4.27:1 on the #edf1f2 tag background: all below the 4.5:1
+     normal-text minimum at these 8-12 px sizes. This keeps the hue and reaches
+     4.87:1 in the worst of those cases. */
+  --muted: #5c6c65;
   --line: #dde3da;
   --soft: #eef1e9;
   --terracotta: #a74d34;

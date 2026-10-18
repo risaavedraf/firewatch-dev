@@ -1,5 +1,5 @@
 SERVICE ?= jobs
-SERVICES := gateway jobs risk
+SERVICES := gateway jobs risk prevention
 
 .PHONY: test build up down logs integration demo
 test:
@@ -15,5 +15,6 @@ logs:
 integration:
 	docker compose --profile test run --build --rm jobs-test
 	docker compose --profile test run --build --rm risk-test
+	docker compose --profile test run --build --rm prevention-test
 demo:
 	python scripts/smoke.py

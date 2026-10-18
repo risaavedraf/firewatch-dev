@@ -327,7 +327,7 @@ paths:
             application/json:
               schema:
                 type: object
-                required: [geography, risk_input]
+                required: [geography, risk_input, sources]
                 properties:
                   geography:
                     type: object
@@ -396,6 +396,12 @@ paths:
                       purpose: {type: string}
                       priority: {type: integer}
                       synthetic: {type: boolean}
+                  sources:
+                    type: array
+                    description: >-
+                      Per-source cycle state and freshness. Empty when no
+                      scheduler is configured; never null.
+                    items: {$ref: '#/components/schemas/CycleSourceStatus'}
         '401': {$ref: '#/components/responses/Unauthorized'}
         '403': {$ref: '#/components/responses/Forbidden'}
         '503':
@@ -409,6 +415,106 @@ paths:
           content:
             application/json:
               schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '429': {$ref: '#/components/responses/RateLimited'}
+        '502': {$ref: '#/components/responses/UpstreamUnavailable'}
+  /v1/risk/cycle/run:
+    post:
+      operationId: runRiskCycle
+      description: >-
+        Admin. Runs one ingestion cycle synchronously for the demo: ingest,
+        per-record validation, classification and publication for every
+        configured zone. The result reports each zone and whether the cycle was
+        complete. A zone that fails does not abort the rest, and an incomplete
+        cycle publishes nothing invalid. With no scheduler configured the route
+        answers 503 cycle_unavailable.
+      responses:
+        '200':
+          description: Outcome of the cycle that just ran.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/CycleRunResult'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '503':
+          description: >-
+            No cycle scheduler is configured. code is cycle_unavailable.
+          headers:
+            X-Request-ID: {$ref: '#/components/headers/RequestID'}
+            Cache-Control: {schema: {type: string, enum: [no-store]}}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '429': {$ref: '#/components/responses/RateLimited'}
+        '502': {$ref: '#/components/responses/UpstreamUnavailable'}
+  /v1/models:
+    get:
+      operationId: listModels
+      description: >-
+        Viewer/admin. The model registry: every version with its kind, frozen
+        parameter fingerprint, approval instant, metrics and active flag. The
+        active row is first so the UI can show the version that judges new
+        assessments. Reading the registry promotes nothing. The active flag is
+        registry lifecycle metadata: the service selects the classifier it runs
+        from configuration at startup (MODEL_ID), so activating a version
+        changes the registry and not the running classifier. Adopting another
+        version means setting that configuration and recreating the service,
+        and the selected version must have a row here with the frozen
+        fingerprint or startup fails closed.
+      responses:
+        '200':
+          description: Model registry ordered active first, then by version.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ModelList'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '503': {$ref: '#/components/responses/StorageUnavailable'}
+        '429': {$ref: '#/components/responses/RateLimited'}
+        '502': {$ref: '#/components/responses/UpstreamUnavailable'}
+  /v1/models/{version}/activate:
+    post:
+      operationId: activateModelVersion
+      description: >-
+        Admin. Makes one model version active and records its approval in one
+        transaction: the previously active row is cleared, approved_at is set
+        when it was null, and metrics records the activation. At most one
+        version is active. Reversion is activating the previous version through
+        this same route. A placeholder is refused with 409 because the schema
+        forbids it from ever being active, and nothing is written.
+      parameters:
+        - in: path
+          name: version
+          required: true
+          schema: {type: string}
+          description: Model version identifier, e.g. firewatch-rule-v2.
+      responses:
+        '200':
+          description: The activated version with its new lifecycle state.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ModelVersion'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404':
+          description: >-
+            No model version has that identifier. code is model_not_found.
+          headers:
+            X-Request-ID: {$ref: '#/components/headers/RequestID'}
+            Cache-Control: {schema: {type: string, enum: [no-store]}}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '409':
+          description: >-
+            The version exists but may never be active (a placeholder). code is
+            model_not_activatable. Nothing is written.
+          headers:
+            X-Request-ID: {$ref: '#/components/headers/RequestID'}
+            Cache-Control: {schema: {type: string, enum: [no-store]}}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '503': {$ref: '#/components/responses/StorageUnavailable'}
         '429': {$ref: '#/components/responses/RateLimited'}
         '502': {$ref: '#/components/responses/UpstreamUnavailable'}
   /v1/risk/zones:
@@ -469,6 +575,281 @@ paths:
                     occurred_at: {type: string, format: date-time}
         '401': {$ref: '#/components/responses/Unauthorized'}
         '403': {$ref: '#/components/responses/Forbidden'}
+        '429': {$ref: '#/components/responses/RateLimited'}
+        '502': {$ref: '#/components/responses/UpstreamUnavailable'}
+        '503': {$ref: '#/components/responses/StorageUnavailable'}
+  /v1/prevention/actions:
+    get:
+      operationId: listPreventiveActions
+      description: >-
+        Viewer/admin. Lists preventive actions, newest first, capped at 200
+        rows. Both query parameters are optional filters: an omitted one
+        narrows nothing, and an empty result is a valid answer rather than an
+        error. A parameter that is repeated, is not one of these two, or carries
+        a status outside the frozen vocabulary is refused 422 invalid_query
+        before anything is read, because an unrecognised status would otherwise
+        read as "no such actions" instead of "no such state".
+      parameters:
+        - in: query
+          name: community_code
+          required: false
+          schema:
+            type: string
+            description: >-
+              Community the action belongs to. The accepted set is whatever the
+              stored actions hold, so it is deliberately not an enum here: an
+              enum would drift from the data.
+        - in: query
+          name: status
+          required: false
+          schema: {$ref: '#/components/schemas/PreventiveActionState'}
+      responses:
+        '200':
+          description: Actions matching the filters; [] when none matches.
+          headers:
+            X-Request-ID: {$ref: '#/components/headers/RequestID'}
+            Cache-Control: {schema: {type: string, enum: [no-store]}}
+          content:
+            application/json:
+              schema:
+                type: array
+                items: {$ref: '#/components/schemas/PreventiveAction'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '422':
+          description: Invalid input; nothing was read.
+          headers:
+            X-Request-ID: {$ref: '#/components/headers/RequestID'}
+            Cache-Control: {schema: {type: string, enum: [no-store]}}
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [code, request_id]
+                properties:
+                  code: {type: string, enum: [invalid_query]}
+                  request_id: {type: string, format: uuid}
+        '429': {$ref: '#/components/responses/RateLimited'}
+        '502': {$ref: '#/components/responses/UpstreamUnavailable'}
+        '503': {$ref: '#/components/responses/StorageUnavailable'}
+    post:
+      operationId: createPreventiveAction
+      description: >-
+        Admin only; a viewer is refused 403. The action is created in the
+        propuesta state and its id is server-generated: neither status nor id is
+        accepted from the client, and an unknown field is refused rather than
+        ignored. Only community_code and title are required, because the
+        contract names the other columns without defining a vocabulary for
+        them.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/PreventiveActionCreate'}
+      responses:
+        '201':
+          description: Action created in the propuesta state.
+          headers:
+            Location:
+              description: Resource path of the created action.
+              schema: {type: string}
+            X-Request-ID: {$ref: '#/components/headers/RequestID'}
+            Cache-Control: {schema: {type: string, enum: [no-store]}}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/PreventiveAction'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '415':
+          description: JSON content type required.
+          headers:
+            X-Request-ID: {$ref: '#/components/headers/RequestID'}
+            Cache-Control: {schema: {type: string, enum: [no-store]}}
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [code, request_id]
+                properties:
+                  code: {type: string, enum: [json_required]}
+                  request_id: {type: string, format: uuid}
+        '422':
+          description: >-
+            Invalid input; no action was created. A blank community or title, a
+            due_date that is not a calendar date, an unknown field, or a body
+            that is not one JSON document is refused here.
+          headers:
+            X-Request-ID: {$ref: '#/components/headers/RequestID'}
+            Cache-Control: {schema: {type: string, enum: [no-store]}}
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [code, request_id]
+                properties:
+                  code: {type: string, enum: [invalid_action_request]}
+                  request_id: {type: string, format: uuid}
+        '429': {$ref: '#/components/responses/RateLimited'}
+        '502': {$ref: '#/components/responses/UpstreamUnavailable'}
+        '503': {$ref: '#/components/responses/StorageUnavailable'}
+  /v1/prevention/actions/{id}:
+    get:
+      operationId: getPreventiveAction
+      description: >-
+        Viewer/admin. The action plus its attributable history, oldest first.
+        The history holds one row per accepted transition; creation is not a
+        transition, so a newly created action has an empty history.
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: {type: string, format: uuid}
+      responses:
+        '200':
+          description: Action with its history
+          headers:
+            X-Request-ID: {$ref: '#/components/headers/RequestID'}
+            Cache-Control: {schema: {type: string, enum: [no-store]}}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/PreventiveActionDetail'}
+        '400':
+          description: The path id is not a UUID.
+          headers:
+            X-Request-ID: {$ref: '#/components/headers/RequestID'}
+            Cache-Control: {schema: {type: string, enum: [no-store]}}
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [code, request_id]
+                properties:
+                  code: {type: string, enum: [invalid_action_id]}
+                  request_id: {type: string, format: uuid}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404':
+          description: No action holds this id.
+          headers:
+            X-Request-ID: {$ref: '#/components/headers/RequestID'}
+            Cache-Control: {schema: {type: string, enum: [no-store]}}
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [code, request_id]
+                properties:
+                  code: {type: string, enum: [action_not_found]}
+                  request_id: {type: string, format: uuid}
+        '429': {$ref: '#/components/responses/RateLimited'}
+        '502': {$ref: '#/components/responses/UpstreamUnavailable'}
+        '503': {$ref: '#/components/responses/StorageUnavailable'}
+  /v1/prevention/actions/{id}/transitions:
+    post:
+      operationId: transitionPreventiveAction
+      description: >-
+        Admin only; a viewer is refused 403. Advances one action to the
+        requested state and appends one history row in a single transaction
+        that locks the row, so two concurrent transitions cannot both be
+        accepted. The two refusals differ: a target outside the frozen
+        vocabulary is invalid input (422 invalid_transition_request) and never
+        reaches storage, while a target that is a state but is not reachable
+        from the action's current status is a conflict (409
+        invalid_transition) that leaves the action exactly as it was and writes
+        no history row. Sending the status the action already holds is not a
+        transition and is refused the same way.
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: {type: string, format: uuid}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/PreventiveActionTransition'}
+      responses:
+        '200':
+          description: The new version after the accepted transition.
+          headers:
+            X-Request-ID: {$ref: '#/components/headers/RequestID'}
+            Cache-Control: {schema: {type: string, enum: [no-store]}}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/PreventiveAction'}
+        '400':
+          description: The path id is not a UUID.
+          headers:
+            X-Request-ID: {$ref: '#/components/headers/RequestID'}
+            Cache-Control: {schema: {type: string, enum: [no-store]}}
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [code, request_id]
+                properties:
+                  code: {type: string, enum: [invalid_action_id]}
+                  request_id: {type: string, format: uuid}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404':
+          description: No action holds this id.
+          headers:
+            X-Request-ID: {$ref: '#/components/headers/RequestID'}
+            Cache-Control: {schema: {type: string, enum: [no-store]}}
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [code, request_id]
+                properties:
+                  code: {type: string, enum: [action_not_found]}
+                  request_id: {type: string, format: uuid}
+        '409':
+          description: >-
+            The action exists but the frozen state machine does not allow this
+            move from its current status. Nothing is written: the status,
+            updated_at and the history are unchanged.
+          headers:
+            X-Request-ID: {$ref: '#/components/headers/RequestID'}
+            Cache-Control: {schema: {type: string, enum: [no-store]}}
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [code, request_id]
+                properties:
+                  code: {type: string, enum: [invalid_transition]}
+                  request_id: {type: string, format: uuid}
+        '415':
+          description: JSON content type required.
+          headers:
+            X-Request-ID: {$ref: '#/components/headers/RequestID'}
+            Cache-Control: {schema: {type: string, enum: [no-store]}}
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [code, request_id]
+                properties:
+                  code: {type: string, enum: [json_required]}
+                  request_id: {type: string, format: uuid}
+        '422':
+          description: >-
+            Invalid input; the transition was not attempted. A missing or
+            unknown to, an unknown field, or a body that is not one JSON
+            document is refused here rather than reaching storage.
+          headers:
+            X-Request-ID: {$ref: '#/components/headers/RequestID'}
+            Cache-Control: {schema: {type: string, enum: [no-store]}}
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [code, request_id]
+                properties:
+                  code: {type: string, enum: [invalid_transition_request]}
+                  request_id: {type: string, format: uuid}
         '429': {$ref: '#/components/responses/RateLimited'}
         '502': {$ref: '#/components/responses/UpstreamUnavailable'}
         '503': {$ref: '#/components/responses/StorageUnavailable'}
@@ -584,6 +965,67 @@ components:
         application/json:
           schema: {$ref: '#/components/schemas/ErrorResponse'}
   schemas:
+    CycleSourceStatus:
+      type: object
+      required: [source_id, complete]
+      properties:
+        source_id: {type: string}
+        last_run_at: {type: string, format: date-time, nullable: true}
+        next_run_at: {type: string, format: date-time, nullable: true}
+        complete: {type: boolean}
+        age_seconds: {type: number, nullable: true, minimum: 0}
+        last_error: {type: string}
+      description: >-
+        Freshness and state of one source. last_run_at, next_run_at and
+        age_seconds are null when the source has never run and complete is
+        false. age_seconds is the age of the last attempt, so a value above the
+        15 minute target is the stale signal. next_run_at is the renewal
+        deadline -- the last attempt plus the configured interval -- and NOT
+        necessarily the instant the scheduler fires next: a manual run
+        recomputes it while the automatic schedule keeps its own phase, so the
+        two can differ by design.
+    CycleZoneResult:
+      type: object
+      required: [zone_id, published]
+      properties:
+        zone_id: {type: string}
+        published: {type: boolean}
+        error: {type: string}
+    CycleRunResult:
+      type: object
+      required: [source_id, started_at, finished_at, complete, zones]
+      properties:
+        source_id: {type: string}
+        started_at: {type: string, format: date-time}
+        finished_at: {type: string, format: date-time}
+        complete: {type: boolean}
+        zones:
+          type: array
+          items: {$ref: '#/components/schemas/CycleZoneResult'}
+      description: >-
+        One cycle outcome. complete is false when any zone failed; a failed zone
+        does not abort the rest.
+    ModelVersion:
+      type: object
+      required: [version, kind, params_hash, approved_at, metrics, active]
+      properties:
+        version: {type: string}
+        kind: {type: string, enum: [rule, trained, placeholder]}
+        params_hash: {type: string, nullable: true, pattern: '^[0-9a-f]{64}$'}
+        approved_at: {type: string, format: date-time, nullable: true}
+        metrics: {type: object, additionalProperties: true}
+        active: {type: boolean}
+      description: >-
+        One registry row. params_hash is the fingerprint of the effective
+        parameters, not a model artifact digest, and is null for a placeholder
+        whose parameter set is not reconstructible.
+    ModelList:
+      type: object
+      required: [models]
+      properties:
+        models:
+          type: array
+          items: {$ref: '#/components/schemas/ModelVersion'}
     ErrorResponse:
       type: object
       description: >-
@@ -928,3 +1370,131 @@ components:
             One feature per catalogue zone that carries a geometry; empty when
             none matches, which is a valid answer rather than an error.
           items: {$ref: '#/components/schemas/ZoneFeature'}
+    PreventiveActionState:
+      type: string
+      description: >-
+        The frozen state vocabulary. The allowed moves are
+        propuesta -> asignada, asignada -> en_curso, en_curso -> bloqueada,
+        bloqueada -> en_curso, en_curso -> enviada, enviada -> aceptada,
+        enviada -> devuelta and devuelta -> en_curso (reopening); cancelada is
+        reachable from every non-terminal state. aceptada and cancelada are
+        terminal. Every other move is 409 invalid_transition and writes
+        nothing, including re-sending the state the action already holds.
+      enum:
+        - propuesta
+        - asignada
+        - en_curso
+        - bloqueada
+        - enviada
+        - aceptada
+        - devuelta
+        - cancelada
+    PreventiveAction:
+      type: object
+      required:
+        - id
+        - community_code
+        - title
+        - description
+        - priority
+        - status
+        - assignee
+        - due_date
+        - created_by
+        - created_at
+        - updated_at
+      properties:
+        id: {type: string, format: uuid}
+        community_code: {type: string}
+        title: {type: string}
+        description: {type: string}
+        priority:
+          type: string
+          description: >-
+            Free text. The contract names this column and defines no vocabulary
+            for it, so it is deliberately not an enum; the empty string means
+            the priority was not stated.
+        status: {$ref: '#/components/schemas/PreventiveActionState'}
+        assignee:
+          type: string
+          nullable: true
+          description: Absent until someone is assigned; null means unassigned.
+        due_date:
+          type: string
+          nullable: true
+          description: >-
+            Calendar date (YYYY-MM-DD), not an instant: a time of day would be
+            a fabricated precision. Null when unset.
+        created_by:
+          type: string
+          description: >-
+            Verified token subject of the operator who created the action,
+            never a client-supplied identity.
+        created_at: {type: string, format: date-time}
+        updated_at:
+          type: string
+          format: date-time
+          description: >-
+            Set by the accepted transition that last changed the action.
+    PreventiveActionHistory:
+      type: object
+      description: >-
+        One accepted transition, append-only: there is no update and no delete,
+        which is what makes it the durable audit record of this service.
+      required:
+        - id
+        - action_id
+        - from_status
+        - to_status
+        - actor_sub
+        - note
+        - created_at
+      properties:
+        id: {type: integer, format: int64}
+        action_id: {type: string, format: uuid}
+        from_status: {$ref: '#/components/schemas/PreventiveActionState'}
+        to_status: {$ref: '#/components/schemas/PreventiveActionState'}
+        actor_sub:
+          type: string
+          description: Verified token subject of the operator who asked for it.
+        note:
+          type: string
+          description: Free-text reason; the empty string means none was given.
+        created_at: {type: string, format: date-time}
+    PreventiveActionDetail:
+      allOf:
+        - $ref: '#/components/schemas/PreventiveAction'
+        - type: object
+          required: [history]
+          properties:
+            history:
+              type: array
+              description: >-
+                Oldest first, in the order the transitions were accepted.
+                Creation is not a transition, so a newly created action has an
+                empty history.
+              items: {$ref: '#/components/schemas/PreventiveActionHistory'}
+    PreventiveActionCreate:
+      type: object
+      additionalProperties: false
+      required: [community_code, title]
+      properties:
+        community_code:
+          type: string
+          description: Community the action belongs to; must not be blank.
+        title: {type: string, description: Must not be blank.}
+        description: {type: string}
+        priority: {type: string}
+        assignee: {type: string}
+        due_date:
+          type: string
+          description: Calendar date (YYYY-MM-DD); a date-time is refused.
+    PreventiveActionTransition:
+      type: object
+      additionalProperties: false
+      required: [to]
+      properties:
+        to: {$ref: '#/components/schemas/PreventiveActionState'}
+        note:
+          type: string
+          description: Optional free-text reason, recorded in the history row.

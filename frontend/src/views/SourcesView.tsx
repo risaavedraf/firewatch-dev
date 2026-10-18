@@ -6,9 +6,11 @@ import { PanelHeading, UnimplementedNote } from '../components/ui';
 import { timing } from '../config';
 import { jobsStatus, riskStatus, sources, type Failure } from '../core/api';
 import {
+  evaluateCycle,
   evaluatePipeline,
   evaluateProvenance,
   evaluateServiceStatus,
+  type CycleFreshness,
   type PipelineDecision,
   type ProvenanceDecision,
   type ServiceStatusDecision,
@@ -26,6 +28,7 @@ type Phase = 'unconsulted' | 'loading' | 'settled';
 interface SourcesSnapshot {
   provenance: ProvenanceDecision | null;
   provenanceFailure: Failure | null;
+  cycle: CycleFreshness | null;
   risk: ServiceStatusDecision | null;
   jobs: ServiceStatusDecision | null;
   pipeline: PipelineDecision | null;
@@ -83,13 +86,17 @@ export function SourcesView() {
       const provenance = sourcesOutcome.ok ? evaluateProvenance(200, sourcesOutcome.data) : null;
       const provenanceFailure = sourcesOutcome.ok ? null : sourcesOutcome.failure;
       const now = Date.now();
+      // Cycle freshness travels inside the sources payload (front 1, T4). The
+      // transport passes the optional object through; the domain decides what it
+      // means and never invents a run time the service did not state.
+      const cycleFreshness = sourcesOutcome.ok ? evaluateCycle(sourcesOutcome.data, now) : null;
       const risk = riskOutcome.ok
         ? evaluateServiceStatus({ status: 200, body: riskOutcome.data }, now)
         : evaluateServiceStatus({ status: riskOutcome.failure.status ?? 0, body: null }, now);
       const jobs = jobsOutcome.ok
         ? evaluateServiceStatus({ status: 200, body: jobsOutcome.data }, now)
         : evaluateServiceStatus({ status: jobsOutcome.failure.status ?? 0, body: null }, now);
-      setSnapshot({ provenance, provenanceFailure, risk, jobs, pipeline: evaluatePipeline(risk, jobs) });
+      setSnapshot({ provenance, provenanceFailure, cycle: cycleFreshness, risk, jobs, pipeline: evaluatePipeline(risk, jobs) });
 
       // Recursive setTimeout only: each cycle replaces one bounded, cancelable
       // timer while the session lives, exactly as the retired page did.
@@ -111,6 +118,7 @@ export function SourcesView() {
   const current = signedIn ? snapshot : null;
   const provenance = current?.provenance ?? null;
   const provenanceFailure = current?.provenanceFailure ?? null;
+  const cycle = current?.cycle ?? null;
   const riskDecision = current?.risk ?? null;
   const jobsDecision = current?.jobs ?? null;
   const pipeline = current?.pipeline ?? null;
@@ -143,6 +151,33 @@ export function SourcesView() {
           ? pipeline.status
           : 'Servicios dependientes no verificados.';
   const pipelineClass = pipeline?.verified ? 'status-copy risk-good' : 'status-copy';
+
+  // Cycle freshness. Every field is labelled in place: an unreadable or absent
+  // field is never rendered as a plausible timestamp or a zero age. The state is
+  // the derived completeness of the per-source array, not a field the service
+  // does not publish.
+  const cycleBadge =
+    phase === 'unconsulted'
+      ? 'SIN CONSULTAR'
+      : phase === 'loading'
+        ? 'CONSULTANDO'
+        : cycle !== null && cycle.available
+          ? cycle.complete === true
+            ? 'COMPLETA'
+            : 'INCOMPLETA'
+          : 'SIN INFORMAR';
+  const cycleStatusText =
+    phase === 'unconsulted'
+      ? idleCopy(session, 'consultar la frescura del ciclo')
+      : phase === 'loading'
+        ? 'Consultando la frescura del ciclo…'
+        : cycle !== null
+          ? cycle.label
+          : 'La API no devolvió la frescura del ciclo; se muestra como no disponible.';
+  const cycleField = (value: string): string => (cycle !== null && cycle.available && value !== '' ? value : 'No informado');
+  const cycleAge = cycle !== null && cycle.available && cycle.ageSeconds !== null ? `${cycle.ageSeconds} s` : 'No informado';
+  const cycleState =
+    cycle !== null && cycle.available ? (cycle.complete === true ? 'completa' : 'incompleta') : 'No informado';
 
   return (
     <section className="view" id="sources" data-view="sources" aria-labelledby="sources-title">
@@ -209,8 +244,9 @@ export function SourcesView() {
           </div>
         </dl>
         <UnimplementedNote>
-          Acciones de revisión e incorporación de registros, y hallazgos de calidad: <code>/v1/risk/sources</code>{' '}
-          publica la procedencia y la integridad reales, no un catálogo de acciones ni de hallazgos.
+          Hallazgos de calidad: <code>/v1/risk/sources</code> publica la procedencia y la integridad reales, no un
+          catálogo de hallazgos de calidad. Las acciones preventivas sí existen y viven en su propia vista{' '}
+          (<a href="#actions">#actions</a>).
         </UnimplementedNote>
       </article>
 
@@ -242,6 +278,48 @@ export function SourcesView() {
             <dd id="pipeline-gateway">
               La tarjeta "Gateway" solo informa disponibilidad del gateway; un 204 no acredita el pipeline.
             </dd>
+          </div>
+        </dl>
+      </article>
+
+      <article className="panel cycle-panel" id="cycle" aria-labelledby="cycle-title">
+        <PanelHeading
+          eyebrow="CICLO DE INGESTA"
+          titleId="cycle-title"
+          title="Frescura y última ejecución"
+          badge={
+            <span className="neutral-tag" id="cycle-badge">
+              {cycleBadge}
+            </span>
+          }
+        />
+        <p id="cycle-status" className="status-copy" role="status" aria-live="polite">
+          {cycleStatusText}
+        </p>
+        <dl className="data-list compact">
+          <div>
+            <dt>Última ejecución</dt>
+            <dd id="cycle-last-run">{cycleField(cycle?.lastRunAt ?? '')}</dd>
+          </div>
+          <div>
+            <dt>Renovación esperada</dt>
+            <dd id="cycle-next-run">{cycleField(cycle?.nextRunAt ?? '')}</dd>
+          </div>
+          <div>
+            <dt>Estado del ciclo</dt>
+            <dd id="cycle-state">{cycleState}</dd>
+          </div>
+          <div>
+            <dt>Antigüedad</dt>
+            <dd id="cycle-age">{cycleAge}</dd>
+          </div>
+          <div>
+            <dt>Fuentes informadas</dt>
+            <dd id="cycle-sources">{cycle !== null && cycle.available ? String(cycle.sourceCount) : 'No informado'}</dd>
+          </div>
+          <div>
+            <dt>Último error</dt>
+            <dd id="cycle-last-error">{cycle !== null && cycle.available && cycle.lastError !== '' ? cycle.lastError : 'Sin error informado'}</dd>
           </div>
         </dl>
       </article>

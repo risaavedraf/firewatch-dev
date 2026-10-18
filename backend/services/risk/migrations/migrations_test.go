@@ -24,15 +24,26 @@ func migrationFor(t *testing.T, version int) Migration {
 	return Migration{}
 }
 
-func TestMigrationsAreOrderedCompleteAndNonEmpty(t *testing.T) {
+// TestMigrationsAreOrderedByUniqueVersion guards the list's shape. Versions must
+// start at 1 and increase strictly, but NOT contiguously: this service shares the
+// database's schema_migrations ledger with the prevention service, which owns
+// version 9 (009_preventive_actions.sql). A version is therefore reserved against
+// the integrated tree, not against this module alone; a decrease or a duplicate
+// would still make a migration run out of order or skip in silence.
+func TestMigrationsAreOrderedByUniqueVersion(t *testing.T) {
 	all := All()
 	if len(all) == 0 {
 		t.Fatal("All() returned no migrations")
 	}
 	for index, migration := range all {
-		want := index + 1
-		if migration.Version != want {
-			t.Fatalf("migration at index %d has version %d, want %d; versions must start at 1 and increase by exactly 1 with no gaps or duplicates", index, migration.Version, want)
+		if migration.Version < 1 {
+			t.Fatalf("migration at index %d has version %d; versions start at 1", index, migration.Version)
+		}
+		if index == 0 && migration.Version != 1 {
+			t.Fatalf("the first migration has version %d, want 1", migration.Version)
+		}
+		if index > 0 && migration.Version <= all[index-1].Version {
+			t.Fatalf("migration at index %d has version %d after %d; versions must increase strictly with no duplicates", index, migration.Version, all[index-1].Version)
 		}
 		if migration.Name == "" {
 			t.Errorf("migration %d has an empty Name; a failure must be attributable", migration.Version)
@@ -200,6 +211,39 @@ func TestSyntheticEvaluationMigrationIsGuardedAndIdempotent(t *testing.T) {
 	for _, forbidden := range []string{"DROP TABLE", "TRUNCATE", "DELETE FROM", "UPDATE "} {
 		if strings.Contains(sql, forbidden) {
 			t.Errorf("007_synthetic_evaluation.sql contains %q; schema migrations here never destroy data", forbidden)
+		}
+	}
+}
+
+// TestFirewatchRuleV2MigrationIsGuardedAndIdempotent protects T5's registry row:
+// the second deterministic rule version is registered with the frozen fingerprint
+// it actually reports, stays inactive so it does not replace academic-rule-v1 by
+// default, and the statement is guarded so re-applying the file is a no-op.
+func TestFirewatchRuleV2MigrationIsGuardedAndIdempotent(t *testing.T) {
+	migration := migrationFor(t, 8)
+	if migration.Name != "firewatch_rule_v2" {
+		t.Errorf("migration 8 is named %q, want %q", migration.Name, "firewatch_rule_v2")
+	}
+	sql := migration.SQL
+	for _, fragment := range []string{
+		"'firewatch-rule-v2'",
+		"ON CONFLICT (version) DO NOTHING",
+		"'59259c4c0c470e5a0d512fe09f6c748c38fd29f9bc5d760d49754555c66e699b'",
+	} {
+		if !strings.Contains(sql, fragment) {
+			t.Errorf("008_firewatch_rule_v2.sql does not contain %q", fragment)
+		}
+	}
+	recorded := quotedSHA256.FindAllStringSubmatch(sql, -1)
+	if len(recorded) != 1 {
+		t.Fatalf("008_firewatch_rule_v2.sql records %d quoted sha256 literals, want exactly 1", len(recorded))
+	}
+	if got := recorded[0][1]; got != classify.FirewatchRuleV2ParamsHash {
+		t.Errorf("008_firewatch_rule_v2.sql records params hash %q, want the frozen %q", got, classify.FirewatchRuleV2ParamsHash)
+	}
+	for _, forbidden := range []string{"DROP TABLE", "TRUNCATE", "DELETE FROM", "UPDATE "} {
+		if strings.Contains(sql, forbidden) {
+			t.Errorf("008_firewatch_rule_v2.sql contains %q; schema migrations here never destroy data", forbidden)
 		}
 	}
 }

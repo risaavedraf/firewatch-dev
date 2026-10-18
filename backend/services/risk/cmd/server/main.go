@@ -11,11 +11,13 @@ import (
 	"os"
 	"os/signal"
 	"strconv"
+	"strings"
 	"sync/atomic"
 	"syscall"
 	"time"
 
 	"firewatch.local/risk/internal/classify"
+	"firewatch.local/risk/internal/cycle"
 	"firewatch.local/risk/internal/handler"
 	"firewatch.local/risk/internal/messaging"
 	"firewatch.local/risk/internal/metrics"
@@ -135,6 +137,12 @@ func run() error {
 	if err := classifiers.Register(classify.NewAcademicRuleV1()); err != nil {
 		return fmt.Errorf("register classifier: %w", err)
 	}
+	// The second rule version is registered alongside v1, not instead of it, so
+	// both are selectable through MODEL_ID and neither replaces the other by
+	// default (the default below stays academic-rule-v1).
+	if err := classifiers.Register(classify.NewFirewatchRuleV2()); err != nil {
+		return fmt.Errorf("register classifier: %w", err)
+	}
 	activeModel := os.Getenv("MODEL_ID")
 	if activeModel == "" {
 		activeModel = classify.AcademicRuleV1ID
@@ -161,11 +169,15 @@ func run() error {
 	if err := classify.VerifyRegisteredModel(activeModel, registered, storedHash); err != nil {
 		return err
 	}
-	// The fixture is the only provider that exists today because real ingestion
-	// is deferred. Registering a real provider here is what flips the persisted
-	// demo flag to false: that flag is derived from the provider's provenance, so
-	// it is not hardcoded anywhere.
-	provider := source.NewFixtureProvider()
+	// The fixture is the deterministic default; a configured FIREWATCH_SOURCE_URL
+	// selects the HTTP/JSON provider. A missing or empty value makes no network
+	// call, so a fresh deployment and every suite behave identically. Registering a
+	// non-synthetic provider is what flips the persisted demo flag to false: that
+	// flag is derived from the provider's provenance, not hardcoded.
+	provider, err := source.ProviderFromEnv(os.Getenv("FIREWATCH_SOURCE_URL"))
+	if err != nil {
+		return fmt.Errorf("configure source provider: %w", err)
+	}
 	// The model-outcome counters are shared between the publication path, which
 	// writes them, and /metrics, which reads them: one value, two surfaces.
 	outcomes := &metrics.RiskOutcomes{}
@@ -186,10 +198,18 @@ func run() error {
 	workerDone := make(chan struct{})
 	go func() { defer close(workerDone); broker.Run(ctx) }()
 	defer func() { stop(); <-workerDone }()
+	// The 15 minute cycle runs immediately and then on the configured interval. It
+	// owns scheduling and freshness; the real aggregation, validation,
+	// classification and persistence happen through the publisher above, so the
+	// cycle cannot bypass any guard.
+	cycleRunner := cycle.New(provider, &publisher, cycle.Options{Zones: cycleZones(os.Getenv("FIREWATCH_CYCLE_ZONES")), Interval: cycle.DefaultInterval})
+	cycleDone := make(chan struct{})
+	go func() { defer close(cycleDone); cycleRunner.Start(ctx) }()
+	defer func() { <-cycleDone }()
 	snapshot := func() messaging.DeadLetterSnapshot { return broker.Snapshot(time.Now(), dlqReadyMaxAge) }
 	mux := http.NewServeMux()
 	check := statusEvaluator(db.Ping, snapshot, dlqReadyMaxDepth, dlqReadyMaxAge)
-	mux.Handle("/v1/", handler.NewWithStatus(store, verifier, check, publisher.Provider))
+	mux.Handle("/v1/", handler.NewWithCycle(store, verifier, check, cycleRunner, publisher.Provider))
 	mux.HandleFunc("GET /health/live", func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(204) })
 	mux.Handle("GET /health/ready", healthHandler(check))
 	var requests atomic.Uint64
@@ -233,6 +253,29 @@ func run() error {
 		return nil
 	}
 	return err
+}
+
+// cycleZones parses FIREWATCH_CYCLE_ZONES into the zones one cycle publishes.
+// An unset or blank value uses the legacy demo zone, so a fresh deployment
+// publishes the deterministic fixture without configuration. Blank entries are
+// dropped, and a value that lists no usable zone falls back to the demo zone
+// rather than scheduling an empty cycle.
+func cycleZones(raw string) []string {
+	const defaultZone = "valparaiso-demo"
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return []string{defaultZone}
+	}
+	zones := make([]string, 0, strings.Count(trimmed, ",")+1)
+	for _, part := range strings.Split(trimmed, ",") {
+		if zone := strings.TrimSpace(part); zone != "" {
+			zones = append(zones, zone)
+		}
+	}
+	if len(zones) == 0 {
+		return []string{defaultZone}
+	}
+	return zones
 }
 
 // defaultDLQReadyMaxDepth is the documented default for DLQ_READY_MAX_DEPTH: any

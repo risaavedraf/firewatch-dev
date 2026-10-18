@@ -673,6 +673,10 @@ class Harness:
                 **common,
                 "JOBS_URL": "http://jobs:8080",
                 "RISK_URL": "http://risk:8080",
+                # Required by the gateway at startup, like JOBS_URL and RISK_URL.
+                # This harness starts no prevention container and calls no
+                # /v1/prevention/ route, so the value only has to exist.
+                "PREVENTION_URL": "http://prevention:8084",
                 "WEB_ORIGIN": "http://localhost:4173",
             },
             ports=[f"127.0.0.1:{self.gateway_port}:8080"],

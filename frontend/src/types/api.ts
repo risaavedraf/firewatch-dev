@@ -83,6 +83,11 @@ export interface SourceProvenance {
     cutoff_semantics: string;
   };
   risk_input?: { synthetic?: boolean; display_name?: string; id?: string } | null;
+  // Per-source cycle state and freshness (front 1, T4). The real payload always
+  // carries a non-null `sources` array of `SourceStatus`; it is typed `unknown`
+  // on purpose, because the transport does not re-shape it and `domain/cycle.ts`
+  // decides what each entry means.
+  sources?: unknown;
   code?: string;
 }
 
@@ -136,4 +141,42 @@ export interface AuditEntry {
   job_id: string;
   trace_id: string;
   occurred_at: string;
+}
+
+// ── Preventive actions (frozen `prevention` contract) ───────────────────────
+//
+// The fields are the columns of `prevention.actions` named in
+// `odd/tasks/presentation-client-ready.md` §«Contrato congelado». Declarations
+// are not guarantees: every payload is validated at the transport boundary and
+// `action_history` is required by the detail route.
+
+export interface PreventiveAction {
+  id: string;
+  community_code: string;
+  title: string;
+  description?: string;
+  priority?: string;
+  status: string;
+  // Nullable on the wire: the column is `*string`, so an unassigned action
+  // carries `null` rather than an absent field.
+  assignee?: string | null;
+  due_date?: string | null;
+  created_by?: string;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface ActionHistoryEntry {
+  // The service's `action_history.id` is an int64, so it arrives as a number.
+  id?: number;
+  action_id?: string;
+  from_status?: string | null;
+  to_status: string;
+  actor_sub?: string;
+  note?: string;
+  created_at?: string;
+}
+
+export interface PreventiveActionDetail extends PreventiveAction {
+  history: ActionHistoryEntry[];
 }

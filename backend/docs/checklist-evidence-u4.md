@@ -40,7 +40,7 @@ no alert has been produced in this repository. Every row below inherits that lim
 
 | ID | State | Evidence in this repository | What is missing to close it |
 |---|---|---|---|
-| `SLA-I1` | Blocked | Closest artifact: `backend/services/gateway/internal/handler/gateway.go:53` logs one `duration_ms` per gateway request, but it is a log line, not a p95 objective or an aggregation. `backend/docs/architecture.md:63` records production performance targets as later requirements. | An **agreed** p95 inference-latency objective (a FireWatch value, not the source document's `< 200 ms` example), the service boundary it applies to, and a named owner. |
+| `SLA-I1` | Blocked | Closest artifact: `backend/services/gateway/internal/handler/gateway.go:118` logs one `duration_ms` per gateway request, but it is a log line, not a p95 objective or an aggregation. `backend/docs/architecture.md:63` records production performance targets as later requirements. | An **agreed** p95 inference-latency objective (a FireWatch value, not the source document's `< 200 ms` example), the service boundary it applies to, and a named owner. |
 | `SLA-I2` | Blocked | None. `backend/docs/architecture.md:51` describes a 20/s-per-replica gateway limit, which is a protective cap, not a required throughput. | An agreed required throughput figure, the load profile it is measured over, and a named owner. |
 | `SLA-I3` | Blocked | None. No JMeter, K6 or Locust tool, config or runner exists in the repository or in `.github/workflows/*.yml`. | A named owner to select and justify a load-testing tool. |
 | `SLA-I4` | Blocked | None. | The objectives from `SLA-I1`/`SLA-I2` once agreed, each explicitly labelled objective or measured; nothing exists to label. |

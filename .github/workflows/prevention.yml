@@ -1,0 +1,26 @@
+name: Prevention
+on:
+  pull_request:
+    paths:
+      - 'backend/services/prevention/**'
+      - 'backend/contracts/**'
+      - 'backend/go.work'
+      - 'backend/go.work.sum'
+      - 'backend/.dockerignore'
+      - '.github/workflows/**'
+      - '.gitattributes'
+  push:
+    paths:
+      - 'backend/services/prevention/**'
+      - 'backend/contracts/**'
+      - 'backend/go.work'
+      - 'backend/go.work.sum'
+      - 'backend/.dockerignore'
+      - '.github/workflows/**'
+      - '.gitattributes'
+permissions:
+  contents: read
+jobs:
+  checks:
+    uses: ./.github/workflows/_go-service.yml
+    with: {service: prevention}

@@ -28,7 +28,7 @@ The endpoints bind only to host loopback. HTTP/password grants and the shared Ra
 
 ### Optional classifier selection
 
-`MODEL_ID` selects the classifier version the `risk` service runs; it is optional because the default is `academic-rule-v1` in the code, and the selected version must have a row in the `models` table that the migrations create and seed.
+`MODEL_ID` selects the classifier version the `risk` service runs. The compose stack passes it through and defaults it to `firewatch-rule-v2`, so the local stack classifies with v2 unless `.env` sets `MODEL_ID` to another registered version; the code default, when nothing is configured at all, stays `academic-rule-v1`. The selected version must have a row in the `models` table that the migrations create and seed, or the service fails closed at startup. Loading a different version there does not change the classifier in a running container: the version is fixed when the service starts.
 
 ```sh
 docker compose --profile observability up -d

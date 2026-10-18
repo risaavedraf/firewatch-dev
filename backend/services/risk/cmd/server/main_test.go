@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -90,6 +91,26 @@ func TestStatusEvaluator(t *testing.T) {
 				t.Fatal(canceled)
 			}
 		})
+	}
+}
+
+// TestCycleZones pins the scheduler's zone configuration: an unset value keeps
+// the deterministic demo zone, blank entries are dropped, and a list that names
+// no usable zone still schedules rather than running an empty cycle.
+func TestCycleZones(t *testing.T) {
+	for _, tc := range []struct {
+		raw  string
+		want []string
+	}{
+		{"", []string{"valparaiso-demo"}},
+		{"   ", []string{"valparaiso-demo"}},
+		{"05101", []string{"05101"}},
+		{"05101, 05102 ,05103", []string{"05101", "05102", "05103"}},
+		{",,", []string{"valparaiso-demo"}},
+	} {
+		if got := cycleZones(tc.raw); !reflect.DeepEqual(got, tc.want) {
+			t.Errorf("cycleZones(%q) = %v, want %v", tc.raw, got, tc.want)
+		}
 	}
 }
 

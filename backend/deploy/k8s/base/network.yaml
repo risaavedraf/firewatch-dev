@@ -39,6 +39,13 @@ spec:
         - podSelector:
             matchExpressions: [{key: app, operator: In, values: [jobs, risk]}]
       ports: [{protocol: TCP, port: 8080}]
+    # prevention listens on its own port, so it needs its own egress rule: one
+    # rule carries one port, and folding it into the rule above would open the
+    # wrong port.
+    - to:
+        - podSelector:
+            matchExpressions: [{key: app, operator: In, values: [prevention]}]
+      ports: [{protocol: TCP, port: 8084}]
 ---
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
@@ -67,3 +74,26 @@ spec:
           podSelector:
             matchLabels: {app: rabbitmq}
       ports: [{protocol: TCP, port: 5671}]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: {name: prevention-entry-and-data}
+spec:
+  podSelector:
+    matchLabels: {app: prevention}
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels: {app: gateway}
+        - namespaceSelector:
+            matchLabels: {kubernetes.io/metadata.name: monitoring}
+      ports: [{protocol: TCP, port: 8084}]
+  # No broker egress: this service owns one schema and talks to nothing else.
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels: {kubernetes.io/metadata.name: firewatch-infra}
+          podSelector:
+            matchLabels: {app: postgres}
+      ports: [{protocol: TCP, port: 5432}]
