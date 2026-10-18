@@ -32,7 +32,18 @@ services:
       - ./deploy/local/postgres-init.sh:/docker-entrypoint-initdb.d/10-firewatch.sh:ro
     networks: [backend]
     healthcheck:
-      test: [CMD-SHELL, 'pg_isready -U postgres -d postgres']
+      # pg_isready without -h probes the local Unix socket. The entrypoint runs
+      # docker-entrypoint-initdb.d against a temporary server started with
+      # listen_addresses='' that answers on that same socket, so a socket-only
+      # probe can report the container healthy while the real server is not yet
+      # listening on TCP and the databases do not exist. The *-migrate services
+      # would then dial and exit with `migration connection failed`.
+      # -h 127.0.0.1 makes the probe a real TCP connection, which succeeds only
+      # once the init script has finished and the real server is listening.
+      # scripts/verify_synthetic.py already treats TCP as readiness.
+      test:
+        - CMD-SHELL
+        - pg_isready -h 127.0.0.1 -p 5432 -U postgres -d postgres
       interval: 5s
       timeout: 3s
       retries: 30
