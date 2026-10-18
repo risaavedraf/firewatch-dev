@@ -23,12 +23,25 @@ python scripts/smoke.py
 | `http://localhost:8081` | Keycloak (`local-admin`; password in `.env`) |
 | `http://localhost:15672` | RabbitMQ management (`firewatch`; password in `.env`) |
 | `http://localhost:9090` | Prometheus, when the observability profile is enabled |
+| `http://localhost:3000` | Grafana, when the observability profile is enabled (`admin`; password in `.env`) |
 
 The endpoints bind only to host loopback. HTTP/password grants and the shared RabbitMQ development credential are local-only choices. PostgreSQL and the service APIs have no published host ports.
 
 ### Optional classifier selection
 
 `MODEL_ID` selects the classifier version the `risk` service runs. The compose stack passes it through and defaults it to `firewatch-rule-v2`, so the local stack classifies with v2 unless `.env` sets `MODEL_ID` to another registered version; the code default, when nothing is configured at all, stays `academic-rule-v1`. The selected version must have a row in the `models` table that the migrations create and seed, or the service fails closed at startup. Loading a different version there does not change the classifier in a running container: the version is fixed when the service starts.
+
+### Observability profile
+
+`docker compose --profile observability up -d` adds Prometheus and Grafana to the stack. Prometheus scrapes `gateway`, `jobs`, `risk`, `prevention` and the RabbitMQ exporter, and evaluates the rules in [`deploy/local/alerts.yml`](deploy/local/alerts.yml); Grafana comes up with the Prometheus datasource and the dashboard in [`deploy/local/grafana/`](deploy/local/grafana/) already provisioned, so the panels are files under review rather than something edited in the browser.
+
+**Grafana needs a password before it can start.** `docker compose` interpolates the whole file before it applies a profile, so the variable is required by every command in this directory, not only by the observability one: a missing value fails the parse with `required variable GRAFANA_ADMIN_PASSWORD is missing a value`. `scripts/init_env.py` writes it on a fresh checkout; on an existing `.env`, add the line yourself:
+
+```sh
+printf 'GRAFANA_ADMIN_PASSWORD=%s\n' "$(python -c 'import secrets;print(secrets.token_hex(24))')" >> .env
+```
+
+The password is required rather than defaulted on purpose: a shipped default would be a working credential nobody chose, and anonymous access would expose the panels to anyone with access to the host. Two things this profile still does **not** do, declared rather than implied: there is no Alertmanager, so a firing alert is visible in the Prometheus UI and as the `ALERTS` series but is not routed anywhere; and `/metrics` on each service is unauthenticated, the same posture it had before, which is a network or ingress concern for a real deployment.
 
 ```sh
 docker compose --profile observability up -d

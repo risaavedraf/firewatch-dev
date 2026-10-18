@@ -168,6 +168,26 @@ services:
     ports: ['127.0.0.1:9090:9090']
     networks: [backend, edge]
 
+  # Grafana reads Prometheus over the internal network; nothing else about it is
+  # configured here, because the datasource and the dashboard are files under
+  # deploy/local/grafana/, so the panels are reviewed like any other artifact.
+  # The admin password is required rather than defaulted: a fixed default would
+  # ship a working credential nobody chose.
+  grafana:
+    image: grafana/grafana:11.5.2
+    profiles: [observability]
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:?required}
+      GF_AUTH_ANONYMOUS_ENABLED: 'false'
+      GF_USERS_ALLOW_SIGN_UP: 'false'
+    volumes:
+      - ./deploy/local/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./deploy/local/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana-data:/var/lib/grafana
+    ports: ['127.0.0.1:3000:3000']
+    networks: [backend, edge]
+    depends_on: [prometheus]
+
   jobs-test:
     profiles: [test]
     build: {context: ., dockerfile: services/jobs/Dockerfile, target: test}
@@ -239,3 +259,4 @@ volumes:
   postgres-data:
   rabbitmq-data:
   prometheus-data:
+  grafana-data:

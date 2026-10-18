@@ -1,0 +1,17 @@
+# Dashboards are loaded from files, never from the browser: what an operator
+# sees is the reviewed JSON here. Deletion and UI edits are disabled for the
+# same reason — a change that lives only in the running volume is
+# invisible to review and disappears on the next recreate.
+apiVersion: 1
+
+providers:
+  - name: firewatch
+    orgId: 1
+    folder: FireWatch
+    type: file
+    disableDeletion: true
+    allowUiUpdates: false
+    updateIntervalSeconds: 60
+    options:
+      path: /var/lib/grafana/dashboards
+      foldersFromFilesStructure: false
