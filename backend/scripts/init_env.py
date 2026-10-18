@@ -7,7 +7,7 @@ root = Path(__file__).resolve().parent.parent
 names = [
     "POSTGRES_PASSWORD", "JOBS_DB_PASSWORD", "RISK_DB_PASSWORD",
     "KEYCLOAK_DB_PASSWORD", "RABBITMQ_PASSWORD", "KEYCLOAK_ADMIN_PASSWORD",
-    "DEMO_ADMIN_PASSWORD", "DEMO_VIEWER_PASSWORD",
+    "DEMO_ADMIN_PASSWORD", "DEMO_VIEWER_PASSWORD", "GRAFANA_ADMIN_PASSWORD",
 ]
 path = root / ".env"
 fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)

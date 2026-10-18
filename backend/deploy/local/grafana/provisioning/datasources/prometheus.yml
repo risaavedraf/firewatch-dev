@@ -1,0 +1,16 @@
+# The datasource is provisioned from this file rather than created by hand, so
+# a fresh volume comes up with the panels already pointed at Prometheus. The uid
+# is fixed because the dashboard JSON references it by that name.
+apiVersion: 1
+
+datasources:
+  - name: Prometheus
+    uid: prometheus
+    type: prometheus
+    access: proxy
+    url: http://prometheus:9090
+    isDefault: true
+    # The datasource is part of the deployment, not something an operator edits
+    # in the browser: a change made in the UI would be invisible to review and
+    # would disappear on the next recreate.
+    editable: false
