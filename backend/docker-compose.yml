@@ -99,6 +99,16 @@ services:
     depends_on:
       postgres: {condition: service_healthy}
 
+  prevention-migrate:
+    <<: *hardened
+    build: {context: ., dockerfile: services/prevention/Dockerfile}
+    command: [migrate]
+    restart: 'no'
+    environment:
+      DATABASE_URL: postgres://postgres:${POSTGRES_PASSWORD:?required}@postgres:5432/risk?sslmode=disable
+    depends_on:
+      postgres: {condition: service_healthy}
+
   jobs:
     <<: *hardened
     build: {context: ., dockerfile: services/jobs/Dockerfile}
@@ -120,6 +130,16 @@ services:
     depends_on:
       risk-migrate: {condition: service_completed_successfully}
       rabbitmq: {condition: service_healthy}
+
+  prevention:
+    <<: *hardened
+    build: {context: ., dockerfile: services/prevention/Dockerfile}
+    environment:
+      <<: *oidc
+      # Owns the `prevention` schema of this database, not the whole database.
+      DATABASE_URL: postgres://risk_app:${RISK_DB_PASSWORD:?required}@postgres:5432/risk?sslmode=disable
+    depends_on:
+      prevention-migrate: {condition: service_completed_successfully}
 
   gateway:
     <<: *hardened
@@ -163,6 +183,15 @@ services:
       risk-test-migrate: {condition: service_completed_successfully}
     networks: [backend]
 
+  prevention-test:
+    profiles: [test]
+    build: {context: ., dockerfile: services/prevention/Dockerfile, target: test}
+    environment:
+      TEST_DATABASE_URL: postgres://risk_app:${RISK_DB_PASSWORD:?required}@postgres:5432/risk_test?sslmode=disable
+    depends_on:
+      prevention-test-migrate: {condition: service_completed_successfully}
+    networks: [backend]
+
   jobs-test-migrate:
     <<: *hardened
     profiles: [test]
@@ -178,6 +207,17 @@ services:
     <<: *hardened
     profiles: [test]
     build: {context: ., dockerfile: services/risk/Dockerfile}
+    command: [migrate]
+    restart: 'no'
+    environment:
+      DATABASE_URL: postgres://postgres:${POSTGRES_PASSWORD:?required}@postgres:5432/risk_test?sslmode=disable
+    depends_on:
+      postgres: {condition: service_healthy}
+
+  prevention-test-migrate:
+    <<: *hardened
+    profiles: [test]
+    build: {context: ., dockerfile: services/prevention/Dockerfile}
     command: [migrate]
     restart: 'no'
     environment:

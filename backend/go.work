@@ -4,5 +4,6 @@ use (
 	./contracts/gen
 	./services/gateway
 	./services/jobs
+	./services/prevention
 	./services/risk
 )
