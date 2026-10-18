@@ -250,19 +250,19 @@ test('logout returns the role panel to the explicit unavailable state', async ()
 // port of the legacy assertion
 // `the permissions matrix documents the real server guards and marks what it cannot verify`.
 const GUARD_LINES: Record<string, RegExp> = {
-  'backend/services/gateway/internal/handler/gateway.go:69': /mux\.Handle\("\/v1\/audit"/,
-  'backend/services/gateway/internal/handler/gateway.go:125': /health\/ready/,
-  'backend/services/gateway/internal/handler/gateway.go:139': /auth := strings\.Fields/,
-  'backend/services/gateway/internal/handler/gateway.go:145': /verifier\.Verify\(ctx, auth\[1\]\)/,
-  'backend/services/risk/internal/handler/security.go:43': /role == "viewer" \|\| role == "admin"/,
-  'backend/services/risk/internal/handler/security.go:48': /fail\(w, 403, "forbidden"\)/,
-  'backend/services/risk/internal/handler/api.go:41': /"GET \/v1\/risk\/status"/,
-  'backend/services/risk/internal/handler/api.go:80': /"GET \/v1\/risk\/latest"/,
-  'backend/services/risk/internal/handler/api.go:81': /"GET \/v1\/risk\/history"/,
-  'backend/services/risk/internal/handler/api.go:82': /"GET \/v1\/risk\/zones"/,
-  'backend/services/risk/internal/handler/api.go:83': /"GET \/v1\/risk\/synthetic-scenarios"/,
-  'backend/services/risk/internal/handler/api.go:88': /"GET \/v1\/risk\/sources"/,
-  'backend/services/risk/internal/handler/api.go:89': /return Authorize\(verifier, mux\)/,
+  'backend/services/gateway/internal/handler/gateway.go:70': /mux\.Handle\("\/v1\/audit"/,
+  'backend/services/gateway/internal/handler/gateway.go:153': /health\/ready/,
+  'backend/services/gateway/internal/handler/gateway.go:177': /auth := strings\.Fields/,
+  'backend/services/gateway/internal/handler/gateway.go:183': /verifier\.Verify\(ctx, auth\[1\]\)/,
+  'backend/services/risk/internal/handler/security.go:59': /role == "viewer" \|\| role == "admin"/,
+  'backend/services/risk/internal/handler/security.go:64': /fail\(w, 403, "forbidden"\)/,
+  'backend/services/risk/internal/handler/api.go:53': /"GET \/v1\/risk\/status"/,
+  'backend/services/risk/internal/handler/api.go:92': /"GET \/v1\/risk\/latest"/,
+  'backend/services/risk/internal/handler/api.go:93': /"GET \/v1\/risk\/history"/,
+  'backend/services/risk/internal/handler/api.go:94': /"GET \/v1\/risk\/zones"/,
+  'backend/services/risk/internal/handler/api.go:95': /"GET \/v1\/risk\/synthetic-scenarios"/,
+  'backend/services/risk/internal/handler/api.go:105': /"GET \/v1\/risk\/sources"/,
+  'backend/services/risk/internal/handler/api.go:106': /return Authorize\(verifier, mux\)/,
   'backend/services/jobs/internal/handler/security.go:44': /role == "admin"/,
   'backend/services/jobs/internal/handler/security.go:49': /fail\(w, 403, "forbidden"\)/,
   'backend/services/jobs/internal/handler/api.go:86': /"GET \/v1\/jobs\/status"/,
@@ -341,7 +341,7 @@ test('no role selector, switcher or picker is ported anywhere in the view', () =
   // The matrix note names the real guards and the `ruta:línea` citation format.
   const matrixNote = document.getElementById('permissions-matrix-note')?.textContent ?? '';
   expect(matrixNote).toMatch(/ruta:línea/);
-  expect(matrixNote).toMatch(/risk\/internal\/handler\/security\.go:43/);
+  expect(matrixNote).toMatch(/risk\/internal\/handler\/security\.go:59/);
   expect(matrixNote).toMatch(/jobs\/internal\/handler\/security\.go:44/);
 });
 
