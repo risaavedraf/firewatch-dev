@@ -15,5 +15,6 @@ logs:
 integration:
 	docker compose --profile test run --build --rm jobs-test
 	docker compose --profile test run --build --rm risk-test
+	docker compose --profile test run --build --rm prevention-test
 demo:
 	python scripts/smoke.py
