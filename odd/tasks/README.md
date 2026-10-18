@@ -128,6 +128,7 @@ Plan de producción en [`../plan-produccion/README.md`](../plan-produccion/READM
 | Documento | Estado | Qué está entregado | Qué falta |
 | --- | --- | --- | --- |
 | [Preparación de presentación MVP](presentation/presentacion-mvp.md) | **Listo — documentación** | Cinco unidades y guía preparadas | Ejecutar/verificar backlog y confirmar demo; no aprueba los 132 IDs ni producción |
+| [Cierre para la presentación con el cliente](presentation-client-ready.md) | **Parcial — implementado y verificado en árbol local** | Frentes 1, 2, 3 y 9 más el ítem de código del frente 5 en `feat/presentacion-cliente`: ingesta configurable con ciclo de 15 min, validación por registro y frescura por fuente; segunda versión de modelo con activación y reversión; servicio `prevention` con su máquina de estados y la migración `009`; vista de acciones, panel de frescura y panel de versión de modelo; métricas en `gateway` y `jobs`; proxies del gateway para `prevention` y `/v1/models`; CI, compose y k8s cableados. 27 paquetes Go verdes, 304 pruebas de frontend verdes, `compose config` válido | Levantar la pila (exige Docker Desktop: este host no tiene daemon), la verificación end-to-end y las pruebas contra PostgreSQL, el recorrido de login en navegador y el render a 390 px, las 29 citas `archivo:línea` de `backend/docs` y `odd`, la línea `PREVENTION_URL` del `.env.example` del gateway (bloqueada por la política de seguridad) y los push/PRs/merges, que son decisión del usuario |
 
 ## Publicación
 
