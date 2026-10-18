@@ -43,12 +43,236 @@ func create(t *testing.T, ctx context.Context, store Store, community string) Ac
 	}
 	t.Cleanup(func() {
 		// Deleting the fixtures is safe here because this is a disposable test
-		// database and the rows were created by this test. History first: it
-		// references the action.
+		// database and the rows were created by this test. Child tables first: they
+		// reference the action.
+		_, _ = store.DB.Exec(context.Background(), `DELETE FROM prevention.action_reassessment WHERE action_id=$1`, action.ID)
+		_, _ = store.DB.Exec(context.Background(), `DELETE FROM prevention.action_evidence_review WHERE action_id=$1`, action.ID)
+		_, _ = store.DB.Exec(context.Background(), `DELETE FROM prevention.action_evidence WHERE action_id=$1`, action.ID)
 		_, _ = store.DB.Exec(context.Background(), `DELETE FROM prevention.action_history WHERE action_id=$1`, action.ID)
 		_, _ = store.DB.Exec(context.Background(), `DELETE FROM prevention.actions WHERE id=$1`, action.ID)
 	})
 	return action
+}
+
+// acceptWithEvidence drives an action to enviada, records one evidence snapshot,
+// records a sufficient human review of it and accepts the action. It is the only
+// path the acceptance guard admits, and later tests reuse it as a fixture.
+func acceptWithEvidence(t *testing.T, ctx context.Context, store Store, action Action) {
+	t.Helper()
+	for _, step := range []state.State{state.Asignada, state.EnCurso, state.Enviada} {
+		if _, err := store.Transition(ctx, action.ID, string(step), "admin-1", ""); err != nil {
+			t.Fatalf("transition to %s: %v", step, err)
+		}
+	}
+	evidence, err := store.AddEvidence(ctx, action.ID, NewEvidence{
+		Criterion:  "Acta y fotografías de la faja cortafuego",
+		References: []string{"https://example.org/informe/2026"},
+		CreatedBy:  "admin-1",
+	})
+	if err != nil {
+		t.Fatalf("add evidence: %v", err)
+	}
+	if _, err = store.ReviewEvidence(ctx, action.ID, evidence.ID, NewReview{
+		Decision: "suficiente", ReviewerSub: "reviewer-1", Note: "acta revisada",
+	}); err != nil {
+		t.Fatalf("review evidence: %v", err)
+	}
+	if _, err = store.Transition(ctx, action.ID, string(state.Aceptada), "admin-1", "cierre"); err != nil {
+		t.Fatalf("accept with sufficient evidence: %v", err)
+	}
+}
+
+// TestAcceptanceRequiresASufficientCurrentReview proves the guard in the database
+// and not only in the route fake: no evidence, an insufficient review and a review
+// of a replaced snapshot are all refused without a status or history change, and a
+// sufficient review of the current snapshot is what finally admits the edge.
+func TestAcceptanceRequiresASufficientCurrentReview(t *testing.T) {
+	ctx, store := testStore(t)
+	action := create(t, ctx, store, "valparaiso")
+	for _, step := range []state.State{state.Asignada, state.EnCurso, state.Enviada} {
+		if _, err := store.Transition(ctx, action.ID, string(step), "admin-1", ""); err != nil {
+			t.Fatalf("transition to %s: %v", step, err)
+		}
+	}
+
+	assertRefused := func(stage string) {
+		t.Helper()
+		before, err := store.Get(ctx, action.ID)
+		if err != nil {
+			t.Fatalf("get: %v", err)
+		}
+		if _, err := store.Transition(ctx, action.ID, string(state.Aceptada), "admin-1", ""); !errors.Is(err, ErrEvidenceInsufficient) {
+			t.Fatalf("%s: acceptance returned %v, want ErrEvidenceInsufficient", stage, err)
+		}
+		after, err := store.Get(ctx, action.ID)
+		if err != nil {
+			t.Fatalf("get: %v", err)
+		}
+		if after.Status != before.Status || !after.UpdatedAt.Equal(before.UpdatedAt) || len(after.History) != len(before.History) {
+			t.Errorf("%s: a refused acceptance changed the action", stage)
+		}
+	}
+	assertRefused("no evidence")
+
+	first, err := store.AddEvidence(ctx, action.ID, NewEvidence{
+		Criterion: "Acta", References: []string{"https://example.org/a"}, CreatedBy: "admin-1",
+	})
+	if err != nil {
+		t.Fatalf("add evidence: %v", err)
+	}
+	assertRefused("evidence without a review")
+
+	if _, err = store.ReviewEvidence(ctx, action.ID, first.ID, NewReview{Decision: "insuficiente", ReviewerSub: "reviewer-1"}); err != nil {
+		t.Fatalf("review evidence: %v", err)
+	}
+	assertRefused("insufficient review")
+
+	if _, err = store.ReviewEvidence(ctx, action.ID, first.ID, NewReview{Decision: "suficiente", ReviewerSub: "reviewer-2"}); err != nil {
+		t.Fatalf("review evidence: %v", err)
+	}
+	updated, err := store.Transition(ctx, action.ID, string(state.Aceptada), "admin-1", "cierre")
+	if err != nil {
+		t.Fatalf("acceptance with a sufficient current review: %v", err)
+	}
+	if updated.Status != string(state.Aceptada) {
+		t.Errorf("status %q, want aceptada", updated.Status)
+	}
+}
+
+// TestNewEvidenceInvalidatesTheEarlierReview pins the anti-reuse rule: a review
+// always names the snapshot it judged, so recording new evidence makes the old
+// approval stale and a review of the old snapshot is refused.
+func TestNewEvidenceInvalidatesTheEarlierReview(t *testing.T) {
+	ctx, store := testStore(t)
+	action := create(t, ctx, store, "valparaiso")
+	for _, step := range []state.State{state.Asignada, state.EnCurso, state.Enviada} {
+		if _, err := store.Transition(ctx, action.ID, string(step), "admin-1", ""); err != nil {
+			t.Fatalf("transition to %s: %v", step, err)
+		}
+	}
+	first, err := store.AddEvidence(ctx, action.ID, NewEvidence{Criterion: "Acta", References: []string{"https://example.org/a"}, CreatedBy: "admin-1"})
+	if err != nil {
+		t.Fatalf("add evidence: %v", err)
+	}
+	if _, err = store.ReviewEvidence(ctx, action.ID, first.ID, NewReview{Decision: "suficiente", ReviewerSub: "reviewer-1"}); err != nil {
+		t.Fatalf("review evidence: %v", err)
+	}
+	second, err := store.AddEvidence(ctx, action.ID, NewEvidence{Criterion: "Acta corregida", References: []string{"https://example.org/b"}, CreatedBy: "admin-1"})
+	if err != nil {
+		t.Fatalf("add evidence: %v", err)
+	}
+	if _, err = store.ReviewEvidence(ctx, action.ID, first.ID, NewReview{Decision: "suficiente", ReviewerSub: "reviewer-1"}); !errors.Is(err, ErrStaleEvidence) {
+		t.Fatalf("review of a replaced snapshot returned %v, want ErrStaleEvidence", err)
+	}
+	if _, err = store.Transition(ctx, action.ID, string(state.Aceptada), "admin-1", ""); !errors.Is(err, ErrEvidenceInsufficient) {
+		t.Fatalf("acceptance after new evidence returned %v, want ErrEvidenceInsufficient", err)
+	}
+	if _, err = store.ReviewEvidence(ctx, action.ID, second.ID, NewReview{Decision: "suficiente", ReviewerSub: "reviewer-1"}); err != nil {
+		t.Fatalf("review current evidence: %v", err)
+	}
+	if _, err = store.Transition(ctx, action.ID, string(state.Aceptada), "admin-1", ""); err != nil {
+		t.Fatalf("acceptance after reviewing the current snapshot: %v", err)
+	}
+	detail, err := store.Get(ctx, action.ID)
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if !detail.EvidenceSufficient {
+		t.Error("a sufficient current review must be reported as sufficient")
+	}
+	if len(detail.Evidence) != 2 || len(detail.EvidenceReviews) != 2 {
+		t.Errorf("detail carries %d evidence and %d reviews, want 2 and 2", len(detail.Evidence), len(detail.EvidenceReviews))
+	}
+}
+
+// TestTerminalActionRefusesNewEvidence keeps the evidence set of a closed action
+// frozen: aceptada is terminal and may not gain a snapshot that could never be
+// acted on.
+func TestTerminalActionRefusesNewEvidence(t *testing.T) {
+	ctx, store := testStore(t)
+	action := create(t, ctx, store, "valparaiso")
+	acceptWithEvidence(t, ctx, store, action)
+	if _, err := store.AddEvidence(ctx, action.ID, NewEvidence{Criterion: "tarde", References: []string{"https://example.org/c"}, CreatedBy: "admin-1"}); !errors.Is(err, ErrEvidenceState) {
+		t.Errorf("evidence on an accepted action returned %v, want ErrEvidenceState", err)
+	}
+}
+
+// insertSyntheticBatch publishes one synthetic batch for the shared risk schema.
+// It is deleted with the test. The test is skipped when the risk schema is absent,
+// because this package's own migrations never create it.
+func insertSyntheticBatch(t *testing.T, ctx context.Context, store Store, jobID, zone, requestedAt, publishedAt, modelVersion, riskLevel string, demo bool) {
+	t.Helper()
+	var exists bool
+	if err := store.DB.QueryRow(ctx, `SELECT to_regclass('public.batches') IS NOT NULL`).Scan(&exists); err != nil || !exists {
+		t.Skip("requires the shared risk schema (public.batches)")
+	}
+	_, err := store.DB.Exec(ctx, `INSERT INTO batches(id,job_id,zone_id,requested_at,published_at,valid_until,model_version,demo,location,risk_level)
+		VALUES(gen_random_uuid(),$1,$2,$3::timestamptz,$4::timestamptz,$4::timestamptz + interval '1 hour',$5,$6,ST_SetSRID(ST_MakePoint(-71.6,-33.0),4326),$7)`,
+		jobID, zone, requestedAt, publishedAt, modelVersion, demo, riskLevel)
+	if err != nil {
+		t.Fatalf("insert batch: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = store.DB.Exec(context.Background(), `DELETE FROM batches WHERE job_id=$1`, jobID)
+	})
+}
+
+// TestReassessmentLinksOnlyARealLaterSyntheticBatchOfTheSameCommune pins the four
+// server-side validations: the batch must exist, belong to the action's commune,
+// be synthetic and be later than the reviewed evidence. The derived fields come
+// from the batch, never from the client.
+func TestReassessmentLinksOnlyARealLaterSyntheticBatchOfTheSameCommune(t *testing.T) {
+	ctx, store := testStore(t)
+	action := create(t, ctx, store, "valparaiso-demo")
+	if _, err := store.LinkReassessment(ctx, action.ID, "6f1e7b0a-2f4f-4a3f-9a5b-1d3c7e9f2a44", "admin-1"); !errors.Is(err, ErrReassessmentUnavailable) {
+		t.Fatalf("an unpublished job returned %v, want ErrReassessmentUnavailable", err)
+	}
+
+	evidence, err := store.AddEvidence(ctx, action.ID, NewEvidence{Criterion: "Acta", References: []string{"https://example.org/a"}, CreatedBy: "admin-1"})
+	if err != nil {
+		t.Fatalf("add evidence: %v", err)
+	}
+	if _, err = store.ReviewEvidence(ctx, action.ID, evidence.ID, NewReview{Decision: "suficiente", ReviewerSub: "reviewer-1"}); err != nil {
+		t.Fatalf("review evidence: %v", err)
+	}
+
+	otherCommune := "6f1e7b0a-2f4f-4a3f-9a5b-1d3c7e9f2a45"
+	insertSyntheticBatch(t, ctx, store, otherCommune, "05101", "2026-10-18T10:00:00Z", "2026-10-18T10:05:00Z", "academic-rule-v1", "medio", true)
+	if _, err = store.LinkReassessment(ctx, action.ID, otherCommune, "admin-1"); !errors.Is(err, ErrReassessmentCommuneMismatch) {
+		t.Fatalf("another commune's batch returned %v, want ErrReassessmentCommuneMismatch", err)
+	}
+
+	older := "6f1e7b0a-2f4f-4a3f-9a5b-1d3c7e9f2a46"
+	insertSyntheticBatch(t, ctx, store, older, "valparaiso-demo", "2026-10-17T10:00:00Z", "2026-10-17T10:05:00Z", "academic-rule-v1", "bajo", true)
+	if _, err = store.LinkReassessment(ctx, action.ID, older, "admin-1"); !errors.Is(err, ErrReassessmentNotNew) {
+		t.Fatalf("a batch older than the review returned %v, want ErrReassessmentNotNew", err)
+	}
+
+	later := "6f1e7b0a-2f4f-4a3f-9a5b-1d3c7e9f2a47"
+	insertSyntheticBatch(t, ctx, store, later, "valparaiso-demo", "2030-01-01T10:00:00Z", "2030-01-01T10:05:00Z", "academic-rule-v1", "alto", true)
+	link, err := store.LinkReassessment(ctx, action.ID, later, "admin-1")
+	if err != nil {
+		t.Fatalf("link a real later batch: %v", err)
+	}
+	if link.JobID != later || link.Version != "academic-rule-v1" || link.RiskLevel != "alto" || link.ZoneID != "valparaiso-demo" {
+		t.Errorf("link %+v did not derive its fields from the batch", link)
+	}
+	if !link.Synthetic {
+		t.Error("synthetic must be copied from batches.demo, which is true here")
+	}
+	if link.CausalProof {
+		t.Error("a synthetic classification is never presented as causal proof")
+	}
+	if _, err = store.LinkReassessment(ctx, action.ID, later, "admin-1"); !errors.Is(err, ErrReassessmentAlreadyLinked) {
+		t.Fatalf("a second link of one job returned %v, want ErrReassessmentAlreadyLinked", err)
+	}
+	detail, err := store.Get(ctx, action.ID)
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if len(detail.Reassessments) != 1 || detail.Reassessments[0].JobID != later {
+		t.Errorf("detail reassessments %+v do not carry the accepted link", detail.Reassessments)
+	}
 }
 
 // TestCreateStartsAtPropuestaWithNoHistory pins the two create-time rules: the
@@ -133,15 +357,12 @@ func TestRefusedTransitionWritesNothing(t *testing.T) {
 
 // TestTerminalStatesRefuseEveryFurtherMove keeps aceptada and cancelada terminal
 // in the database and not only in the handler: no further history row may be
-// written for them.
+// written for them. The acceptance itself records evidence and a sufficient
+// review first, because the S2 guard admits no other path.
 func TestTerminalStatesRefuseEveryFurtherMove(t *testing.T) {
 	ctx, store := testStore(t)
 	action := create(t, ctx, store, "valparaiso")
-	for _, step := range []state.State{state.Asignada, state.EnCurso, state.Enviada, state.Aceptada} {
-		if _, err := store.Transition(ctx, action.ID, string(step), "admin-1", ""); err != nil {
-			t.Fatalf("transition to %s: %v", step, err)
-		}
-	}
+	acceptWithEvidence(t, ctx, store, action)
 	for _, target := range state.States() {
 		if _, err := store.Transition(ctx, action.ID, string(target), "admin-1", ""); !errors.Is(err, ErrInvalidTransition) {
 			t.Errorf("accepted action accepted a move to %s: %v", target, err)
