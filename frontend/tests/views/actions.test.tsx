@@ -60,7 +60,7 @@ function detailFixture(overrides: Record<string, unknown> = {}): Record<string, 
     ...actionFixture(overrides),
     history: [
       {
-        id: 'h-1',
+        id: 1,
         action_id: 'action-1',
         from_status: null,
         to_status: 'propuesta',
@@ -69,7 +69,7 @@ function detailFixture(overrides: Record<string, unknown> = {}): Record<string, 
         created_at: '2026-10-17T10:00:00Z',
       },
       {
-        id: 'h-2',
+        id: 2,
         action_id: 'action-1',
         from_status: 'propuesta',
         to_status: 'asignada',

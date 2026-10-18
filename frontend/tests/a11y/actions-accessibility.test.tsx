@@ -80,7 +80,7 @@ async function openAdminWithDetail(): Promise<void> {
       ...actionFixture(),
       history: [
         {
-          id: 'h-1',
+          id: 1,
           action_id: 'action-1',
           from_status: null,
           to_status: 'propuesta',

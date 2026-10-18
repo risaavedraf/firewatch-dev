@@ -253,6 +253,13 @@ function optionalString(value: unknown): boolean {
   return value === undefined || typeof value === 'string';
 }
 
+// The service serializes its history primary key — an `int64` column — as a JSON
+// number, so a string there would be a contract change rather than a tolerance.
+// Demanding a string rejected a real detail payload as `invalid_shape`.
+function optionalNumber(value: unknown): boolean {
+  return value === undefined || typeof value === 'number';
+}
+
 // --- Boundary guards -------------------------------------------------------
 //
 // The declarations in `types/api.ts` are not runtime guarantees. Each guard
@@ -520,7 +527,10 @@ function isPreventiveAction(value: unknown): value is PreventiveAction {
   if (!record(value)) return false;
   if (!nonempty(value.id) || !nonempty(value.community_code) || !nonempty(value.title)) return false;
   if (typeof value.status !== 'string') return false;
-  if (!optionalString(value.description) || !optionalString(value.priority) || !optionalString(value.assignee)) {
+  // `assignee` is a nullable column (`*string`), so an unassigned action answers
+  // `null`: demanding a string here rejected a real 200/201 as `invalid_shape`
+  // and the view rendered nothing.
+  if (!optionalString(value.description) || !optionalString(value.priority) || !nullableString(value.assignee)) {
     return false;
   }
   if (!nullableString(value.due_date) || !optionalString(value.created_by)) return false;
@@ -536,7 +546,7 @@ function isActionHistoryEntry(value: unknown): value is ActionHistoryEntry {
     record(value) &&
     nonempty(value.to_status) &&
     nullableString(value.from_status) &&
-    optionalString(value.id) &&
+    optionalNumber(value.id) &&
     optionalString(value.action_id) &&
     optionalString(value.actor_sub) &&
     optionalString(value.note) &&

@@ -157,7 +157,9 @@ export interface PreventiveAction {
   description?: string;
   priority?: string;
   status: string;
-  assignee?: string;
+  // Nullable on the wire: the column is `*string`, so an unassigned action
+  // carries `null` rather than an absent field.
+  assignee?: string | null;
   due_date?: string | null;
   created_by?: string;
   created_at?: string;
@@ -165,7 +167,8 @@ export interface PreventiveAction {
 }
 
 export interface ActionHistoryEntry {
-  id?: string;
+  // The service's `action_history.id` is an int64, so it arrives as a number.
+  id?: number;
   action_id?: string;
   from_status?: string | null;
   to_status: string;
