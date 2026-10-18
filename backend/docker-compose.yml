@@ -127,6 +127,10 @@ services:
       <<: *oidc
       DATABASE_URL: postgres://risk_app:${RISK_DB_PASSWORD:?required}@postgres:5432/risk?sslmode=disable
       AMQP_URL: amqp://firewatch:${RABBITMQ_PASSWORD:?required}@rabbitmq:5672/firewatch
+      # The classifier the service runs is chosen at startup, not by the registry's
+      # `active` row. The local stack selects v2 so the demo classifies with it;
+      # set MODEL_ID in .env to run another registered version instead.
+      MODEL_ID: ${MODEL_ID:-firewatch-rule-v2}
     depends_on:
       risk-migrate: {condition: service_completed_successfully}
       rabbitmq: {condition: service_healthy}
