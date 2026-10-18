@@ -23,3 +23,10 @@ scrape_configs:
   - job_name: rabbitmq
     static_configs:
       - targets: ['rabbitmq:15692']
+  # prevention publishes its own /metrics on its contract port, so it is scraped
+  # like the services it shares the database with. It is a distinct port because
+  # the gateway owns :8080 on this stack, and the target is the service name on
+  # the compose network.
+  - job_name: prevention
+    static_configs:
+      - targets: ['prevention:8084']
