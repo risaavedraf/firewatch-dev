@@ -78,11 +78,14 @@ function detailFixture(overrides: Record<string, unknown> = {}): Record<string, 
         created_at: '2026-10-17T11:00:00Z',
       },
     ],
+    evidence: [],
+    evidence_reviews: [],
+    reassessments: [],
+    evidence_sufficient: false,
   };
 }
 
-async function answerList(body: unknown, status = 200, requestId = ''): Promise<void> {
-  await act(async () => {
+async function answerList(body: unknown, status = 200, requestId = ''): Promise<void> {  await act(async () => {
     fetchStub.answer(ACTIONS_URL, body, status, requestId);
     await flush();
   });
@@ -325,7 +328,14 @@ test('a newly created action is shown with an empty history, because creation is
   // The create flow opens the created action; its detail carries no history row.
   await waitFor(() => expect(fetchStub.callsFor(`${ACTIONS_URL}/action-new`)).toHaveLength(1));
   await act(async () => {
-    fetchStub.answer(`${ACTIONS_URL}/action-new`, { ...actionFixture({ id: 'action-new' }), history: [] });
+    fetchStub.answer(`${ACTIONS_URL}/action-new`, {
+      ...actionFixture({ id: 'action-new' }),
+      history: [],
+      evidence: [],
+      evidence_reviews: [],
+      reassessments: [],
+      evidence_sufficient: false,
+    });
     await flush();
   });
   expect(document.getElementById('action-history-rows')?.querySelectorAll('tr')).toHaveLength(0);
@@ -385,3 +395,4 @@ test('logout clears the list, the detail, the form and the notice', async () => 
   expect(text('actions-notice')).toBe('');
   expect(text('actions-status')).toMatch(/conecta un token autorizado/i);
 });
+
