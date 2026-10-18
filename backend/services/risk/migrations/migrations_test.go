@@ -204,6 +204,39 @@ func TestSyntheticEvaluationMigrationIsGuardedAndIdempotent(t *testing.T) {
 	}
 }
 
+// TestFirewatchRuleV2MigrationIsGuardedAndIdempotent protects T5's registry row:
+// the second deterministic rule version is registered with the frozen fingerprint
+// it actually reports, stays inactive so it does not replace academic-rule-v1 by
+// default, and the statement is guarded so re-applying the file is a no-op.
+func TestFirewatchRuleV2MigrationIsGuardedAndIdempotent(t *testing.T) {
+	migration := migrationFor(t, 8)
+	if migration.Name != "firewatch_rule_v2" {
+		t.Errorf("migration 8 is named %q, want %q", migration.Name, "firewatch_rule_v2")
+	}
+	sql := migration.SQL
+	for _, fragment := range []string{
+		"'firewatch-rule-v2'",
+		"ON CONFLICT (version) DO NOTHING",
+		"'59259c4c0c470e5a0d512fe09f6c748c38fd29f9bc5d760d49754555c66e699b'",
+	} {
+		if !strings.Contains(sql, fragment) {
+			t.Errorf("008_firewatch_rule_v2.sql does not contain %q", fragment)
+		}
+	}
+	recorded := quotedSHA256.FindAllStringSubmatch(sql, -1)
+	if len(recorded) != 1 {
+		t.Fatalf("008_firewatch_rule_v2.sql records %d quoted sha256 literals, want exactly 1", len(recorded))
+	}
+	if got := recorded[0][1]; got != classify.FirewatchRuleV2ParamsHash {
+		t.Errorf("008_firewatch_rule_v2.sql records params hash %q, want the frozen %q", got, classify.FirewatchRuleV2ParamsHash)
+	}
+	for _, forbidden := range []string{"DROP TABLE", "TRUNCATE", "DELETE FROM", "UPDATE "} {
+		if strings.Contains(sql, forbidden) {
+			t.Errorf("008_firewatch_rule_v2.sql contains %q; schema migrations here never destroy data", forbidden)
+		}
+	}
+}
+
 func TestModelsIntegrityMigrationIsGuardedAndIdempotent(t *testing.T) {
 	// 006 states the registry's structural invariants in the schema: a placeholder
 	// can never be active, and at most one model may be active. The constraint is

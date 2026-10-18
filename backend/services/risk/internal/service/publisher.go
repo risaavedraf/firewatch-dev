@@ -144,6 +144,25 @@ func (p Publisher) Publish(ctx context.Context, request v1.Event) error {
 	if !set.Provenance.Complete {
 		return fmt.Errorf("provider %s declared an incomplete retrieval (provenance.complete=false): a partial retrieval must not produce a determined assessment", descriptor.ID)
 	}
+	// Record-level validation runs before classification, so an invalid record can
+	// never be interpreted as a reading. The rejection stays TRANSIENT: the
+	// provider is re-fetched on every attempt and a source can repair a bad batch,
+	// so discarding the job permanently would be the wrong call. Every rejection is
+	// logged with its cause and index so the invalid entry is attributable, and the
+	// error carries the same reasons for the dead-letter record.
+	validation := source.Validate(set)
+	if !validation.Complete() {
+		for _, rejection := range validation.Rejected {
+			slog.Warn("source_record_rejected",
+				"job_id", request.JobID,
+				"provider_id", descriptor.ID,
+				"index", rejection.Index,
+				"cause", string(rejection.Cause),
+				"detail", rejection.Detail,
+			)
+		}
+		return fmt.Errorf("provider %s returned %d invalid records: %s", descriptor.ID, len(validation.Rejected), validation.Reasons())
+	}
 	features, err := featuresFrom(set, request.ZoneID)
 	if err != nil {
 		return fmt.Errorf("build features from provider %s: %w", descriptor.ID, err)

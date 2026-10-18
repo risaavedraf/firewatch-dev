@@ -30,6 +30,36 @@ type fakeStore struct {
 	// lastBBox records the bbox the handler passed down, so a test can prove
 	// the parsed value reached the repository instead of being dropped.
 	lastBBox *repository.BBox
+	// Model registry state for the T6 endpoints.
+	models      []repository.ModelVersion
+	modelsErr   error
+	activateErr error
+	activated   []string
+}
+
+func (s *fakeStore) ListModels(context.Context) ([]repository.ModelVersion, error) {
+	if s.modelsErr != nil {
+		return nil, s.modelsErr
+	}
+	return s.models, nil
+}
+
+// ActivateModel records the requested version and returns that version marked
+// active, so the handler's success path is exercised without a database.
+func (s *fakeStore) ActivateModel(_ context.Context, version string) (repository.ModelVersion, error) {
+	s.activated = append(s.activated, version)
+	if s.activateErr != nil {
+		return repository.ModelVersion{}, s.activateErr
+	}
+	approved := time.Now().UTC()
+	for _, model := range s.models {
+		if model.Version == version {
+			model.Active = true
+			model.ApprovedAt = &approved
+			return model, nil
+		}
+	}
+	return repository.ModelVersion{Version: version, Kind: "rule", Active: true, ApprovedAt: &approved, Metrics: []byte("{}")}, nil
 }
 
 func (s *fakeStore) List(context.Context, string, int) ([]repository.Batch, error) {
@@ -189,6 +219,14 @@ func TestReadAccessAndInsufficientData(t *testing.T) {
 // the zones route is exercised through the same authorization as production.
 func authorizedServer(t *testing.T, role string, store Repository, providers ...DescriptorProvider) (http.Handler, string) {
 	t.Helper()
+	return authorizedServerWith(t, role, store, nil, providers...)
+}
+
+// authorizedServerWith is the full harness: it also wires the cycle runner, so
+// the freshness route and the manual trigger are exercised through the same
+// authorization as production.
+func authorizedServerWith(t *testing.T, role string, store Repository, runner CycleRunner, providers ...DescriptorProvider) (http.Handler, string) {
+	t.Helper()
 	key, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
 		t.Fatal(err)
@@ -207,7 +245,7 @@ func authorizedServer(t *testing.T, role string, store Repository, providers ...
 	if err != nil {
 		t.Fatal(err)
 	}
-	return New(store, verifier, providers...), token
+	return NewWithCycle(store, verifier, nil, runner, providers...), token
 }
 
 func getZones(t *testing.T, handler http.Handler, token, target string) *httptest.ResponseRecorder {
