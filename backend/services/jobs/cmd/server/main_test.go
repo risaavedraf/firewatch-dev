@@ -4,13 +4,16 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"firewatch.local/jobs/internal/handler"
 	"firewatch.local/jobs/internal/messaging"
+	"firewatch.local/jobs/internal/metrics"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -217,6 +220,95 @@ func TestReadinessHTTPUsesEffectiveSnapshot(t *testing.T) {
 			if w.Code != tc.code || calls != 1 || body.Reason != tc.reason ||
 				body.Dependencies.Broker.State != tc.broker || body.Dependencies.DeadLetter.State != tc.deadLetter {
 				t.Fatalf("status=%d body=%q snapshots=%d", w.Code, w.Body.String(), calls)
+			}
+		})
+	}
+}
+
+// S3 (T11): /metrics keeps every broker and dead-letter counter this service
+// already exported and adds the three signals it was missing — response classes
+// and the 5xx error total as "errors by class", the latency histogram, and the
+// process/runtime resources. The old series are asserted here verbatim, so a
+// later refactor of the new block cannot quietly drop the ones the dead-letter
+// and stuck-job alert rules are written against.
+func TestMetricsKeepsBrokerCountersAndAddsOperationalSignals(t *testing.T) {
+	var requests atomic.Uint64
+	requests.Store(9)
+	broker := &messaging.Broker{}
+	broker.Published.Store(3)
+	broker.Processed.Store(2)
+	broker.Rejected.Store(1)
+	// One success and one server error, so the classes, the error series and the
+	// histogram are all exercised through the real handler.
+	httpMetrics := &metrics.HTTPMetrics{}
+	httpMetrics.Observe(200, 15*time.Millisecond)
+	httpMetrics.Observe(503, 2*time.Second)
+	snapshot := func() messaging.DeadLetterSnapshot {
+		return messaging.DeadLetterSnapshot{Ready: true, Depth: 4, AgeSeconds: 12.5}
+	}
+	queuedAge := func(context.Context) float64 { return 91.5 }
+
+	response := httptest.NewRecorder()
+	metricsHandler(snapshot, &requests, broker, queuedAge, httpMetrics.Text, metrics.RuntimeText).
+		ServeHTTP(response, httptest.NewRequest("GET", "/metrics", nil))
+	if got := response.Header().Get("Content-Type"); got != "text/plain; version=0.0.4" {
+		t.Fatalf("/metrics Content-Type got %q want %q", got, "text/plain; version=0.0.4")
+	}
+	body := response.Body.String()
+	for _, want := range []string{
+		// The delivery and dead-letter surface that already existed.
+		"firewatch_http_requests_total 9",
+		"firewatch_broker_ready 1",
+		"firewatch_events_published_total 3",
+		"firewatch_events_processed_total 2",
+		"firewatch_events_rejected_total 1",
+		"firewatch_dead_letter_depth 4",
+		"firewatch_dead_letter_depth_age_seconds 12.5",
+		"firewatch_queued_job_age_seconds 91.5",
+		// Errors by class.
+		"firewatch_http_responses_total{class=\"2xx\"} 1",
+		"firewatch_http_responses_total{class=\"3xx\"} 0",
+		"firewatch_http_responses_total{class=\"4xx\"} 0",
+		"firewatch_http_responses_total{class=\"5xx\"} 1",
+		"firewatch_http_errors_total 1",
+		// Latency histogram.
+		"firewatch_http_request_duration_seconds_bucket{le=\"0.005\"} ",
+		"firewatch_http_request_duration_seconds_bucket{le=\"+Inf\"} 2",
+		"firewatch_http_request_duration_seconds_sum ",
+		"firewatch_http_request_duration_seconds_count 2",
+		// Process/runtime signals.
+		"firewatch_process_goroutines ",
+		"firewatch_process_cpu_seconds_total ",
+		"firewatch_process_memory_bytes ",
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("/metrics body %q does not contain %q", body, want)
+		}
+	}
+}
+
+// The middleware reads the status off a recorder wrapper, and that reading has
+// to match the code net/http actually sends: a handler that writes a body
+// without calling WriteHeader answers 200.
+func TestStatusRecorderReportsTheCodeNetHTTPSends(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		write func(http.ResponseWriter)
+		want  int
+	}{
+		{"explicit status", func(w http.ResponseWriter) { w.WriteHeader(http.StatusNoContent) }, http.StatusNoContent},
+		{"implicit 200", func(w http.ResponseWriter) { _, _ = w.Write([]byte("ok")) }, http.StatusOK},
+		{"nothing written", func(http.ResponseWriter) {}, http.StatusOK},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			recorder := &statusRecorder{ResponseWriter: httptest.NewRecorder()}
+			tc.write(recorder)
+			status := recorder.status
+			if status == 0 {
+				status = http.StatusOK
+			}
+			if status != tc.want {
+				t.Fatalf("recorded status %d want %d", status, tc.want)
 			}
 		})
 	}

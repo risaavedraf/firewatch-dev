@@ -52,7 +52,7 @@ func TestGatewayFiltersIdentityHeadersAndInternalRoutes(t *testing.T) {
 	for _, tc := range []struct {
 		path, token string
 		want        int
-	}{{"/v1/jobs", "valid", 202}, {"/v1/jobs", "invalid", 401}, {"/metrics", "valid", 404}, {"/health/live", "", 204}, {"/health/ready", "", 204}} {
+	}{{"/v1/jobs", "valid", 202}, {"/v1/jobs", "invalid", 401}, {"/metrics", "valid", 200}, {"/health/live", "", 204}, {"/health/ready", "", 204}} {
 		r := httptest.NewRequest("GET", tc.path, nil)
 		r.Header.Set("Authorization", "Bearer "+tc.token)
 		r.Header.Set("X-User-ID", "root")
@@ -679,5 +679,152 @@ func TestGatewayErrorBodyCarriesTheSameCorrelationIDAsTheHeader(t *testing.T) {
 	}
 	if body.RequestID != values[0] {
 		t.Errorf("body request_id got %q and header got %q, want the same literal", body.RequestID, values[0])
+	}
+}
+
+// S3 (T10): the gateway exposes its own /metrics. jobs and risk already do, and
+// the agreed p95 and error-rate alert rules are written against exactly these
+// series, so a gateway without them is the one hop of the request path that is
+// invisible when the page is slow or failing.
+//
+// The scrape carries no bearer token on purpose: a Prometheus job has no way to
+// obtain one, and /metrics is answered before the aggregate and anonymous
+// quotas so monitoring cannot be rate limited by, or push real traffic into,
+// the budgets those quotas bound.
+func TestGatewayExposesOperationalMetrics(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// The gateway does not author this 5xx: an upstream failure is the case
+		// the error series has to catch, so the class is read from the status
+		// actually written, not from what a handler decided.
+		if r.URL.Path == "/v1/audit" {
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+		w.WriteHeader(http.StatusAccepted)
+	}))
+	defer upstream.Close()
+	target, _ := url.Parse(upstream.URL)
+	app := New(verifier{}, target, target, allowedOrigin)
+
+	for _, tc := range []struct {
+		path, token string
+		want        int
+	}{
+		{"/v1/jobs", "valid", http.StatusAccepted},
+		{"/v1/audit", "valid", http.StatusInternalServerError},
+		{"/v1/jobs", "", http.StatusUnauthorized},
+		{"/v1/unknown", "valid", http.StatusNotFound},
+		{"/health/live", "", http.StatusNoContent},
+	} {
+		request := httptest.NewRequest(http.MethodGet, tc.path, nil)
+		if tc.token != "" {
+			request.Header.Set("Authorization", "Bearer "+tc.token)
+		}
+		if got := serve(app, request); got != tc.want {
+			t.Fatalf("%s got %d want %d", tc.path, got, tc.want)
+		}
+	}
+
+	scrape := httptest.NewRecorder()
+	app.ServeHTTP(scrape, httptest.NewRequest(http.MethodGet, "/metrics", nil))
+	if scrape.Code != http.StatusOK {
+		t.Fatalf("/metrics got %d want %d", scrape.Code, http.StatusOK)
+	}
+	if got := scrape.Header().Get("Content-Type"); got != "text/plain; version=0.0.4" {
+		t.Fatalf("/metrics Content-Type got %q want %q", got, "text/plain; version=0.0.4")
+	}
+	body := scrape.Body.String()
+	for _, want := range []string{
+		// Responses by class: the error classes are the "errors by class" signal.
+		"firewatch_http_responses_total{class=\"2xx\"} 2",
+		"firewatch_http_responses_total{class=\"3xx\"} 0",
+		"firewatch_http_responses_total{class=\"4xx\"} 2",
+		"firewatch_http_responses_total{class=\"5xx\"} 1",
+		"firewatch_http_errors_total 1",
+		// The latency histogram, cumulative and with the Prometheus sum/count pair.
+		"firewatch_http_request_duration_seconds_bucket{le=\"0.005\"} ",
+		"firewatch_http_request_duration_seconds_bucket{le=\"+Inf\"} 5",
+		"firewatch_http_request_duration_seconds_sum ",
+		"firewatch_http_request_duration_seconds_count 5",
+		// The process/runtime signals.
+		"firewatch_process_goroutines ",
+		"firewatch_process_cpu_seconds_total ",
+		"firewatch_process_memory_bytes ",
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("/metrics body %q does not contain %q", body, want)
+		}
+	}
+}
+
+// S3 (T10): a scrape must not be the thing that trips the rate limiter. The
+// anonymous and aggregate budgets exist to bound caller traffic; consuming them
+// with monitoring would let a busy Prometheus silence the page.
+func TestGatewayMetricsScrapeConsumesNoQuota(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusAccepted)
+	}))
+	defer upstream.Close()
+	target, _ := url.Parse(upstream.URL)
+	app := New(subjectVerifier{}, target, target, "")
+
+	for scrape := 0; scrape < 100; scrape++ {
+		response := httptest.NewRecorder()
+		app.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/metrics", nil))
+		if response.Code != http.StatusOK {
+			t.Fatalf("scrape %d got %d want %d", scrape, response.Code, http.StatusOK)
+		}
+	}
+
+	authenticated := httptest.NewRequest(http.MethodGet, "/v1/jobs", nil)
+	authenticated.Header.Set("Authorization", "Bearer actor-x")
+	if got := serve(app, authenticated); got != http.StatusAccepted {
+		t.Fatalf("authenticated request after a scrape burst got %d, want %d", got, http.StatusAccepted)
+	}
+	anonymous := httptest.NewRequest(http.MethodGet, "/v1/risk/latest", nil)
+	if got := serve(app, anonymous); got != http.StatusUnauthorized {
+		t.Fatalf("first anonymous request got %d, want %d", got, http.StatusUnauthorized)
+	}
+}
+
+// The middleware reads the status off a recorder wrapper. That reading has to
+// match the code net/http actually sends: a handler that writes a body without
+// calling WriteHeader answers 200, and a wrapper that reported 0 there would
+// silently drop that response out of the classes.
+func TestStatusRecorderReportsTheCodeNetHTTPSends(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		write func(http.ResponseWriter)
+		want  int
+	}{
+		{"explicit status", func(w http.ResponseWriter) { w.WriteHeader(http.StatusNoContent) }, http.StatusNoContent},
+		{"implicit 200", func(w http.ResponseWriter) { _, _ = w.Write([]byte("ok")) }, http.StatusOK},
+		{"nothing written", func(http.ResponseWriter) {}, http.StatusOK},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			recorder := &statusRecorder{ResponseWriter: httptest.NewRecorder()}
+			tc.write(recorder)
+			status := recorder.status
+			if status == 0 {
+				status = http.StatusOK
+			}
+			if status != tc.want {
+				t.Fatalf("recorded status %d want %d", status, tc.want)
+			}
+		})
+	}
+}
+
+// httputil.ReverseProxy flushes through http.NewResponseController, which only
+// finds the real writer if the wrapper lets it through. A wrapper that hid the
+// underlying ResponseWriter would turn every flush into an error and stall the
+// proxied responses the page waits on.
+func TestStatusRecorderKeepsTheWriterReachable(t *testing.T) {
+	inner := httptest.NewRecorder()
+	if err := http.NewResponseController(&statusRecorder{ResponseWriter: inner}).Flush(); err != nil {
+		t.Fatalf("flush through the recorder: %v", err)
+	}
+	if !inner.Flushed {
+		t.Fatal("the recorder swallowed the flush the reverse proxy relies on")
 	}
 }
