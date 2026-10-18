@@ -31,7 +31,10 @@ groups:
         # class-labelled responses counter only. Dividing by a series a service
         # does not export leaves its ratio empty, which is the defect this
         # expression closes.
-        expr: sum(rate(firewatch_http_errors_total[5m])) by (job) / clamp_min(sum(rate(firewatch_http_responses_total[5m])) by (job), 1) > 0.01
+        expr: >-
+          sum(rate(firewatch_http_errors_total[5m])) by (job)
+          / clamp_min(sum(rate(firewatch_http_responses_total[5m])) by (job), 1)
+          > 0.01
         for: 5m
         labels:
           severity: warning

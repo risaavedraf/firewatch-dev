@@ -84,7 +84,7 @@ Plan de producción en [`../plan-produccion/README.md`](../plan-produccion/READM
 | [2 — Servicio de inferencia](../plan-produccion/02-modelo-inferencia.md) | **Pendiente** | Implementar el *seam* y disponer de un modelo evaluable |
 | [3 — `prevention`](../plan-produccion/03-prevention.md) | **Pendiente** | Aprobar el alcance FWP03 antes de implementar |
 | [4 — Fallos terminales y replay](../plan-produccion/04-dlq-replay-terminal.md) | **Listo — verificado** | Escenario end-to-end (PostgreSQL + broker interrumpidos) y `-race` local |
-| [5 — Observabilidad](../plan-produccion/05-observabilidad.md) | **Parcial** | Medir; *ground truth*; instrumentar latencia y errores en `gateway` y `jobs`; enrutamiento de alertas |
+| [5 — Observabilidad](../plan-produccion/05-observabilidad.md) | **Parcial — monitoreo completo en la pila local** | Medir los umbrales (frente 6); *ground truth*; enrutamiento de alertas (no hay Alertmanager); monitoreo en los manifiestos de Kubernetes |
 | [6 — Autoscaling, carga y SLO](../plan-produccion/06-autoscaling-carga-slo.md) | **Parcial** | Ejecutar la carga, verificar el HPA y medir el RTO |
 | [7 — Firma, registry y rollout](../plan-produccion/07-firma-registry-rollout.md) | **Pendiente** | Firma, promoción y despliegue verificado |
 | [8 — Gobierno y seguridad (U1)](../plan-produccion/08-gobierno-seguridad-u1.md) | **Pendiente** | Responsables y aprobación de controles |
