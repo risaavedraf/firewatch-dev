@@ -57,12 +57,17 @@ El trabajo está desglosado en **un archivo por spec** (frente) en esta misma ca
 
 ## 4. Bloqueos y decisiones humanas
 
-**Resueltas el 2026-10-16** (sesión A2 y sesión B; el detalle vive en [`handoff-sesion-a2.md`](handoff-sesion-a2.md) §«Decisiones resueltas» y en el `## Log` de cada frente):
+**Resueltas el 2026-10-16** (sesión A2 y sesión B; el detalle autoritativo vive en el `## Log` de cada frente y en el documento de su unidad):
 
 - **Política de recuperación** (frente 4 / BH-07): estado terminal `failed` solo con evidencia real, reintentos sin cambios y replay de operador; el hueco de un job `queued` se resolvió **extendiendo el replay** con confirmación explícita, no aceptándolo.
 - **Cuotas del gateway** (BH-03) y **política de tokens** (BH-09, ratificada por escrito).
 - **Umbrales y herramientas de operación** (frentes 5 y 6): objetivos fijados y registrados — **ninguno medido todavía**.
 - **Rama y entrega**: `fix/backend-hardening-bh`, publicada como PR #29.
+
+Dos decisiones de la sesión A2 no aparecen arriba porque no son políticas de producto; su handoff de origen se retiró el 2026-10-17 y quedan registradas aquí:
+
+- **D1 — Alcance de A2 en dos niveles.** Nivel 1, cerrable sin entorno: BH-03, BH-07 (política, implementación y tests unitarios), BH-08 y BH-09. Nivel 2, diferido con razón registrada y **sin marcar hecho**: BH-02 (scan de imágenes), verificación end-to-end de BH-07, BH-10, BH-04/05/06/11 y BH-12.
+- **D7 — Archivos.** `.agents/` fuera de control de versiones; la documentación commiteada completa; los artefactos de los frentes 5/6 (sesión B) junto a `backend/docs/operations.md` en el mismo commit.
 
 **Siguen abiertas:**
 
@@ -171,7 +176,7 @@ Límite declarado: latencia/errores/recursos se implementaron **solo en el servi
 
 ## 9. Registro de avance — Sesión A (cerrada el 2026-10-16)
 
-Sesión ejecutada sobre los frentes **4 (fallos terminales y replay), 10 (OpenAPI y contract tests) y 11 (hardening BH-01…BH-11)**, en la rama `fix/backend-hardening-bh`. El detalle autoritativo vive en el `## Log` de [`04-dlq-replay-terminal.md`](04-dlq-replay-terminal.md) (L3–L4), [`10-openapi-contract-tests.md`](10-openapi-contract-tests.md), [`11-hardening-bh.md`](11-hardening-bh.md) (L3) y en el documento de cada unidad (`../tasks/security/backend-hardening/NN-*.md`). El cierre tiene su propia sección en [`handoff-sesion-a2.md`](handoff-sesion-a2.md) §«Estado al cierre de la sesión A».
+Sesión ejecutada sobre los frentes **4 (fallos terminales y replay), 10 (OpenAPI y contract tests) y 11 (hardening BH-01…BH-11)**, en la rama `fix/backend-hardening-bh`. El detalle autoritativo vive en el `## Log` de [`04-dlq-replay-terminal.md`](04-dlq-replay-terminal.md) (L3–L4), [`10-openapi-contract-tests.md`](10-openapi-contract-tests.md), [`11-hardening-bh.md`](11-hardening-bh.md) (L3) y en el documento de cada unidad (`../tasks/security/backend-hardening/NN-*.md`).
 
 ### 9.1 Estado por unidad
 
@@ -200,6 +205,35 @@ Un job `queued` cuya entrega no se puede rastrear no tenía camino de reparació
 
 Nada por decisión pendiente: lo que queda abierto lo está por **entorno** (Docker, PostgreSQL, broker, clúster) o por **otra sesión** (frentes 1, 2, 3, 5/6, 7, 8, 9, 12, 13, 14, 15). El frente 6 conserva su ejecución pendiente y el frente 5 su único ítem de código abierto, ambos de la sesión B. El inventario completo, con qué desbloquea cada cosa, está en §10.
 
+### 9.5 Historial de la rama y rebanadas de revisión del PR #29
+
+Registro trasladado desde el handoff de la sesión A2, retirado el 2026-10-17. La rama `fix/backend-hardening-bh` acumula el frente completo (≈6 000 líneas autoradas), así que el PR #29 conviene revisarlo **por rebanada, una unidad por commit**, no como un diff único.
+
+| Commit | Unidad | Contenido |
+| --- | --- | --- |
+| `02911d5` | BH-01 | Baseline de toolchain (cherry-pick de `ee215b4`) |
+| `750cd80` | BH-08 | Contract tests contra rutas reales (cherry-pick de `b91714b`) |
+| `702aff6` | BH-02 | Evidencia de scans de dependencias (cherry-pick de `aed5e09`) |
+| `03baa09` | BH-09 | Tests negativos de la política de tokens (cherry-pick de `678a13a`) |
+| `2ab9cc4` | — | `.agents/` fuera de control de versiones |
+| `9326daa` | frentes 5/6 | Métricas de resultado y artefactos operativos de la sesión B, con `operations.md` |
+| `784f589` | — | El plan de producción, un archivo por frente |
+| `e025643` | — | Arranque del frontend, semántica de health y citas obsoletas |
+| `29811ef` | A2 | Decisiones D1–D7 y las políticas acordadas |
+| `2981dc5` | **BH-03** | Tres capas de cuota del gateway |
+| `54c1ce8` | **BH-07 u1** | Estado terminal `failed` en la fila del job |
+| `1436dae` | BH-08 | Corrección de dos descripciones falsas del contrato, más las sondas del verificador |
+| `0b0f784` | **BH-07 u2** | Reporte de fallo `risk`→`jobs` y señal de job atascado |
+| `537f83a` | **BH-07 u3** | Replay de operador |
+| `a00b483` | BH-07 | Corrección del bloqueador del runbook, más las sondas del verificador |
+| `90f48a6` | **BH-07 u4** | Replay de un job `queued` con confirmación explícita, y compuerta de conflicto de lote en `risk` |
+| `cf23d20` | BH-08 | Corrección de la descripción de `ErrorResponse.code` |
+| `c2f5044` | — | Cierre documental |
+| `8ac654e` | CI | `risk`: copia de `contracts/openapi/` en la imagen de pruebas |
+| `761c16c` | CI | Citas de guards del backend en el test de frontend |
+
+Los SHA de la sesión A cambiaron al reaplicarse sobre `main`: `ee215b4`→`02911d5`, `b91714b`→`750cd80`, `aed5e09`→`702aff6`, `678a13a`→`03baa09`. El detalle por unidad vive en su documento en [`../tasks/security/backend-hardening/`](../tasks/security/backend-hardening/).
+
 ## 10. Pendientes consolidados (2026-10-16)
 
 Todo lo que sigue abierto de este plan, en un solo lugar, con **qué lo desbloquea**: una decisión humana, un entorno, otra sesión o otro frente. El estado por unidad de hardening vive en [`../tasks/security/backend-hardening/`](../tasks/security/backend-hardening/) y el índice del §5 se mantiene en [`../tasks/README.md`](../tasks/README.md).
@@ -225,11 +259,25 @@ Todo lo que sigue abierto de este plan, en un solo lugar, con **qué lo desbloqu
 ### 10.1 Entrega y revisión
 
 - **PR #29** (`fix/backend-hardening-bh` → `main`, 83 archivos, +6 033/−188): abierto, `MERGEABLE` y con CI verde. **El merge es decisión del usuario.**
-- Conviene revisarlo **por rebanada** (una unidad por commit); el reparto está en [`handoff-sesion-a2.md`](handoff-sesion-a2.md) §«Estado al cierre de la sesión A».
+- Conviene revisarlo **por rebanada** (una unidad por commit); el reparto está en §9.5 de este documento.
 - **Revisión nativa:** el candidato `b0f77f9..HEAD` se evaluó como `high` con `review_due`; la oferta se hizo una vez y el consentimiento quedó **declinado para este candidato** (`lineage_created: false`, sin autoridad consumida). Un cambio nuevo vuelve a tener su propia oferta.
 - **Duplicado pendiente de decisión humana:** `odd/tasks/backend-hardening/` sigue en la raíz del índice de tareas; su copia verificada vive en `odd/tasks/security/backend-hardening/`.
 
 ### 10.2 Registro
 
 El §5 exige declarar **qué está entregado** y **qué falta** en [`../tasks/README.md`](../tasks/README.md). Al cerrar la sesión A se actualizó allí la fila del plan de hardening, las doce unidades y se agregó la tabla de los frentes de este plan, para que el índice deje de decir que BH-01…BH-11 están pendientes.
+
+## 11. Cierre para la presentación con el cliente (2026-10-17)
+
+La entrega de esta semana tiene su propio plan, con specs, tareas y reparto por worktrees: [`../tasks/presentation-client-ready.md`](../tasks/presentation-client-ready.md). Cubre los frentes **1, 2, 3 y 9** más el ítem de código abierto del frente 5 (latencia y errores en `gateway` y `jobs`), y deja declarado fuera lo que exige modelo entrenado, clúster o decisiones de gobierno.
+
+| Ola | Rama | Tareas | Módulo |
+| --- | --- | --- | --- |
+| 1 | `feat/ingesta-ciclo` | T1–T6 | `risk` (ingesta, ciclo de 15 min, segunda versión de modelo) |
+| 1 | `feat/prevention` | T7–T9 | `prevention` (servicio nuevo) |
+| 1 | `feat/metrics-operacion` | T10–T11 | `gateway`, `jobs` |
+| 2 | `feat/frontend-completo` | T12–T15 | `frontend` |
+| cierre | `feat/presentacion-cliente` | T16–T19 | integración y verificación end-to-end |
+
+Sigue en pie lo que este documento ya declara fuera: frentes 6, 7, 8, 12, 13, 14, 15 y las unidades BH que exigen entorno.
 

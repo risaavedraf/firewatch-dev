@@ -140,8 +140,8 @@ Plan de producción en [`../plan-produccion/README.md`](../plan-produccion/READM
 | Entrega | Estado | Qué falta |
 | --- | --- | --- |
 | Traslado de documentos por área | **Listo** | Los 9 documentos viven en `backend/`, `security/`, `frontend/`, `reviews/` y `presentation/`; este índice apunta a las rutas nuevas |
-| Referencias con rutas antiguas en superficies ajenas | **Pendiente** | `odd/urgent/README.md` conserva rutas relativas antiguas; su sesión propietaria las actualizará con la tabla old→new de abajo |
-| Duplicado residual en la raíz | **Pendiente** | `odd/tasks/backend-hardening/` sigue en la raíz y debe eliminarse; su copia verificada vive en `security/backend-hardening/`. Decisión humana pendiente: no se consolidó ni se borró |
+| Referencias con rutas antiguas en superficies ajenas | **Listo** | Verificado el 2026-10-17 con `odd/tools/check_md_links.py` (`BROKEN: 0`, `--self-test` 22/22): todas las referencias de `odd/urgent/README.md` resuelven; las dos rutas backtick que seguían root-relativas se corrigieron a relativas al documento |
+| Duplicado residual en la raíz | **Listo** | Eliminado el 2026-10-17: `odd/tasks/backend-hardening/` contenía las versiones previas (`Status: pending`, casillas sin marcar) de 12 unidades; la copia trabajada y verificada vive en `security/backend-hardening/` |
 | Área `publication/` agregada | **Listo** | El documento de preparación de publicación vive en `publication/` y este índice apunta a la ruta nueva |
 
 ## Convención práctica

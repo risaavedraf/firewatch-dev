@@ -9,7 +9,7 @@ La evidencia revisada describe un prototipo/demo local con clasificación acadé
 | Afirmación | Estado que se puede comunicar | Evidencia / límite |
 |---|---|---|
 | Demo geoespacial y flujo backend | Implementación documentada; validar la demo en el entorno de presentación | `../tasks/backend/firewatch-app-funcional.md`; `../tasks/backend/firewatch-geospatial-map.md`; código de riesgo en `backend/services/risk/internal/handler/api.go` |
-| Escenarios sintéticos: catálogo de seis perfiles y selección opcional por API | Implementado y probado dentro de su alcance sintético; la ruta autenticada completa se ejecutó una vez en un stack desechable aislado | `../tasks/backend/urgent-synthetic-mvp.md`; `backend/docs/synthetic-scenarios.md`; `backend/contracts/openapi/firewatch-v1.yaml` |
+| Escenarios sintéticos: catálogo de seis perfiles y selección opcional por API | Implementado y probado dentro de su alcance sintético; la ruta autenticada completa se ejecutó una vez en un stack desechable aislado | `../tasks/backend/urgent-synthetic-mvp.md`; `../../backend/docs/synthetic-scenarios.md`; `../../backend/contracts/openapi/firewatch-v1.yaml` |
 | Naturaleza de la clasificación | Regla académica; datos sintéticos, no riesgo observado | `../tasks/backend/firewatch-data-contract.md` |
 | Pruebas frontend | Hay una ronda registrada; no acredita login/logout real en Keycloak ni revisión móvil | `../tasks/reviews/judgment-day-frontend-round2.md`; pendientes indicados en `../tasks/frontend/client-proposal-page.md` |
 | Hardening | Pendiente/no demostrado por la documentación revisada | `../tasks/security/backend-hardening.md`; unidades `../tasks/security/backend-hardening/` |
@@ -70,4 +70,4 @@ Cada ID del checklist fuente está asignado una sola vez. “Pendiente de verifi
 
 ## Fuente de verdad y limpieza
 
-El detalle normativo y los criterios íntegros están en `Referencias/tareas_verificacion_implementacion_IA.md`; este backlog los referencia por ID, no los reemplaza. El documento de seguimiento ODD es `../tasks/presentation/presentacion-mvp.md`. Esta carpeta es temporal y se puede retirar cuando el equipo lo decida; no existe una eliminación automática.
+El detalle normativo y los criterios íntegros están en `../../Referencias/tareas_verificacion_implementacion_IA.md`; este backlog los referencia por ID, no los reemplaza. El documento de seguimiento ODD es `../tasks/presentation/presentacion-mvp.md`. Esta carpeta es temporal y se puede retirar cuando el equipo lo decida; no existe una eliminación automática.

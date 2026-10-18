@@ -1,7 +1,7 @@
 # Frente 11 — Hardening backend BH-01…BH-11
 
 - **Grupo de entrega:** G3 — Robustez de backend.
-- **Estado:** Sesión A cerrada (2026-10-16, rama `fix/backend-hardening-bh`). BH-01 cerrada; BH-03 y BH-07 implementadas, incluido el replay de un job `queued`; BH-08 re-verificada en línea y BH-09 ratificada por escrito; BH-02 parcial (faltan el inventario y el scan de imágenes, que exigen daemon de Docker); BH-04/05/06/10/11 diferidas por entorno; BH-12 diferida. Detalle, decisiones y rebanadas de revisión en [`handoff-sesion-a2.md`](handoff-sesion-a2.md) §«Estado al cierre de la sesión A».
+- **Estado:** Sesión A cerrada (2026-10-16, rama `fix/backend-hardening-bh`). BH-01 cerrada; BH-03 y BH-07 implementadas, incluido el replay de un job `queued`; BH-08 re-verificada en línea y BH-09 ratificada por escrito; BH-02 parcial (faltan el inventario y el scan de imágenes, que exigen daemon de Docker); BH-04/05/06/10/11 diferidas por entorno; BH-12 diferida. Detalle, decisiones y rebanadas de revisión en [`README.md`](README.md) §9 y §9.5.
 - **Riesgo (Task Size):** alto al implementar — ítems 2 (seguridad), 4 (idempotencia concurrente) y 5 (despliegue/release).
 - **Depende de:** BH-01 abre la secuencia; BH-11 depende de BH-02/04/05/06; BH-12 requiere activación explícita y baseline BH-08.
 - **Seam / superficie:** toolchain, gateway, broker, transporte, red Kubernetes, consumidores, OpenAPI, autenticación, persistencia e infraestructura de despliegue.
