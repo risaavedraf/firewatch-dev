@@ -832,10 +832,12 @@ func TestStatusRecorderKeepsTheWriterReachable(t *testing.T) {
 }
 
 // T21: /v1/prevention/ is a route of its own to the prevention service, exactly
-// as /v1/jobs and /v1/risk are for theirs. All four frozen contract routes live
-// below that one prefix, so the single registration has to forward all four —
-// and none of them may be answered by jobs or risk, whose 404 would look like a
-// missing endpoint to the page.
+// as /v1/jobs and /v1/risk are for theirs. All seven contract routes (the four
+// frozen action routes plus the three S2 evidence/review/reassessment writes)
+// live below that one prefix, so the single registration has to forward all of
+// them — and none may be answered by jobs or risk, whose 404 would look like a
+// missing endpoint to the page. No wildcard beyond this already-scoped prefix is
+// added.
 func TestGatewayRoutesEveryPreventionRouteToItsOwnUpstream(t *testing.T) {
 	const actionID = "0f0a0e4e-4b3c-4f8e-9a1d-6c2b8d5e7a90"
 
@@ -880,6 +882,9 @@ func TestGatewayRoutesEveryPreventionRouteToItsOwnUpstream(t *testing.T) {
 		"POST /v1/prevention/actions",
 		"GET /v1/prevention/actions/" + actionID,
 		"POST /v1/prevention/actions/" + actionID + "/transitions",
+		"POST /v1/prevention/actions/" + actionID + "/evidence",
+		"POST /v1/prevention/actions/" + actionID + "/evidence/7/reviews",
+		"POST /v1/prevention/actions/" + actionID + "/reassessments",
 	}
 	for index, tc := range []struct {
 		method, path, body string
@@ -888,6 +893,9 @@ func TestGatewayRoutesEveryPreventionRouteToItsOwnUpstream(t *testing.T) {
 		{http.MethodPost, "/v1/prevention/actions", `{"community_code":"valparaiso-demo","title":"Cortafuegos"}`},
 		{http.MethodGet, "/v1/prevention/actions/" + actionID, ""},
 		{http.MethodPost, "/v1/prevention/actions/" + actionID + "/transitions", `{"to":"asignada","note":"turno noche"}`},
+		{http.MethodPost, "/v1/prevention/actions/" + actionID + "/evidence", `{"criterion":"acta","references":["https://example.org/a"]}`},
+		{http.MethodPost, "/v1/prevention/actions/" + actionID + "/evidence/7/reviews", `{"decision":"suficiente"}`},
+		{http.MethodPost, "/v1/prevention/actions/" + actionID + "/reassessments", `{"job_id":"0f0a0e4e-4b3c-4f8e-9a1d-6c2b8d5e7a90"}`},
 	} {
 		var body io.Reader
 		if tc.body != "" {

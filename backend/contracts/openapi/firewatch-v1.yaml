@@ -807,9 +807,13 @@ paths:
                   request_id: {type: string, format: uuid}
         '409':
           description: >-
-            The action exists but the frozen state machine does not allow this
-            move from its current status. Nothing is written: the status,
-            updated_at and the history are unchanged.
+            The transition was refused and nothing was written. Two conditions
+            share this status: the frozen state machine does not allow the move
+            from the current status (invalid_transition), or the move is
+            aceptada and the current evidence snapshot does not carry a
+            sufficient human review (insufficient_evidence). In both cases the
+            status, updated_at and the history are unchanged and no evidence
+            record is created.
           headers:
             X-Request-ID: {$ref: '#/components/headers/RequestID'}
             Cache-Control: {schema: {type: string, enum: [no-store]}}
@@ -819,7 +823,9 @@ paths:
                 type: object
                 required: [code, request_id]
                 properties:
-                  code: {type: string, enum: [invalid_transition]}
+                  code:
+                    type: string
+                    enum: [invalid_transition, insufficient_evidence]
                   request_id: {type: string, format: uuid}
         '415':
           description: JSON content type required.
@@ -849,6 +855,357 @@ paths:
                 required: [code, request_id]
                 properties:
                   code: {type: string, enum: [invalid_transition_request]}
+                  request_id: {type: string, format: uuid}
+        '429': {$ref: '#/components/responses/RateLimited'}
+        '502': {$ref: '#/components/responses/UpstreamUnavailable'}
+        '503': {$ref: '#/components/responses/StorageUnavailable'}
+  /v1/prevention/actions/{id}/evidence:
+    post:
+      operationId: recordPreventiveEvidence
+      description: >-
+        Admin only; a viewer is refused 403. Appends one immutable evidence
+        snapshot: a sufficiency criterion plus bounded, credential-free
+        http(s) references. Nothing is fetched or uploaded, a reference is a
+        citation only. Recording a new snapshot does not edit earlier ones, and
+        it makes any earlier approval stale so an acceptance cannot reuse it. A
+        terminal action (aceptada or cancelada) refuses new evidence 409
+        invalid_evidence_state and nothing is written.
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: {type: string, format: uuid}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/PreventiveEvidenceCreate'}
+      responses:
+        '201':
+          description: The appended evidence snapshot.
+          headers:
+            X-Request-ID: {$ref: '#/components/headers/RequestID'}
+            Cache-Control: {schema: {type: string, enum: [no-store]}}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/PreventiveEvidence'}
+        '400':
+          description: The path id is not a UUID.
+          headers:
+            X-Request-ID: {$ref: '#/components/headers/RequestID'}
+            Cache-Control: {schema: {type: string, enum: [no-store]}}
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [code, request_id]
+                properties:
+                  code: {type: string, enum: [invalid_action_id]}
+                  request_id: {type: string, format: uuid}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404':
+          description: No action holds this id.
+          headers:
+            X-Request-ID: {$ref: '#/components/headers/RequestID'}
+            Cache-Control: {schema: {type: string, enum: [no-store]}}
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [code, request_id]
+                properties:
+                  code: {type: string, enum: [action_not_found]}
+                  request_id: {type: string, format: uuid}
+        '409':
+          description: >-
+            The action is terminal, so its evidence set is frozen. Nothing is
+            written.
+          headers:
+            X-Request-ID: {$ref: '#/components/headers/RequestID'}
+            Cache-Control: {schema: {type: string, enum: [no-store]}}
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [code, request_id]
+                properties:
+                  code: {type: string, enum: [invalid_evidence_state]}
+                  request_id: {type: string, format: uuid}
+        '415':
+          description: JSON content type required.
+          headers:
+            X-Request-ID: {$ref: '#/components/headers/RequestID'}
+            Cache-Control: {schema: {type: string, enum: [no-store]}}
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [code, request_id]
+                properties:
+                  code: {type: string, enum: [json_required]}
+                  request_id: {type: string, format: uuid}
+        '422':
+          description: >-
+            Invalid input; nothing was appended. A blank or over-long criterion,
+            no references, more than ten references, a reference that is not
+            http(s), has no host or embeds credentials, an unknown field, or a
+            body that is not one JSON document is refused here.
+          headers:
+            X-Request-ID: {$ref: '#/components/headers/RequestID'}
+            Cache-Control: {schema: {type: string, enum: [no-store]}}
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [code, request_id]
+                properties:
+                  code: {type: string, enum: [invalid_evidence_request]}
+                  request_id: {type: string, format: uuid}
+        '429': {$ref: '#/components/responses/RateLimited'}
+        '502': {$ref: '#/components/responses/UpstreamUnavailable'}
+        '503': {$ref: '#/components/responses/StorageUnavailable'}
+  /v1/prevention/actions/{id}/evidence/{evidence_id}/reviews:
+    post:
+      operationId: reviewPreventiveEvidence
+      description: >-
+        Admin only; a viewer is refused 403. Appends one attributable HUMAN
+        sufficiency decision about one evidence snapshot. The reviewer is the
+        verified token subject and the date is the server clock; neither is
+        client-supplied. The reviewed snapshot must still be the current one: a
+        decision about a replaced snapshot is refused 409 stale_evidence rather
+        than recorded and ignored. Recording new evidence therefore invalidates
+        an earlier approval. A terminal action refuses the review 409
+        invalid_evidence_state.
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: {type: string, format: uuid}
+        - in: path
+          name: evidence_id
+          required: true
+          schema: {type: integer, format: int64, minimum: 1}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PreventiveEvidenceReviewCreate'
+      responses:
+        '201':
+          description: The appended human decision.
+          headers:
+            X-Request-ID: {$ref: '#/components/headers/RequestID'}
+            Cache-Control: {schema: {type: string, enum: [no-store]}}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/PreventiveEvidenceReview'}
+        '400':
+          description: >-
+            The path action id is not a UUID, or evidence_id is not a positive
+            integer.
+          headers:
+            X-Request-ID: {$ref: '#/components/headers/RequestID'}
+            Cache-Control: {schema: {type: string, enum: [no-store]}}
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [code, request_id]
+                properties:
+                  code:
+                    type: string
+                    enum: [invalid_action_id, invalid_evidence_id]
+                  request_id: {type: string, format: uuid}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404':
+          description: The action or the evidence snapshot does not exist.
+          headers:
+            X-Request-ID: {$ref: '#/components/headers/RequestID'}
+            Cache-Control: {schema: {type: string, enum: [no-store]}}
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [code, request_id]
+                properties:
+                  code:
+                    type: string
+                    enum: [action_not_found, evidence_not_found]
+                  request_id: {type: string, format: uuid}
+        '409':
+          description: >-
+            The decision was refused and nothing was written: the named snapshot
+            is no longer the current one (stale_evidence), or the action is
+            terminal (invalid_evidence_state).
+          headers:
+            X-Request-ID: {$ref: '#/components/headers/RequestID'}
+            Cache-Control: {schema: {type: string, enum: [no-store]}}
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [code, request_id]
+                properties:
+                  code:
+                    type: string
+                    enum: [stale_evidence, invalid_evidence_state]
+                  request_id: {type: string, format: uuid}
+        '415':
+          description: JSON content type required.
+          headers:
+            X-Request-ID: {$ref: '#/components/headers/RequestID'}
+            Cache-Control: {schema: {type: string, enum: [no-store]}}
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [code, request_id]
+                properties:
+                  code: {type: string, enum: [json_required]}
+                  request_id: {type: string, format: uuid}
+        '422':
+          description: >-
+            Invalid input; nothing was appended. A missing or unknown decision,
+            an unknown field, or a body that is not one JSON document is refused
+            here.
+          headers:
+            X-Request-ID: {$ref: '#/components/headers/RequestID'}
+            Cache-Control: {schema: {type: string, enum: [no-store]}}
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [code, request_id]
+                properties:
+                  code: {type: string, enum: [invalid_review_request]}
+                  request_id: {type: string, format: uuid}
+        '429': {$ref: '#/components/responses/RateLimited'}
+        '502': {$ref: '#/components/responses/UpstreamUnavailable'}
+        '503': {$ref: '#/components/responses/StorageUnavailable'}
+  /v1/prevention/actions/{id}/reassessments:
+    post:
+      operationId: linkPreventiveReassessment
+      description: >-
+        Admin only; a viewer is refused 403. Persists the link between the
+        action and one REAL published synthetic batch. The client names only the
+        server-produced job; batch, version, risk level, commune, synthetic flag
+        and publication instant are read from the shared risk database and can
+        never be fabricated. The batch must exist, belong to the action's
+        community_code, be synthetic (batches.demo) and be later than the
+        current evidence snapshot AND the latest human review, so an older batch
+        cannot be relabelled as a reassessment. The new classification stays
+        independent: it is visibly synthetic and is never presented as causal
+        proof that risk was reduced. When the job has not published yet the
+        answer is a retryable 409 reassessment_unavailable, never a fabricated
+        association.
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: {type: string, format: uuid}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/PreventiveReassessmentCreate'}
+      responses:
+        '201':
+          description: The persisted link with the batch-derived classification.
+          headers:
+            X-Request-ID: {$ref: '#/components/headers/RequestID'}
+            Cache-Control: {schema: {type: string, enum: [no-store]}}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/PreventiveReassessment'}
+        '400':
+          description: The path id is not a UUID.
+          headers:
+            X-Request-ID: {$ref: '#/components/headers/RequestID'}
+            Cache-Control: {schema: {type: string, enum: [no-store]}}
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [code, request_id]
+                properties:
+                  code: {type: string, enum: [invalid_action_id]}
+                  request_id: {type: string, format: uuid}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404':
+          description: No action holds this id.
+          headers:
+            X-Request-ID: {$ref: '#/components/headers/RequestID'}
+            Cache-Control: {schema: {type: string, enum: [no-store]}}
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [code, request_id]
+                properties:
+                  code: {type: string, enum: [action_not_found]}
+                  request_id: {type: string, format: uuid}
+        '409':
+          description: >-
+            The link was refused and nothing was written.
+            reassessment_unavailable means the job has no published batch yet
+            (retry);
+            reassessment_not_synthetic means the batch is not a synthetic
+            classification (S2 authorizes synthetic reassessments only);
+            reassessment_commune_mismatch means the batch belongs to another
+            community; reassessment_not_new means the batch predates the current
+            evidence or its latest review; reassessment_already_linked means the
+            job is already linked.
+          headers:
+            X-Request-ID: {$ref: '#/components/headers/RequestID'}
+            Cache-Control: {schema: {type: string, enum: [no-store]}}
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [code, request_id]
+                properties:
+                  code:
+                    type: string
+                    enum:
+                      - reassessment_unavailable
+                      - reassessment_not_synthetic
+                      - reassessment_commune_mismatch
+                      - reassessment_not_new
+                      - reassessment_already_linked
+                  request_id: {type: string, format: uuid}
+        '415':
+          description: JSON content type required.
+          headers:
+            X-Request-ID: {$ref: '#/components/headers/RequestID'}
+            Cache-Control: {schema: {type: string, enum: [no-store]}}
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [code, request_id]
+                properties:
+                  code: {type: string, enum: [json_required]}
+                  request_id: {type: string, format: uuid}
+        '422':
+          description: >-
+            Invalid input; nothing was linked. A missing job_id that is not a
+            UUID, an unknown field such as a client-supplied batch_id,
+            version or risk_level, or a body that is not one JSON document is
+            refused here.
+          headers:
+            X-Request-ID: {$ref: '#/components/headers/RequestID'}
+            Cache-Control: {schema: {type: string, enum: [no-store]}}
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [code, request_id]
+                properties:
+                  code: {type: string, enum: [invalid_reassessment_request]}
                   request_id: {type: string, format: uuid}
         '429': {$ref: '#/components/responses/RateLimited'}
         '502': {$ref: '#/components/responses/UpstreamUnavailable'}
@@ -1465,7 +1822,12 @@ components:
       allOf:
         - $ref: '#/components/schemas/PreventiveAction'
         - type: object
-          required: [history]
+          required:
+            - history
+            - evidence
+            - evidence_reviews
+            - reassessments
+            - evidence_sufficient
           properties:
             history:
               type: array
@@ -1474,6 +1836,31 @@ components:
                 Creation is not a transition, so a newly created action has an
                 empty history.
               items: {$ref: '#/components/schemas/PreventiveActionHistory'}
+            evidence:
+              type: array
+              description: >-
+                Append-only evidence snapshots, oldest first. A later snapshot
+                never edits an earlier one.
+              items: {$ref: '#/components/schemas/PreventiveEvidence'}
+            evidence_reviews:
+              type: array
+              description: >-
+                Append-only human decisions, oldest first. Each names the
+                snapshot it judged, so a decision is attributable and cannot be
+                silently reused after new evidence is recorded.
+              items: {$ref: '#/components/schemas/PreventiveEvidenceReview'}
+            reassessments:
+              type: array
+              description: >-
+                Append-only links to real synthetic batches, oldest first.
+              items: {$ref: '#/components/schemas/PreventiveReassessment'}
+            evidence_sufficient:
+              type: boolean
+              description: >-
+                True only when the CURRENT evidence snapshot (the newest one)
+                carries a human decision of suficiente. A review of a replaced
+                snapshot never counts. This is the same fact the acceptance
+                guard evaluates; the transition route remains the authority.
     PreventiveActionCreate:
       type: object
       additionalProperties: false
@@ -1498,3 +1885,157 @@ components:
         note:
           type: string
           description: Optional free-text reason, recorded in the history row.
+    PreventiveEvidence:
+      type: object
+      description: >-
+        One immutable evidence snapshot recorded by an admin: the sufficiency
+        criterion plus the references a human is asked to judge.
+      required: [id, action_id, criterion, references, created_by, created_at]
+      properties:
+        id: {type: integer, format: int64, minimum: 1}
+        action_id: {type: string, format: uuid}
+        criterion:
+          type: string
+          description: Non-blank, at most 2000 characters.
+        references:
+          type: array
+          minItems: 1
+          maxItems: 10
+          description: >-
+            Bounded http(s) citations. Each has a host, no embedded credentials
+            and at most 2048 bytes. Nothing is fetched or uploaded.
+          items: {type: string, format: uri, maxLength: 2048}
+        created_by:
+          type: string
+          description: Verified token subject of the admin who recorded it.
+        created_at: {type: string, format: date-time}
+    PreventiveEvidenceCreate:
+      type: object
+      additionalProperties: false
+      required: [criterion, references]
+      properties:
+        criterion:
+          type: string
+          description: Non-blank, at most 2000 characters.
+        references:
+          type: array
+          minItems: 1
+          maxItems: 10
+          items: {type: string, format: uri, maxLength: 2048}
+    PreventiveEvidenceReview:
+      type: object
+      description: >-
+        One attributable HUMAN sufficiency decision about exactly one snapshot.
+        The reviewer and the date are server-set.
+      required:
+        - id
+        - action_id
+        - evidence_id
+        - decision
+        - reviewer_sub
+        - note
+        - reviewed_at
+      properties:
+        id: {type: integer, format: int64, minimum: 1}
+        action_id: {type: string, format: uuid}
+        evidence_id:
+          type: integer
+          format: int64
+          minimum: 1
+          description: The evidence snapshot this decision judged.
+        decision:
+          type: string
+          enum: [suficiente, insuficiente]
+        reviewer_sub:
+          type: string
+          description: >-
+            Verified token subject of the reviewer, never a client-supplied
+            identity.
+        note:
+          type: string
+          description: Free-text reason; the empty string means none was given.
+        reviewed_at:
+          type: string
+          format: date-time
+          description: Server clock at the accepted decision.
+    PreventiveEvidenceReviewCreate:
+      type: object
+      additionalProperties: false
+      required: [decision]
+      properties:
+        decision:
+          type: string
+          enum: [suficiente, insuficiente]
+        note:
+          type: string
+          description: Optional free-text reason.
+    PreventiveReassessment:
+      type: object
+      description: >-
+        A persisted link between an action and one real published batch. Every
+        classification field is derived server-side from the shared risk
+        database. The classification is synthetic and is never causal proof of
+        risk reduction.
+      required:
+        - id
+        - action_id
+        - job_id
+        - batch_id
+        - version
+        - risk_level
+        - zone_id
+        - synthetic
+        - causal_proof
+        - batch_published_at
+        - linked_by
+        - linked_at
+      properties:
+        id: {type: integer, format: int64, minimum: 1}
+        action_id: {type: string, format: uuid}
+        job_id: {type: string, format: uuid}
+        batch_id:
+          type: string
+          format: uuid
+          description: The real batch id read from the shared risk database.
+        version:
+          type: string
+          description: The batch's model_version, never a client value.
+        risk_level:
+          type: string
+          enum: [bajo, medio, alto, desconocido]
+        zone_id:
+          type: string
+          description: The batch's own commune, checked against community_code.
+        synthetic:
+          type: boolean
+          description: >-
+            Copied from batches.demo after the service refused a non-synthetic
+            batch; never stamped unconditionally.
+        causal_proof:
+          type: boolean
+          enum: [false]
+          description: >-
+            Always false: an independent synthetic classification is not
+            evidence that the action reduced risk.
+        batch_published_at:
+          type: string
+          format: date-time
+          description: >-
+            The batch's publication instant, used as the temporal proof that it
+            is later than the reviewed evidence.
+        linked_by:
+          type: string
+          description: Verified token subject of the admin who linked it.
+        linked_at: {type: string, format: date-time}
+    PreventiveReassessmentCreate:
+      type: object
+      additionalProperties: false
+      required: [job_id]
+      properties:
+        job_id:
+          type: string
+          format: uuid
+          description: >-
+            The server-produced job whose published batch is the reassessment.
+            The batch, version, risk level and synthetic flag are never accepted
+            from the client.

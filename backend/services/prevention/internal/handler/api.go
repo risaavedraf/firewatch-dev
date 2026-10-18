@@ -21,7 +21,7 @@ import (
 )
 
 // Repository is the persistence this transport needs. It is declared here, not
-// returned by the store, so the transport depends on the four operations of the
+// returned by the store, so the transport depends on the operations of the
 // contract and nothing else.
 type Repository interface {
 	// List returns the actions matching the optional filters, newest first. An
@@ -35,6 +35,12 @@ type Repository interface {
 	// Transition advances one action in a single guarded transaction, or refuses
 	// with repository.ErrInvalidTransition leaving nothing written.
 	Transition(ctx context.Context, id, to, actorSub, note string) (repository.Action, error)
+	// AddEvidence appends one evidence snapshot to a non-terminal action.
+	AddEvidence(ctx context.Context, id string, input repository.NewEvidence) (repository.Evidence, error)
+	// ReviewEvidence appends one human decision about the current snapshot.
+	ReviewEvidence(ctx context.Context, id string, evidenceID int64, input repository.NewReview) (repository.EvidenceReview, error)
+	// LinkReassessment persists the server-validated link to one real batch.
+	LinkReassessment(ctx context.Context, id, jobID, linkedBy string) (repository.Reassessment, error)
 }
 
 // body limits. The create body is a small, flat document; the transition body is
@@ -52,6 +58,7 @@ func New(store Repository, verifier Verifier) http.Handler {
 	mux.HandleFunc("POST /v1/prevention/actions", create(store))
 	mux.HandleFunc("GET /v1/prevention/actions/{id}", detail(store))
 	mux.HandleFunc("POST /v1/prevention/actions/{id}/transitions", transition(store))
+	registerEvidenceRoutes(mux, store)
 	return Authorize(verifier, mux)
 }
 
@@ -274,6 +281,10 @@ func transition(store Repository) http.HandlerFunc {
 		}
 		if errors.Is(err, repository.ErrInvalidTransition) {
 			fail(w, 409, "invalid_transition")
+			return
+		}
+		if errors.Is(err, repository.ErrEvidenceInsufficient) {
+			fail(w, 409, "insufficient_evidence")
 			return
 		}
 		if err != nil {
