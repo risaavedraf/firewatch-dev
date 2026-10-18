@@ -115,7 +115,28 @@ func classifyPublishError(err error) error {
 	return err
 }
 
-// Publish persists one assessed batch and its outbox event.
+// jobSettlement declares whether a persisted batch reports a job completion.
+//
+// It is a named value instead of a bare bool so the call sites state the
+// contract: an explicitly requested job is SETTLED by its batch, while an
+// automatic cycle's batch is only PERSISTED. The decision belongs to the method
+// that owns the origin (Publish or PublishScheduled), never to a request field
+// or an actor string, so a real delivery whose actor happens to read
+// "cycle-scheduler" still settles its job and an automatic cycle never can.
+type jobSettlement bool
+
+const (
+	// settleJob is the explicitly requested job origin: the batch completes the
+	// job the consumer is holding, so exactly one completion event is emitted.
+	settleJob jobSettlement = true
+	// persistOnly is the internal automatic cycle origin: the batch is stored for
+	// the risk API and the freshness panel, but no completion is emitted, because
+	// Jobs never stored the job id the cycle minted.
+	persistOnly jobSettlement = false
+)
+
+// Publish persists one assessed batch and its outbox event for an explicitly
+// requested job.
 //
 // The transaction shape is deliberate: the inbox row is the deduplication gate,
 // the batches insert is idempotent on job_id, and the outbox event is written in
@@ -124,6 +145,33 @@ func classifyPublishError(err error) error {
 // swallowed: it emits a completion for the stored batch (see
 // redispatchCompletion) so an operator re-dispatch can still settle the job.
 func (s Store) Publish(ctx context.Context, request v1.Event, assessment Assessment) error {
+	return s.persist(ctx, request, assessment, settleJob)
+}
+
+// PublishScheduled persists one assessed batch produced by the internal
+// automatic cycle, WITHOUT the job completion Publish emits.
+//
+// An automatic cycle is not a job: Jobs never stored a row for the id the cycle
+// mints, so a risk.batch.published.v1 naming it is refused by the jobs consumer
+// as an unknown job and dead-lettered permanently - one dead letter per zone per
+// cycle, forever, which is the defect this method closes. The batch itself is
+// persisted through the same transaction as an explicit publication, with the
+// same inbox deduplication, the same idempotent insert on job_id and the same
+// scenario metadata, so nothing but the completion changes.
+//
+// Suppression is scoped to this method, not to the consumer: Jobs keeps
+// rejecting an unknown job id, and Store.Complete's unknown-job protection is
+// untouched. A missing or malformed completion is still a defect; an automatic
+// cycle simply never produces one.
+func (s Store) PublishScheduled(ctx context.Context, request v1.Event, assessment Assessment) error {
+	return s.persist(ctx, request, assessment, persistOnly)
+}
+
+// persist is the single transaction both publication origins share. Only the
+// completion step depends on the settlement: the inbox gate, the idempotent
+// batches insert and the metadata are identical for a requested job and an
+// automatic cycle.
+func (s Store) persist(ctx context.Context, request v1.Event, assessment Assessment, settlement jobSettlement) error {
 	tx, err := s.DB.Begin(ctx)
 	if err != nil {
 		return err
@@ -187,6 +235,14 @@ func (s Store) Publish(ctx context.Context, request v1.Event, assessment Assessm
 		// stuck. The id is read rather than invented - a completion must never name a
 		// batch that was not stored - and a read that sees no row is returned as an
 		// error so the delivery is retried instead of committing an empty result.
+		//
+		// An automatic cycle never reaches that repair: it mints a fresh job id per
+		// zone, so a conflict here is a repeated scheduled delivery and there is no
+		// job to settle. The inbox row above is committed so the duplicate stays a
+		// no-op instead of dead-lettering a completion nobody requested.
+		if settlement == persistOnly {
+			return tx.Commit(ctx)
+		}
 		var existingBatchID string
 		if err = tx.QueryRow(ctx, `SELECT id::text FROM batches WHERE job_id=$1`, request.JobID).Scan(&existingBatchID); err != nil {
 			return err
@@ -199,6 +255,12 @@ func (s Store) Publish(ctx context.Context, request v1.Event, assessment Assessm
 		if _, err = tx.Exec(ctx, `INSERT INTO outbox(id,routing_key,payload) VALUES($1,$2,$3)`, event.ID, event.Type, body); err != nil {
 			return err
 		}
+		return tx.Commit(ctx)
+	}
+	if settlement == persistOnly {
+		// The batch is stored, and that is all an automatic cycle reports. Emitting
+		// the completion would hand the jobs consumer an event naming a job row it
+		// never created, which it refuses and dead-letters permanently.
 		return tx.Commit(ctx)
 	}
 	event := request

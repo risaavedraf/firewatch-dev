@@ -20,6 +20,7 @@ import (
 
 	v1 "firewatch.local/contracts/events/v1"
 	"firewatch.local/risk/internal/classify"
+	"firewatch.local/risk/internal/cycle"
 	"firewatch.local/risk/internal/repository"
 	"firewatch.local/risk/internal/source"
 	"github.com/google/uuid"
@@ -260,5 +261,54 @@ func TestPublisherPersistsScenarioMetadataThroughTheRealStore(t *testing.T) {
 	}
 	if strings.Contains(string(payload), "scenario_id") || strings.Contains(string(payload), "evaluated_at") {
 		t.Fatalf("a legacy result event grew scenario keys: %s", payload)
+	}
+}
+
+// S1 integration: an automatic cycle persists one batch per zone through the real
+// store and leaves no completion event behind. Jobs never stored the id the cycle
+// mints, so every completion would be refused as an unknown job and dead-lettered
+// permanently, once per zone per cycle. The explicit job keeps its own
+// completion, so closing the scheduled path did not weaken the lifecycle.
+func TestAutomaticCyclePersistsBatchesWithoutACompletionEvent(t *testing.T) {
+	if testing.Short() || os.Getenv("TEST_DATABASE_URL") == "" {
+		t.Skip("requires migrated disposable risk database")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	db, err := pgxpool.New(ctx, os.Getenv("TEST_DATABASE_URL"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	store := repository.Store{DB: db}
+	publisher := Publisher{Provider: source.NewFixtureProvider(), Classifier: classify.NewAcademicRuleV1(), Store: store}
+	instant := time.Now().UTC().Add(-time.Minute).Truncate(time.Second)
+	ids := make([]string, 0, 3)
+	runner := cycle.New(source.NewFixtureProvider(), &publisher, cycle.Options{
+		Zones:    []string{"valparaiso-demo"},
+		Interval: cycle.DefaultInterval,
+		Now:      func() time.Time { return instant },
+		NewID:    func() string { id := uuid.NewString(); ids = append(ids, id); return id },
+	})
+	if result := runner.RunOnce(ctx); !result.Complete {
+		t.Fatalf("cycle result = %+v", result)
+	}
+	// The batch is stored under the job id the cycle minted...
+	var jobID string
+	if err = db.QueryRow(ctx, `SELECT job_id::text FROM batches WHERE job_id::text = ANY($1::text[])`, ids).Scan(&jobID); err != nil {
+		t.Fatalf("the cycle persisted no batch under any id it minted: %v", err)
+	}
+	// ...and no completion event names any id the cycle minted, so the jobs
+	// consumer has nothing to refuse and dead-letter.
+	var completions int
+	if err = db.QueryRow(ctx, `SELECT count(*) FROM outbox WHERE routing_key=$1 AND payload->>'job_id' = ANY($2::text[])`, v1.BatchPublishedType, ids).Scan(&completions); err != nil || completions != 0 {
+		t.Fatalf("the automatic cycle emitted %d completion events, want 0: %v", completions, err)
+	}
+	explicit := v1.Event{ID: uuid.NewString(), Type: v1.JobRequestedType, OccurredAt: instant, TraceID: uuid.NewString(), JobID: uuid.NewString(), ActorID: "integration-test", ZoneID: "valparaiso-demo", RequestedAt: instant, Demo: true}
+	if err = publisher.Publish(ctx, explicit); err != nil {
+		t.Fatalf("publish the requested job: %v", err)
+	}
+	if err = db.QueryRow(ctx, `SELECT count(*) FROM outbox WHERE routing_key=$1 AND payload->>'job_id'=$2`, v1.BatchPublishedType, explicit.JobID).Scan(&completions); err != nil || completions != 1 {
+		t.Fatalf("the requested job emitted %d completions, want exactly 1: %v", completions, err)
 	}
 }

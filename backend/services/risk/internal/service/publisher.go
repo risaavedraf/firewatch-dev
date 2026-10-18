@@ -19,6 +19,17 @@ type BatchWriter interface {
 	Publish(ctx context.Context, request v1.Event, assessment repository.Assessment) error
 }
 
+// ScheduledBatchWriter persists one assessed batch produced by the internal
+// automatic cycle, without the job completion BatchWriter.Publish emits.
+//
+// It is a separate interface on purpose: a store that cannot persist a scheduled
+// publication must make the scheduled path fail closed rather than fall back to
+// a completion for a job that was never requested, which is the defect this seam
+// exists to close.
+type ScheduledBatchWriter interface {
+	PublishScheduled(ctx context.Context, request v1.Event, assessment repository.Assessment) error
+}
+
 // RiskObserver records the outcome of one published assessment. It is optional:
 // a nil observer disables recording, so the publication path has no hard
 // dependency on the metrics surface and its unit tests need no counter.
@@ -89,14 +100,48 @@ func (p Publisher) selectedProvider(request v1.Event) (source.Provider, error) {
 	return provider, nil
 }
 
-// Publish fetches the provider selected for the request, classifies what it
-// returned and persists the assessment with the request that caused it.
+// Publish runs the publication path for one explicitly requested job: the batch
+// is persisted through the store's completion seam, which settles the job.
+func (p Publisher) Publish(ctx context.Context, request v1.Event) error {
+	if p.Classifier == nil || p.Store == nil {
+		return errors.New("publisher is misconfigured: classifier and store are required")
+	}
+	return p.publish(ctx, request, p.Store.Publish)
+}
+
+// PublishScheduled runs the SAME publication path for one zone of the internal
+// automatic cycle. It differs from Publish in exactly one place: the batch is
+// persisted through the store's scheduled seam, which emits no job completion.
+//
+// Jobs never stored the job id a cycle mints, so a completion naming it is
+// refused as an unknown job and dead-lettered permanently, once per zone per
+// cycle. The seam is a method of its own rather than a flag read off the
+// request, so the origin is decided by the code that owns the publication: a
+// delivery whose actor happens to read "cycle-scheduler" still settles its job
+// through Publish, and a scheduled publication can never settle one. Everything
+// else - scenario resolution, provider selection, validation, classification,
+// policy identity, logging and the outcome counter - is shared, so suppressing
+// the completion cannot become a way to skip a guard.
+func (p Publisher) PublishScheduled(ctx context.Context, request v1.Event) error {
+	if p.Classifier == nil || p.Store == nil {
+		return errors.New("publisher is misconfigured: classifier and store are required")
+	}
+	scheduled, ok := p.Store.(ScheduledBatchWriter)
+	if !ok {
+		return errors.New("publisher is misconfigured: the store cannot persist a scheduled publication without a job completion")
+	}
+	return p.publish(ctx, request, scheduled.PublishScheduled)
+}
+
+// publish fetches the provider selected for the request, classifies what it
+// returned and hands the finished assessment to the persistence seam that
+// matches the publication's origin.
 //
 // The order is fixed and each step guards the next:
 //
-//  1. the two invariants - classifier and store - must be present, and the
-//     provider selected below must not be absent, so a misconfigured process
-//     fails explicitly instead of panicking;
+//  1. the two invariants - classifier and store - are checked by the entry point
+//     that owns the origin, and the provider selected below must not be absent,
+//     so a misconfigured process fails explicitly instead of panicking;
 //  2. the scenario metadata is resolved before anything else, so an unknown
 //     scenario, a missing or zero instant, or an instant without a scenario is
 //     refused permanently before any acquisition or storage;
@@ -111,13 +156,10 @@ func (p Publisher) selectedProvider(request v1.Event) (source.Provider, error) {
 //  6. the classifier is asked for a level, its factors and its rationale;
 //  7. the assessment is validated before storage, so a non-canonical level can
 //     never reach the database;
-//  8. the assessment is persisted with the provenance-derived demo flag, and the
-//     request's scenario metadata travels untouched into the outbox event because
-//     the store copies the request.
-func (p Publisher) Publish(ctx context.Context, request v1.Event) error {
-	if p.Classifier == nil || p.Store == nil {
-		return errors.New("publisher is misconfigured: classifier and store are required")
-	}
+//  8. the assessment is handed to persist, and the request's scenario metadata
+//     travels untouched into the persisted batch because the store copies the
+//     request.
+func (p Publisher) publish(ctx context.Context, request v1.Event, persist func(context.Context, v1.Event, repository.Assessment) error) error {
 	provider, err := p.selectedProvider(request)
 	if err != nil {
 		// The catalogue and the request metadata are fixed, so this can never
@@ -193,7 +235,7 @@ func (p Publisher) Publish(ctx context.Context, request v1.Event) error {
 	// Validate above already proved its policy id and params hash are present. The
 	// address is taken of a local copy, never of a field of a temporary.
 	policy := assessment.Policy
-	if err := p.Store.Publish(ctx, request, repository.Assessment{
+	if err := persist(ctx, request, repository.Assessment{
 		ModelVersion: p.Classifier.ID(),
 		RiskLevel:    string(assessment.Level),
 		Factors:      assessment.Factors,

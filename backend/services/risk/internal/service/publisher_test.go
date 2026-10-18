@@ -43,12 +43,21 @@ func (s stubProvider) Fetch(ctx context.Context, window observations.Window) (ob
 
 // stubWriter is a BatchWriter that records what the publication path tried to
 // persist and can be made to fail, so persistence is asserted without a
-// database and a store failure is proven to surface through Publish.
+// database and a store failure is proven to surface through Publish. The two
+// persistence seams are counted separately: Publish is the explicit-job
+// completion seam and PublishScheduled is the automatic-cycle seam, so a test
+// can prove the publication path chose the one its origin requires.
 type stubWriter struct {
 	calls      int
+	scheduled  int
 	request    v1.Event
 	assessment repository.Assessment
-	err        error
+	// scheduledRequest and scheduledAssessment record the automatic-cycle seam
+	// separately from the explicit-job one, so a test can assert both what was
+	// persisted and which seam persisted it.
+	scheduledRequest    v1.Event
+	scheduledAssessment repository.Assessment
+	err                 error
 }
 
 func (w *stubWriter) Publish(ctx context.Context, request v1.Event, assessment repository.Assessment) error {
@@ -56,6 +65,24 @@ func (w *stubWriter) Publish(ctx context.Context, request v1.Event, assessment r
 	w.request = request
 	w.assessment = assessment
 	return w.err
+}
+
+func (w *stubWriter) PublishScheduled(ctx context.Context, request v1.Event, assessment repository.Assessment) error {
+	w.scheduled++
+	w.scheduledRequest = request
+	w.scheduledAssessment = assessment
+	return w.err
+}
+
+// jobOnlyWriter implements ONLY the explicit-job persistence seam. It models a
+// store that was never given a way to persist a scheduled publication, so a
+// scheduled request against it must fail closed instead of quietly settling a
+// job that does not exist.
+type jobOnlyWriter struct{ calls int }
+
+func (w *jobOnlyWriter) Publish(_ context.Context, _ v1.Event, _ repository.Assessment) error {
+	w.calls++
+	return nil
 }
 
 // stubDescriptor returns a plausible descriptor for a test provider. Synthetic
@@ -142,6 +169,121 @@ func TestPublishPersistsARealAssessmentFromTheFixture(t *testing.T) {
 	}
 	if !assessment.Demo {
 		t.Fatal("the synthetic fixture was persisted as real data")
+	}
+}
+
+// S1 regression: an automatic cycle publishes through the scheduled seam, so its
+// batch is persisted but no job completion is emitted. Jobs never stored the
+// job id a cycle mints, so a risk.batch.published.v1 naming it is refused as an
+// unknown job and dead-lettered permanently, once per zone per cycle. The
+// scheduled path must still run the whole pipeline - scenario resolution, fetch,
+// validation, classification, policy identity - and hand the store the same
+// assessment the explicit path would.
+func TestPublishScheduledUsesTheScheduledSeamAndNeverTheCompletionSeam(t *testing.T) {
+	writer := &stubWriter{}
+	publisher := Publisher{
+		Provider:   source.NewFixtureProvider(),
+		Classifier: classify.NewAcademicRuleV1(),
+		Store:      writer,
+	}
+	request := sampleRequest()
+	if err := publisher.PublishScheduled(context.Background(), request); err != nil {
+		t.Fatalf("publish the fixture as an automatic cycle: %v", err)
+	}
+	if writer.scheduled != 1 || writer.calls != 0 {
+		t.Fatalf("scheduled=%d completion=%d, want the scheduled seam exactly once and the completion seam never", writer.scheduled, writer.calls)
+	}
+	if writer.scheduledRequest != request {
+		t.Fatalf("the scheduled request was not preserved: %+v", writer.scheduledRequest)
+	}
+	assessment := writer.scheduledAssessment
+	if assessment.ModelVersion != classify.AcademicRuleV1ID || assessment.RiskLevel != string(classify.LevelAlto) {
+		t.Fatalf("scheduled assessment = %+v, want the real fixture assessment", assessment)
+	}
+	if len(assessment.Factors) != 5 || assessment.Rationale == "" || !assessment.Demo {
+		t.Fatalf("the scheduled path skipped part of the shared pipeline: %+v", assessment)
+	}
+	if assessment.Policy == nil || assessment.Policy.PolicyID != classify.AcademicRuleV1ID || assessment.Policy.ParamsHash != classify.AcademicRuleV1ParamsHash {
+		t.Fatalf("the scheduled path dropped the policy reference: %+v", assessment.Policy)
+	}
+}
+
+// The explicit-job path keeps its own seam: one delivery of a requested job
+// settles exactly one completion, and never reaches the scheduled seam.
+func TestPublishUsesTheCompletionSeamExactlyOnce(t *testing.T) {
+	writer := &stubWriter{}
+	publisher := Publisher{
+		Provider:   source.NewFixtureProvider(),
+		Classifier: classify.NewAcademicRuleV1(),
+		Store:      writer,
+	}
+	if err := publisher.Publish(context.Background(), sampleRequest()); err != nil {
+		t.Fatalf("publish a requested job: %v", err)
+	}
+	if writer.calls != 1 || writer.scheduled != 0 {
+		t.Fatalf("completion=%d scheduled=%d, want the completion seam exactly once and the scheduled seam never", writer.calls, writer.scheduled)
+	}
+}
+
+// A store that offers no scheduled persistence must fail closed instead of
+// falling back to the completion seam: falling back would recreate the defect
+// this seam exists to prevent, silently dead-lettering a completion for a job
+// that was never requested.
+func TestPublishScheduledFailsClosedWhenTheStoreCannotPersistScheduledPublications(t *testing.T) {
+	writer := &jobOnlyWriter{}
+	err := (Publisher{
+		Provider:   source.NewFixtureProvider(),
+		Classifier: classify.NewAcademicRuleV1(),
+		Store:      writer,
+	}).PublishScheduled(context.Background(), sampleRequest())
+	if err == nil {
+		t.Fatal("a store without the scheduled seam accepted an automatic-cycle publication")
+	}
+	if !strings.Contains(err.Error(), "scheduled") {
+		t.Fatalf("the refusal does not name the missing seam: %v", err)
+	}
+	if writer.calls != 0 {
+		t.Fatalf("the completion seam was reached %d times for a scheduled publication", writer.calls)
+	}
+}
+
+// The scheduled path shares the publication path's permanent refusals: an
+// unknown scenario is refused before any acquisition or storage and stays
+// permanent, because neither the catalogue nor the request can change on a
+// retry. A scheduled publication must not become a way to bypass that
+// classification and spend the retry budget on a deterministic failure.
+func TestPublishScheduledKeepsTheSharedPermanentRefusals(t *testing.T) {
+	writer := &stubWriter{}
+	err := (Publisher{
+		Provider:   source.NewFixtureProvider(),
+		Classifier: classify.NewAcademicRuleV1(),
+		Store:      writer,
+	}).PublishScheduled(context.Background(), scenarioRequest("no-such-scenario", scenarioInstant))
+	var permanent interface{ Permanent() bool }
+	if !errors.As(err, &permanent) || !permanent.Permanent() {
+		t.Fatalf("the scheduled refusal is not permanent: %v", err)
+	}
+	if writer.scheduled != 0 || writer.calls != 0 {
+		t.Fatalf("an unknown scenario reached persistence: scheduled=%d completion=%d", writer.scheduled, writer.calls)
+	}
+}
+
+// The misconfiguration guard is shared: a scheduled publication with no
+// classifier or store must return an error instead of panicking or persisting a
+// partial assessment.
+func TestPublishScheduledRefusesAnUnconfiguredCollaborator(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		publisher Publisher
+	}{
+		{"missing classifier", Publisher{Provider: source.NewFixtureProvider(), Store: &stubWriter{}}},
+		{"missing store", Publisher{Provider: source.NewFixtureProvider(), Classifier: classify.NewAcademicRuleV1()}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if err := tc.publisher.PublishScheduled(context.Background(), sampleRequest()); err == nil {
+				t.Fatal("a misconfigured publisher published a scheduled batch anyway")
+			}
+		})
 	}
 }
 

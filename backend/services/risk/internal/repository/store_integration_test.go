@@ -452,3 +452,51 @@ func TestListRefusesMissingCommuneGeometry(t *testing.T) {
 		}
 	}
 }
+
+// S1: a scheduled publication persists its batch through the same transaction as
+// an explicitly requested one, but writes no completion event. Jobs never stored
+// the job id a cycle mints, so a completion naming it is refused as an unknown
+// job and dead-lettered permanently, once per zone per cycle; the risk API still
+// reads the stored batch. The explicit job keeps exactly one completion, so
+// closing the scheduled path did not weaken the requested-job lifecycle.
+func TestScheduledPublicationPersistsWithoutACompletionEvent(t *testing.T) {
+	if testing.Short() || os.Getenv("TEST_DATABASE_URL") == "" {
+		t.Skip("requires migrated disposable risk database")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	db, err := pgxpool.New(ctx, os.Getenv("TEST_DATABASE_URL"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	s := Store{DB: db}
+	assessment := Assessment{ModelVersion: classify.AcademicRuleV1ID, RiskLevel: "alto", Factors: []classify.Factor{}, Rationale: "scheduled publication", Demo: true}
+	now := time.Now().UTC().Add(-time.Minute)
+	scheduled := v1.Event{ID: uuid.NewString(), JobID: uuid.NewString(), TraceID: uuid.NewString(), ActorID: "cycle-scheduler", Type: v1.JobRequestedType, ZoneID: "valparaiso-demo", RequestedAt: now}
+	if err = s.PublishScheduled(ctx, scheduled, assessment); err != nil {
+		t.Fatalf("persist the scheduled batch: %v", err)
+	}
+	// A redelivery with the same event id is still stopped by the inbox gate, so
+	// it adds nothing and still emits nothing.
+	if err = s.PublishScheduled(ctx, scheduled, assessment); err != nil {
+		t.Fatalf("redeliver the scheduled batch: %v", err)
+	}
+	var batches, completions int
+	if err = db.QueryRow(ctx, `SELECT count(*) FROM batches WHERE job_id=$1`, scheduled.JobID).Scan(&batches); err != nil || batches != 1 {
+		t.Fatalf("scheduled batches=%d err=%v, want exactly 1", batches, err)
+	}
+	if err = db.QueryRow(ctx, `SELECT count(*) FROM outbox WHERE routing_key=$1 AND payload->>'job_id'=$2`, v1.BatchPublishedType, scheduled.JobID).Scan(&completions); err != nil || completions != 0 {
+		t.Fatalf("scheduled completions=%d err=%v, want 0", completions, err)
+	}
+	explicit := scheduled
+	explicit.ID = uuid.NewString()
+	explicit.JobID = uuid.NewString()
+	explicit.ActorID = "operator"
+	if err = s.Publish(ctx, explicit, assessment); err != nil {
+		t.Fatalf("persist the requested batch: %v", err)
+	}
+	if err = db.QueryRow(ctx, `SELECT count(*) FROM outbox WHERE routing_key=$1 AND payload->>'job_id'=$2`, v1.BatchPublishedType, explicit.JobID).Scan(&completions); err != nil || completions != 1 {
+		t.Fatalf("requested completions=%d err=%v, want exactly 1", completions, err)
+	}
+}
