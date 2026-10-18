@@ -21,6 +21,7 @@ jobs:
       - run: docker compose config --quiet
       - run: docker compose --profile test run --build --rm jobs-test
       - run: docker compose --profile test run --build --rm risk-test
+      - run: docker compose --profile test run --build --rm prevention-test
       - run: docker compose up -d --build
       - run: python3 scripts/smoke.py --resilience
       - name: Validate deployment and HTTP contracts

@@ -40,7 +40,7 @@ type Verifier interface {
 	Verify(context.Context, string) (*oidc.IDToken, error)
 }
 
-func New(verifier Verifier, jobs, risk *url.URL, webOrigin string) http.Handler {
+func New(verifier Verifier, jobs, risk, prevention *url.URL, webOrigin string) http.Handler {
 	mux := http.NewServeMux()
 	proxy := func(target *url.URL) http.Handler {
 		return &httputil.ReverseProxy{
@@ -69,6 +69,18 @@ func New(verifier Verifier, jobs, risk *url.URL, webOrigin string) http.Handler 
 	mux.Handle("/v1/jobs/", proxy(jobs))
 	mux.Handle("/v1/audit", proxy(jobs))
 	mux.Handle("/v1/risk/", proxy(risk))
+	// The model registry lives in the risk service, but the page reaches it
+	// through this origin because its CSP allows no other. `GET /v1/models` is the
+	// exact collection path and the admin activation hangs below it, so the two
+	// patterns together cover both, exactly as the jobs route pairs its own
+	// collection path with its subtree.
+	mux.Handle("/v1/models", proxy(risk))
+	mux.Handle("/v1/models/", proxy(risk))
+	// prevention listens on its own port and all four routes of its frozen
+	// contract (/v1/prevention/actions, .../{id} and .../{id}/transitions) sit
+	// below this one prefix, so a single registration forwards them all exactly
+	// as /v1/risk/ does for the risk service.
+	mux.Handle("/v1/prevention/", proxy(prevention))
 	// Three quota layers, per the agreed BH-03 policy: an emergency aggregate
 	// bound charged before authentication, a per-verified-subject bound, and one
 	// deliberately shared anonymous bound. Identity is the verified token

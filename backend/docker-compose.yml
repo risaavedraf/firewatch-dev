@@ -148,10 +148,11 @@ services:
       <<: *oidc
       JOBS_URL: http://jobs:8080
       RISK_URL: http://risk:8080
+      PREVENTION_URL: http://prevention:8084
       WEB_ORIGIN: http://localhost:4173
     ports: ['127.0.0.1:8080:8080']
     networks: [backend, edge]
-    depends_on: [jobs, risk, identity]
+    depends_on: [jobs, risk, prevention, identity]
 
   prometheus:
     image: prom/prometheus:v3.2.1

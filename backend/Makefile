@@ -1,5 +1,5 @@
 SERVICE ?= jobs
-SERVICES := gateway jobs risk
+SERVICES := gateway jobs risk prevention
 
 .PHONY: test build up down logs integration demo
 test:
