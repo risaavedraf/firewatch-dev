@@ -1,0 +1,19 @@
+-- 010: the model activation write path needs its grant.
+--
+-- 002 granted the application role SELECT on `models`, and that was complete at
+-- the time: the seed rows come from the migrations themselves, which run as the
+-- schema owner, and nothing in the running service had ever written to the table.
+-- `ActivateModel` changed that. Without UPDATE the row lock it takes
+-- (`SELECT ... FOR UPDATE`) and the two statements it runs both fail with
+-- `permission denied for table models`, and the API can only report that as the
+-- integrity-neutral 503 storage_unavailable. The endpoint looked broken while the
+-- data and the code were both correct.
+--
+-- This was found by the isolated end-to-end verification: the endpoint answered
+-- 503 with a real database and 200-shaped responses with a fake one, because a
+-- fake repository cannot reproduce a privilege.
+--
+-- Forward-only and guarded: re-applying this file is a no-op, and it neither
+-- backfills nor destroys data. GRANT is not a data mutation: the role keeps
+-- SELECT and gains exactly UPDATE.
+GRANT UPDATE ON models TO risk_app;

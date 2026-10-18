@@ -24,15 +24,26 @@ func migrationFor(t *testing.T, version int) Migration {
 	return Migration{}
 }
 
-func TestMigrationsAreOrderedCompleteAndNonEmpty(t *testing.T) {
+// TestMigrationsAreOrderedByUniqueVersion guards the list's shape. Versions must
+// start at 1 and increase strictly, but NOT contiguously: this service shares the
+// database's schema_migrations ledger with the prevention service, which owns
+// version 9 (009_preventive_actions.sql). A version is therefore reserved against
+// the integrated tree, not against this module alone; a decrease or a duplicate
+// would still make a migration run out of order or skip in silence.
+func TestMigrationsAreOrderedByUniqueVersion(t *testing.T) {
 	all := All()
 	if len(all) == 0 {
 		t.Fatal("All() returned no migrations")
 	}
 	for index, migration := range all {
-		want := index + 1
-		if migration.Version != want {
-			t.Fatalf("migration at index %d has version %d, want %d; versions must start at 1 and increase by exactly 1 with no gaps or duplicates", index, migration.Version, want)
+		if migration.Version < 1 {
+			t.Fatalf("migration at index %d has version %d; versions start at 1", index, migration.Version)
+		}
+		if index == 0 && migration.Version != 1 {
+			t.Fatalf("the first migration has version %d, want 1", migration.Version)
+		}
+		if index > 0 && migration.Version <= all[index-1].Version {
+			t.Fatalf("migration at index %d has version %d after %d; versions must increase strictly with no duplicates", index, migration.Version, all[index-1].Version)
 		}
 		if migration.Name == "" {
 			t.Errorf("migration %d has an empty Name; a failure must be attributable", migration.Version)
