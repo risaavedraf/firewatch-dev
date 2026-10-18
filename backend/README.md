@@ -1,6 +1,6 @@
 # FireWatch backend — first executable slice
 
-Run an authenticated asynchronous workflow with three independently built Go services, PostgreSQL/PostGIS, RabbitMQ and Keycloak. The sample is explicitly synthetic: `demo: true`, classified by `model_version: academic-rule-v1`, with the level, its factors and its rationale stored in each batch.
+Run an authenticated asynchronous workflow with four independently built Go services, PostgreSQL/PostGIS, RabbitMQ and Keycloak. The sample is explicitly synthetic: `demo: true`, classified by the version selected with `MODEL_ID` (the local compose default is `firewatch-rule-v2`; `academic-rule-v1` remains the code default when nothing is configured), with the level, its factors and its rationale stored in each batch.
 
 ## Quick start
 
@@ -30,6 +30,10 @@ The endpoints bind only to host loopback. HTTP/password grants and the shared Ra
 ### Optional classifier selection
 
 `MODEL_ID` selects the classifier version the `risk` service runs. The compose stack passes it through and defaults it to `firewatch-rule-v2`, so the local stack classifies with v2 unless `.env` sets `MODEL_ID` to another registered version; the code default, when nothing is configured at all, stays `academic-rule-v1`. The selected version must have a row in the `models` table that the migrations create and seed, or the service fails closed at startup. Loading a different version there does not change the classifier in a running container: the version is fixed when the service starts.
+
+### Cycle and freshness
+
+`risk` runs the ingestion cycle at startup and every 15 minutes. The startup run publishes a batch for the configured demo zone, so a restart can legitimately make `GET /v1/risk/latest` return a newer batch than the one a client read before; `latest` is the most recently persisted batch, not a durable observation contract. `GET /v1/risk/sources` reports the last run and the expected renewal (`last_run_at` + 900 s), which is a renewal deadline, not necessarily the next scheduler tick.
 
 ### Observability profile
 
@@ -63,6 +67,13 @@ Use the demo script or an API client to obtain a token from Keycloak's `/realms/
 | `GET /v1/jobs/{id}` | admin | `queued` or `published`, with batch ID when published |
 | `GET /v1/risk/latest?zone_id=valparaiso-demo` | viewer/admin | Latest batch, GeoJSON point, emission/validity dates and freshness |
 | `GET /v1/risk/history?zone_id=valparaiso-demo` | viewer/admin | Last 100 batches |
+| `GET /v1/models` | viewer/admin | Registered classifier versions and the single `active` row |
+| `POST /v1/models/{version}/activate` | admin | Activates a registered version; `MODEL_ID` still selects the running classifier |
+| `POST /v1/risk/cycle/run` | admin | Runs the ingestion cycle immediately and reports completion |
+| `GET /v1/prevention/actions?community_code=&status=` | viewer/admin | Preventive actions, at most 200 rows |
+| `GET /v1/prevention/actions/{id}` | viewer/admin | Action detail with its history |
+| `POST /v1/prevention/actions` | admin | Creates a preventive action in `propuesta` |
+| `POST /v1/prevention/actions/{id}/transitions` | admin | Applies a valid state transition and appends history |
 | `GET /v1/audit` | admin | Last 100 administrative/publication records |
 
 Send `Authorization: Bearer <access_token>`. No cookies are used in this backend slice. Unknown or invalid JWTs produce `401`; insufficient roles produce `403`. Full definitions: [`contracts/openapi/firewatch-v1.yaml`](contracts/openapi/firewatch-v1.yaml).
@@ -71,7 +82,7 @@ Send `Authorization: Bearer <access_token>`. No cookies are used in this backend
 
 Six profiles cover mild, mixed, dry/windy, missing humidity, stale observations, and incomplete retrieval. Submit `{"zone_id":"05101","scenario_id":"mixed"}` with a fresh UUID idempotency key to select one; omit the scenario to preserve the fixed legacy fixture. The server assigns `evaluated_at` once and preserves it on retries; clients cannot supply that field. Job/batch history retains optional metadata without changing historical rows.
 
-See [scenario contract, expected demonstration outcomes and proof limits](docs/synthetic-scenarios.md) and the [isolated verification harness](docs/synthetic-verification.md). All affected local services must rebuild together, with forward migrations jobs 003 and risk 007. In isolated disposable databases, fresh forward migrations and the full jobs and risk database suites plus `go vet` ran green under the `jobs_app`/`risk_app` service credentials, with both catalogues cross-referenced; earlier skipped or failed fixture runs remain recorded and are not retroactive passes. The isolated authenticated harness also ran green once (exit 0) against its own disposable Keycloak/RabbitMQ/PostGIS stack; its optional partial-retrieval probe was **SKIPPED** by default and the known advisories remain in [`docs/synthetic-verification.md`](docs/synthetic-verification.md). That disposable stack is separate from the existing local Compose stack, which was **not** rebuilt or upgraded. The existing page has no scenario selector yet. Do not present these synthetic outputs as calibrated probabilities or model accuracy.
+See [scenario contract, expected demonstration outcomes and proof limits](docs/synthetic-scenarios.md) and the [isolated verification harness](docs/synthetic-verification.md). All affected local services must rebuild together, with forward migrations jobs 003 and risk 007. In isolated disposable databases, fresh forward migrations and the full jobs and risk database suites plus `go vet` ran green under the `jobs_app`/`risk_app` service credentials, with both catalogues cross-referenced; earlier skipped or failed fixture runs remain recorded and are not retroactive passes. The isolated authenticated harness also ran green once (exit 0) against its own disposable Keycloak/RabbitMQ/PostGIS stack; its optional partial-retrieval probe was **SKIPPED** by default and the known advisories remain in [`docs/synthetic-verification.md`](docs/synthetic-verification.md). That disposable stack was separate from the existing local Compose stack, which was **not** rebuilt or upgraded **during that verification**; the operator stack was later recreated with `docker compose up -d --build` in L23. The React page has a scenario selector in the job submission view. Do not present these synthetic outputs as calibrated probabilities or model accuracy.
 
 ## Browser login (local demo)
 
@@ -90,12 +101,13 @@ After a successful end-session, Keycloak's SSO cookie is ended and a new authori
 
 ```sh
 # From backend/: explicit module paths are needed in a multi-module workspace.
-go test ./services/gateway/... ./services/jobs/... ./services/risk/...
-go vet ./services/gateway/... ./services/jobs/... ./services/risk/...
+go test ./services/gateway/... ./services/jobs/... ./services/risk/... ./services/prevention/...
+go vet ./services/gateway/... ./services/jobs/... ./services/risk/... ./services/prevention/...
 
 # Real PostgreSQL/PostGIS tests, isolated from application databases.
 docker compose --profile test run --build --rm jobs-test
 docker compose --profile test run --build --rm risk-test
+docker compose --profile test run --build --rm prevention-test
 ```
 
 Repository integration tests skip unless `TEST_DATABASE_URL` points to the corresponding migrated test database. Compose provides separate `jobs_test` and `risk_test` databases; do not point these tests at operational data. Use the integration tests before the smoke demo to keep the demonstration history readable.
@@ -106,6 +118,6 @@ For independent builds, run `GOWORK=off go test ./...` from a service directory 
 
 ## What is implemented and what comes next
 
-Implemented: OIDC/JWT verification in gateway and services, role checks, bounded HTTP handling, SQL parameterization, per-service database credentials, transactional outbox/inbox, confirmed publishing, quorum queues, bounded retry and DLQ, reconnect, synthetic atomic batches, stale-state calculation, audit, JSON logs and basic Prometheus counters.
+Implemented: OIDC/JWT verification in gateway and services, role checks, bounded HTTP handling, SQL parameterization, per-service database credentials, transactional outbox/inbox, confirmed publishing, quorum queues, bounded retry and DLQ, terminal job-failure events and operator replay, reconnect, synthetic atomic batches, stale-state calculation, audit and JSON logs. The presentation slice adds a configurable HTTP/JSON ingestion provider with per-record validation, the 15-minute cycle with per-source freshness, a second deterministic classifier (`firewatch-rule-v2`) with a transactional model registry (activation and reversal), the `prevention` service with its browser view, and Prometheus metrics with latency, error-class and process signals in all four services, seven alert rules and a provisioned Grafana dashboard.
 
-Next work units: real data ingestion/validation; model approval and inference; the 15-minute scheduler; preventive actions/evidence; terminal job-failure events and DLQ replay; richer metrics, distributed traces and alert rules. Kubernetes manifests are a configurable staging base, not an executed production rollout. See [architecture](docs/architecture.md), [verification evidence](docs/verification.md) and [deployment prerequisites](deploy/k8s/README.md).
+Next work units: the real observation source and its production validation ranges; the trained model and its scientific evaluation; distributed tracing; Alertmanager routing and monitoring in the Kubernetes manifests; image signing, registry promotion and an executed rollout. The 15-minute cycle and the preventive-action flow are implemented, not future work. Kubernetes manifests remain a configurable staging base, not an executed production rollout. See [architecture](docs/architecture.md), [verification evidence](docs/verification.md) and [deployment prerequisites](deploy/k8s/README.md).

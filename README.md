@@ -2,7 +2,7 @@
 
 Two parts, deliberately separate:
 
-- [`backend/`](backend/README.md) — the executable slice: authenticated job submission, asynchronous processing through RabbitMQ, synthetic PostGIS batch publication, history and audit.
+- [`backend/`](backend/README.md) — the executable slice: authenticated job submission, asynchronous processing through RabbitMQ, a 15-minute ingestion cycle with per-record validation, synthetic PostGIS batch publication, preventive actions, model-version activation, history, audit and Prometheus metrics.
 - [`frontend/`](frontend/README.md) — the browser page, served on its own origin and calling the backend API.
 
 ## Running the local demonstration
@@ -36,3 +36,5 @@ Open it as `localhost`, never as `127.0.0.1`. The identity provider and the gate
 - [Original project references](Referencias/)
 
 The current backend uses demonstration data only. It does not estimate real wildfire risk.
+
+**Delivery status (2026-10-18).** The presentation delivery landed on `main` at `f509666` (PR #31, issue #30): ingestion cycle, model v2, preventive actions and browser login. The local monitoring wave followed in PRs #33–#35, so the current `main` baseline is `0725a1b` (the PR #35 merge). The trained model and real data sources are still pending. See the [task index](odd/tasks/README.md) for the delivered/missing state and its limits.
