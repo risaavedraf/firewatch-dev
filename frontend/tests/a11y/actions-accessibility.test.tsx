@@ -219,10 +219,18 @@ test('the palette pairs painted by the actions view meet WCAG AA (4.5:1)', () =>
   // so the actions view overrides them; the overrides are asserted below and
   // their pairs are measured here.
   const tagBackground = '#edf1f2';
+  // `canvas` and the table-header surface are real painted backgrounds that the
+  // measured browser check flagged (4.44 and 4.39 with the previous `--muted`),
+  // and the footer carried its own literal instead of the token.
+  const canvas = palette.get('canvas') as string;
+  const tableHead = '#f3f4ed';
 
   const pairs: ReadonlyArray<[string, string, string]> = [
     ['body text', ink, paper],
     ['secondary text', muted, paper],
+    ['secondary text on canvas', muted, canvas],
+    ['table header', muted, tableHead],
+    ['footer', muted, canvas],
     ['secondary buttons', forest, paper],
     ['actions status chip', ink, soft],
     ['actions status badge', ink, tagBackground],
@@ -235,6 +243,8 @@ test('the palette pairs painted by the actions view meet WCAG AA (4.5:1)', () =>
   // fail this test rather than silently reverting to the low-contrast base.
   expect(appCss).toMatch(/#actions \.chip\s*\{[^}]*color:\s*var\(--ink\)/);
   expect(appCss).toMatch(/#actions \.neutral-tag\s*\{[^}]*color:\s*var\(--ink\)/);
+  // The footer must read the token: its own literal is how it drifted to 3.53:1.
+  expect(appCss).toMatch(/footer\s*\{[^}]*color:\s*var\(--muted\)/);
 });
 
 // ── 390 px layout ──────────────────────────────────────────────────────────

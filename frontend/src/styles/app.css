@@ -319,7 +319,7 @@ input::placeholder { color: #8a968b; font-size: 11px; }
 .job-result > p[role="status"] { min-height: 25px; margin: 3px 0; color: var(--muted); font-size: 9px; }
 
 /* ── Footer and toast ──────────────────────────────────────────────────── */
-footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 0 34px; padding: 17px 0 23px; border-top: 1px solid var(--line); color: #788579; font-size: 9px; }
+footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 0 34px; padding: 17px 0 23px; border-top: 1px solid var(--line); color: var(--muted); font-size: 9px; }
 footer button { display: flex; align-items: center; gap: 6px; padding: 6px; border: 0; background: none; color: var(--forest-700); font-size: 10px; }
 footer .icon { width: 13px; height: 13px; }
 .toast { position: fixed; right: 24px; bottom: 24px; z-index: 30; max-width: min(440px, calc(100vw - 32px)); padding: 15px 20px; border-radius: 9px; background: var(--forest-900); color: var(--paper); box-shadow: 0 8px 30px rgb(16 44 45 / 19%); font-size: 12px; opacity: 0; transform: translateY(15px); pointer-events: none; transition: opacity .2s, transform .2s; }
