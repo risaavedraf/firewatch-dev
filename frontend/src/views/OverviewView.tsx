@@ -483,7 +483,10 @@ export function OverviewView() {
         </dl>
         <p className="panel-note">
           La marca sintética se reproduce tal como el servicio la declara. Una versión sin marca declarada se muestra
-          como no declarada; la página no la supone no sintética.
+          como no declarada; la página no la supone no sintética. Activar una versión mueve el registro, no el
+          clasificador que está en uso: el servicio fija su versión con <code>MODEL_ID</code> al arrancar, así que
+          adoptar la activa exige fijar ese valor y recrear el servicio; la versión elegida debe existir en el
+          registro con su huella congelada o el arranque falla cerrado.
         </p>
       </article>
 

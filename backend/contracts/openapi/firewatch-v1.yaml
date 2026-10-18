@@ -453,7 +453,13 @@ paths:
         Viewer/admin. The model registry: every version with its kind, frozen
         parameter fingerprint, approval instant, metrics and active flag. The
         active row is first so the UI can show the version that judges new
-        assessments. Reading the registry promotes nothing.
+        assessments. Reading the registry promotes nothing. The active flag is
+        registry lifecycle metadata: the service selects the classifier it runs
+        from configuration at startup (MODEL_ID), so activating a version
+        changes the registry and not the running classifier. Adopting another
+        version means setting that configuration and recreating the service,
+        and the selected version must have a row here with the frozen
+        fingerprint or startup fails closed.
       responses:
         '200':
           description: Model registry ordered active first, then by version.
@@ -973,7 +979,11 @@ components:
         Freshness and state of one source. last_run_at, next_run_at and
         age_seconds are null when the source has never run and complete is
         false. age_seconds is the age of the last attempt, so a value above the
-        15 minute target is the stale signal.
+        15 minute target is the stale signal. next_run_at is the renewal
+        deadline -- the last attempt plus the configured interval -- and NOT
+        necessarily the instant the scheduler fires next: a manual run
+        recomputes it while the automatic schedule keeps its own phase, so the
+        two can differ by design.
     CycleZoneResult:
       type: object
       required: [zone_id, published]

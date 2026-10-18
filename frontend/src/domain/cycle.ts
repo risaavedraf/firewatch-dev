@@ -128,7 +128,7 @@ export function evaluateCycle(payload: unknown, nowMs: number): CycleFreshness {
     sourceCount: entries.length,
     label: `Ejecución del ciclo: ${complete ? 'completa' : 'incompleta'} · Última: ${
       selected === null ? 'no informada' : selected.lastRunAt
-    } · Próxima: ${earliestNext === null ? 'no informada' : earliestNext.nextRunAt} · Antigüedad: ${
+    } · Renovación esperada: ${earliestNext === null ? 'no informada' : earliestNext.nextRunAt} · Antigüedad: ${
       ageSeconds === null ? 'no informada' : `${ageSeconds} s`
     } · Fuentes: ${entries.length}.${lastError === '' ? '' : ` Último error: ${lastError}.`}`,
   };

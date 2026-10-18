@@ -76,6 +76,11 @@ type RunResult struct {
 // LastRunAt is the last attempt (a failed attempt is still an execution), and
 // Complete is whether that attempt published every zone. AgeSeconds is the age
 // of the last attempt, so the UI can compare it against the 15 minute target.
+//
+// NextRunAt is the renewal deadline —the last attempt plus the configured
+// interval— and NOT the scheduler's next tick: a manual run recomputes it while
+// the automatic ticker keeps its own phase, so the two can legitimately differ.
+// The API says the same thing, and the cycle panel labels it accordingly.
 type SourceStatus struct {
 	SourceID   string     `json:"source_id"`
 	LastRunAt  *time.Time `json:"last_run_at"`

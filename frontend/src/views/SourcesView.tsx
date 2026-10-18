@@ -302,7 +302,7 @@ export function SourcesView() {
             <dd id="cycle-last-run">{cycleField(cycle?.lastRunAt ?? '')}</dd>
           </div>
           <div>
-            <dt>Próxima ejecución</dt>
+            <dt>Renovación esperada</dt>
             <dd id="cycle-next-run">{cycleField(cycle?.nextRunAt ?? '')}</dd>
           </div>
           <div>
