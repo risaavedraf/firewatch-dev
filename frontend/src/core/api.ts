@@ -13,10 +13,13 @@
 //      login) is discarded instead of repopulating it;
 //   3. every read honours the caller's `AbortSignal` and a bounded deadline, so
 //      a hung gateway cannot leave a request pending forever.
-import { gatewayOrigin, jobRoute, routes } from '../config';
+import { gatewayOrigin, jobRoute, preventiveActionRoute, preventiveTransitionRoute, routes } from '../config';
 import type {
+  ActionHistoryEntry,
   AuditEntry,
   Job,
+  PreventiveAction,
+  PreventiveActionDetail,
   RiskBatch,
   Scenario,
   ServiceSnapshot,
@@ -57,7 +60,12 @@ type RequestKind =
   | 'scenarios'
   | 'audit'
   | 'createJob'
-  | 'job';
+  | 'job'
+  | 'preventiveActions'
+  | 'preventiveAction'
+  | 'createPreventiveAction'
+  | 'transitionPreventiveAction'
+  | 'models';
 
 // The sequence is per kind on purpose: `latest` and `history` are issued
 // together for one selection, so a shared counter would make each treat the
@@ -497,4 +505,165 @@ export async function job(id: string, signal?: AbortSignal): Promise<Outcome<Job
     return failureOutcome(failureSpec('malformed', 'job_mismatch', result.status, result.requestId));
   }
   return { ok: true, data: result.body };
+}
+
+// --- Preventive actions (frozen `prevention` contract) ---------------------
+//
+// The transport proves the shape the view can use and fails closed on anything
+// else, exactly like every other route. The state machine lives in
+// `domain/prevention.ts`; the role affordance and the rendered refusal live in
+// the view. A `409 invalid_transition` and a `422 invalid_input` are NOT
+// swallowed here: the failure keeps its status, its `code` and its request id so
+// the view can state what the server answered.
+
+function isPreventiveAction(value: unknown): value is PreventiveAction {
+  if (!record(value)) return false;
+  if (!nonempty(value.id) || !nonempty(value.community_code) || !nonempty(value.title)) return false;
+  if (typeof value.status !== 'string') return false;
+  if (!optionalString(value.description) || !optionalString(value.priority) || !optionalString(value.assignee)) {
+    return false;
+  }
+  if (!nullableString(value.due_date) || !optionalString(value.created_by)) return false;
+  if (!optionalString(value.created_at) || !optionalString(value.updated_at)) return false;
+  return true;
+}
+
+// A history row must state the status it moved TO. The actor, the note and the
+// from-status are optional facts the service may omit; an omitted one is labelled
+// in place, never filled from another row.
+function isActionHistoryEntry(value: unknown): value is ActionHistoryEntry {
+  return (
+    record(value) &&
+    nonempty(value.to_status) &&
+    nullableString(value.from_status) &&
+    optionalString(value.id) &&
+    optionalString(value.action_id) &&
+    optionalString(value.actor_sub) &&
+    optionalString(value.note) &&
+    optionalString(value.created_at)
+  );
+}
+
+function isPreventiveActionDetail(value: unknown): value is PreventiveActionDetail {
+  if (!record(value)) return false;
+  return isPreventiveAction(value) && Array.isArray(value.history) && value.history.every(isActionHistoryEntry);
+}
+
+export async function preventiveActions(
+  filter: { communityCode?: string; status?: string } = {},
+  signal?: AbortSignal,
+): Promise<Outcome<PreventiveAction[]>> {
+  const query = new URLSearchParams();
+  if (nonempty(filter.communityCode)) query.set('community_code', filter.communityCode.trim());
+  if (nonempty(filter.status)) query.set('status', filter.status.trim());
+  const suffix = query.size > 0 ? `?${query.toString()}` : '';
+  const result = await requestJson(
+    'preventiveActions',
+    `${gatewayOrigin}${routes.preventiveActions}${suffix}`,
+    { authenticated: true },
+    signal,
+  );
+  if (result.state !== 'ok') return resultFailure<PreventiveAction[]>(result);
+  if (!Array.isArray(result.body) || !result.body.every(isPreventiveAction)) {
+    return failureOutcome(failureSpec('malformed', 'invalid_shape', result.status, result.requestId));
+  }
+  return { ok: true, data: result.body };
+}
+
+export async function preventiveAction(id: string, signal?: AbortSignal): Promise<Outcome<PreventiveActionDetail>> {
+  const result = await requestJson(
+    'preventiveAction',
+    `${gatewayOrigin}${preventiveActionRoute(id)}`,
+    { authenticated: true },
+    signal,
+  );
+  if (result.state !== 'ok') return resultFailure<PreventiveActionDetail>(result);
+  if (!isPreventiveActionDetail(result.body)) {
+    return failureOutcome(failureSpec('malformed', 'invalid_shape', result.status, result.requestId));
+  }
+  if (result.body.id !== id) {
+    return failureOutcome(failureSpec('malformed', 'action_mismatch', result.status, result.requestId));
+  }
+  return { ok: true, data: result.body };
+}
+
+export interface PreventiveActionInput {
+  readonly communityCode: string;
+  readonly title: string;
+  readonly description?: string;
+  readonly priority?: string;
+  readonly assignee?: string;
+  readonly dueDate?: string;
+}
+
+export async function createPreventiveAction(
+  input: PreventiveActionInput,
+  signal?: AbortSignal,
+): Promise<Outcome<PreventiveAction>> {
+  // An empty optional field is omitted, not sent blank: the server rejects an
+  // explicit empty value while an absent one keeps its own default (the same
+  // rule the job POST already follows for `scenario_id`).
+  const body: Record<string, string> = { community_code: input.communityCode, title: input.title };
+  if (nonempty(input.description)) body.description = input.description;
+  if (nonempty(input.priority)) body.priority = input.priority;
+  if (nonempty(input.assignee)) body.assignee = input.assignee;
+  if (nonempty(input.dueDate)) body.due_date = input.dueDate;
+  const result = await requestJson(
+    'createPreventiveAction',
+    `${gatewayOrigin}${routes.preventiveActions}`,
+    {
+      method: 'POST',
+      body: JSON.stringify(body),
+      headers: { 'Content-Type': 'application/json' },
+      authenticated: true,
+    },
+    signal,
+  );
+  if (result.state !== 'ok') return resultFailure<PreventiveAction>(result);
+  if (!isPreventiveAction(result.body)) {
+    return failureOutcome(failureSpec('malformed', 'invalid_shape', result.status, result.requestId));
+  }
+  return { ok: true, data: result.body };
+}
+
+export async function transitionPreventiveAction(
+  id: string,
+  input: { to: string; note?: string },
+  signal?: AbortSignal,
+): Promise<Outcome<PreventiveAction>> {
+  const result = await requestJson(
+    'transitionPreventiveAction',
+    `${gatewayOrigin}${preventiveTransitionRoute(id)}`,
+    {
+      method: 'POST',
+      // `{to, note}` is the frozen body; the note travels even when empty so the
+      // field the contract names is always present.
+      body: JSON.stringify({ to: input.to, note: input.note ?? '' }),
+      headers: { 'Content-Type': 'application/json' },
+      authenticated: true,
+    },
+    signal,
+  );
+  if (result.state !== 'ok') return resultFailure<PreventiveAction>(result);
+  if (!isPreventiveAction(result.body)) {
+    return failureOutcome(failureSpec('malformed', 'invalid_shape', result.status, result.requestId));
+  }
+  if (result.body.id !== id) {
+    return failureOutcome(failureSpec('malformed', 'action_mismatch', result.status, result.requestId));
+  }
+  return { ok: true, data: result.body };
+}
+
+// The model registry is passed through as an array of opaque entries: the real
+// `GET /v1/models` body is an OBJECT ENVELOPE (`{"models": [...]}`, see
+// `backend/services/risk/internal/handler/models.go`), so the transport accepts the
+// envelope, rejects a missing/malformed list or a malformed entry, and hands the
+// array to `domain/model.ts`, which reads the one active version.
+export async function modelVersions(signal?: AbortSignal): Promise<Outcome<unknown[]>> {
+  const result = await requestJson('models', `${gatewayOrigin}${routes.models}`, { authenticated: true }, signal);
+  if (result.state !== 'ok') return resultFailure<unknown[]>(result);
+  if (!record(result.body) || !Array.isArray(result.body.models) || !result.body.models.every(record)) {
+    return failureOutcome(failureSpec('malformed', 'invalid_shape', result.status, result.requestId));
+  }
+  return { ok: true, data: result.body.models };
 }

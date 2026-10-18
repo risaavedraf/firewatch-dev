@@ -19,6 +19,7 @@ const TOKEN_URL = `${issuer}/protocol/openid-connect/token`;
 const ZONES_URL = `${gatewayOrigin}${routes.zones}`;
 const latestUrl = (zone: string): string => `${gatewayOrigin}${routes.latest}?zone_id=${zone}`;
 const historyUrl = (zone: string): string => `${gatewayOrigin}${routes.history}?zone_id=${zone}`;
+const MODELS_URL = `${gatewayOrigin}${routes.models}`;
 
 // Two stubs are shared by the whole file and rebuilt before every test, so no
 // test can inherit a pending request or a previous session from another.
@@ -571,4 +572,75 @@ test('closing a rejected session returns to the anonymous copy (S6)', async () =
   expect(getSessionSnapshot()).toEqual({ status: 'signed-out', roles: null, reason: null });
   expect(textOf('map-empty')).toBe('Conecta un token autorizado para cargar las zonas analizadas.');
   expect(textOf('risk-status')).toBe('Conecta un token autorizado para consultar la API.');
+});
+
+// T13 — the active model version comes from the model registry (`GET /v1/models`,
+// an OBJECT ENVELOPE `{models: [...]}`) and is labelled with the `synthetic` mark
+// the service declares. An undeclared mark is stated as undeclared, never assumed
+// to be non-synthetic; an unreachable or wrongly-shaped registry is stated, never
+// replaced with a plausible version.
+test('shows the active model version from the {models} envelope with its declared synthetic mark (T13)', async () => {
+  await openSignedIn();
+
+  fetchStub.answer(MODELS_URL, {
+    models: [
+      {
+        version: 'academic-rule-v1',
+        kind: 'rule',
+        params_hash: 'e17aaa5600eb67c9a91340e90057aec100f4e80ef0895662f373cffee66564c7',
+        approved_at: null,
+        metrics: { official: false, calibrated_against_observed_fires: false },
+        active: false,
+      },
+      { version: 'modelo-sintetico', kind: 'rule', params_hash: null, approved_at: null, metrics: { synthetic: true }, active: true },
+    ],
+  });
+  await settle();
+
+  expect(textOf('model-active-version')).toBe('modelo-sintetico');
+  expect(textOf('model-synthetic')).toBe('SINTÉTICO');
+  expect(textOf('model-status')).toMatch(/sintétic/i);
+});
+
+test('the real default active row declares no synthetic mark, and a wrong envelope is rejected (T13)', async () => {
+  await openSignedIn();
+  // The exact default seed: academic-rule-v1 active, firewatch-rule-v2 and
+  // demo-fixture-v1 registered but inactive. Neither academic-rule-v1 nor
+  // firewatch-rule-v2 declares `synthetic`, so the honest answer is "not declared".
+  fetchStub.answer(MODELS_URL, {
+    models: [
+      {
+        version: 'academic-rule-v1',
+        kind: 'rule',
+        params_hash: 'e17aaa5600eb67c9a91340e90057aec100f4e80ef0895662f373cffee66564c7',
+        approved_at: null,
+        metrics: { official: false, calibrated_against_observed_fires: false },
+        active: true,
+      },
+      {
+        version: 'firewatch-rule-v2',
+        kind: 'rule',
+        params_hash: '59259c4c0c470e5a0d512fe09f6c748c38fd29f9bc5d760d49754555c66e699b',
+        approved_at: null,
+        metrics: { official: false, calibrated_against_observed_fires: false, aggregation: 'dominant_factor' },
+        active: false,
+      },
+      { version: 'demo-fixture-v1', kind: 'placeholder', params_hash: null, approved_at: null, metrics: { official: false, synthetic: true }, active: false },
+    ],
+  });
+  await settle();
+
+  expect(textOf('model-active-version')).toBe('academic-rule-v1');
+  expect(textOf('model-synthetic')).toBe('NO DECLARADO');
+  expect(textOf('model-status')).toMatch(/no declara/i);
+
+  cleanup();
+  prepare();
+  await openSignedIn();
+  // The bare array was the assumed shape and is NOT what the service serves; it
+  // must render as unavailable rather than as a parsed registry.
+  fetchStub.answer(MODELS_URL, [{ version: 'academic-rule-v1', active: true }]);
+  await settle();
+  expect(textOf('model-active-version')).toBe('No informada');
+  expect(textOf('model-synthetic')).toBe('NO DISPONIBLE');
 });

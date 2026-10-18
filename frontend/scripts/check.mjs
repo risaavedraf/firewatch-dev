@@ -95,6 +95,8 @@ for (const route of [
   '/v1/jobs/status',
   '/v1/risk/synthetic-scenarios',
   '/v1/audit',
+  '/v1/prevention/actions',
+  '/v1/models',
 ]) {
   assert.ok(joined.includes(route), `the consumed route is missing from the app: ${route}`);
 }
@@ -180,5 +182,5 @@ assert.match(
 );
 
 console.log(
-  `PASS: ${sources.size} shipped source files checked. The honesty statement is present (${required.length} required statements), no fixture, frozen clock, invented identity or alias ships, all nine consumed routes and both external origins are present, no client-side role guard exists, tokens are never persisted, no secret is bundled, the sidebar still declares its own vertical scroll, and no external asset or inline handler is served.`,
+  `PASS: ${sources.size} shipped source files checked. The honesty statement is present (${required.length} required statements), no fixture, frozen clock, invented identity or alias ships, all eleven consumed routes and both external origins are present, no client-side role guard exists, tokens are never persisted, no secret is bundled, the sidebar still declares its own vertical scroll, and no external asset or inline handler is served.`,
 );

@@ -353,3 +353,74 @@ test('the pipeline refresh is rescheduled while signed in and cancelled on logou
     vi.useRealTimers();
   }
 });
+
+// T13 — cycle freshness. The service owns the cycle; the panel reproduces the
+// last/next run, the declared status and the age, and states explicitly when the
+// service does not report them instead of inventing a fresh-looking default.
+test('the cycle panel shows the last run, the next run and the freshness the service reports (T13)', async () => {
+  const { fetchStub } = await connect();
+  render(<SourcesView />);
+  await flush();
+
+  fetchStub.answer(SOURCES_URL, {
+    ...provenanceBody(),
+    sources: [
+      {
+        source_id: 'fixture',
+        last_run_at: '2026-01-01T11:45:00Z',
+        next_run_at: '2026-01-01T12:00:00Z',
+        complete: true,
+        age_seconds: 900,
+      },
+    ],
+  });
+  fetchStub.answer(RISK_STATUS_URL, statusBody());
+  fetchStub.answer(JOBS_STATUS_URL, statusBody());
+  await waitFor(() => expect(text('cycle-badge')).toBe('COMPLETA'));
+
+  expect(text('cycle-last-run')).toBe('2026-01-01T11:45:00Z');
+  expect(text('cycle-next-run')).toBe('2026-01-01T12:00:00Z');
+  expect(text('cycle-state')).toBe('completa');
+  expect(text('cycle-age')).toBe('900 s');
+  expect(text('cycle-sources')).toBe('1');
+  expect(text('cycle-last-error')).toBe('Sin error informado');
+  expect(text('cycle-status')).toMatch(/completa/);
+});
+
+test('the cycle panel derives incompleteness and surfaces a source error (T13)', async () => {
+  const { fetchStub } = await connect();
+  render(<SourcesView />);
+  await flush();
+
+  fetchStub.answer(SOURCES_URL, {
+    ...provenanceBody(),
+    sources: [
+      { source_id: 'a', last_run_at: '2026-01-01T11:45:00Z', next_run_at: '2026-01-01T12:00:00Z', complete: true, age_seconds: 900 },
+      { source_id: 'b', last_run_at: null, next_run_at: null, complete: false, age_seconds: null, last_error: 'timeout upstream' },
+    ],
+  });
+  fetchStub.answer(RISK_STATUS_URL, statusBody());
+  fetchStub.answer(JOBS_STATUS_URL, statusBody());
+  await waitFor(() => expect(text('cycle-badge')).toBe('INCOMPLETA'));
+
+  expect(text('cycle-state')).toBe('incompleta');
+  expect(text('cycle-sources')).toBe('2');
+  expect(text('cycle-last-error')).toContain('b');
+  expect(text('cycle-last-error')).toContain('timeout upstream');
+});
+
+test('the cycle panel states the service does not report sources, without inventing a run (T13)', async () => {
+  const { fetchStub } = await connect();
+  render(<SourcesView />);
+  await flush();
+
+  fetchStub.answer(SOURCES_URL, provenanceBody());
+  fetchStub.answer(RISK_STATUS_URL, statusBody());
+  fetchStub.answer(JOBS_STATUS_URL, statusBody());
+  await waitFor(() => expect(text('cycle-badge')).toBe('SIN INFORMAR'));
+
+  expect(text('cycle-status')).toMatch(/no informa/i);
+  expect(text('cycle-last-run')).toBe('No informado');
+  expect(text('cycle-age')).toBe('No informado');
+  expect(text('cycle-sources')).toBe('No informado');
+});
