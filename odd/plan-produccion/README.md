@@ -10,17 +10,19 @@
 
 Rutas relativas a la raíz del repositorio. «¿Dato?» y «¿Modelo?» marcan los frentes que dependen de los dos pendientes permitidos.
 
+**Base de planificación histórica (2026-10-16).** Las descripciones de «qué especifica» resumen cada documento fuente en su fecha; no son el estado actual. El estado vigente está en §10 y §11: la entrega de presentación quedó en `f509666` (PR #31) y el baseline actual es `0725a1b` (PRs #33–#35).
+
 | # | Frente pendiente | Documentación real (redirección) | Qué especifica | ¿Dato? | ¿Modelo? |
 |--:|---|---|---|:--:|:--:|
 | 1 | Ingesta de fuentes reales y ciclo/scheduler de 15 min | [`Referencias/EP1_Equipo3_Armijo_Calderon_Saavedra2_produccion.md:42-45,88`](../../Referencias/EP1_Equipo3_Armijo_Calderon_Saavedra2_produccion.md); [`Actividad C4_...:193-199,239-247`](<../../Referencias/Actividad C4_FireWatch_produccion.md>); [`odd/tasks/backend/firewatch-data-contract.md:25-28`](../tasks/backend/firewatch-data-contract.md) | Fuentes, validación y proceso automático; el contrato ODD deja los adaptadores reales fuera de su alcance actual | Sí | No |
 | 2 | Servicio real de inferencia / modelo aprobado | [`odd/tasks/backend/firewatch-data-contract.md:4,17-23`](../tasks/backend/firewatch-data-contract.md); [`Referencias/EP1_...:30,46-56`](../../Referencias/EP1_Equipo3_Armijo_Calderon_Saavedra2_produccion.md) | Define los contratos `Provider`/`Classifier` y `academic-rule-v1`; los datos sintéticos no son un modelo validado | No | Sí |
-| 3 | Servicio `prevention` y ciclo de acciones preventivas | [`backend/docs/architecture.md:34`](../../backend/docs/architecture.md); [`Referencias/EP1_...:62-66`](../../Referencias/EP1_Equipo3_Armijo_Calderon_Saavedra2_produccion.md); [`odd/tasks/frontend/frontend-mockup/README.md:46-73`](../tasks/frontend/frontend-mockup/README.md) | Servicio futuro; el backlog FWP03 define asignación, estados, responsable e historial, pero sigue propuesto | No | No |
-| 4 | Propagación de fallos terminales y replay de DLQ | [`backend/docs/architecture.md:42-46`](../../backend/docs/architecture.md); [`backend/README.md:94-98`](../../backend/README.md) | La DLQ conserva fallos; falta su replay y la propagación a estado terminal del job | No | No |
-| 5 | Observabilidad productiva y métricas de modelo | [`Referencias/tareas_...:361-411,484-491`](../../Referencias/tareas_verificacion_implementacion_IA.md); [`backend/docs/architecture.md:55-57`](../../backend/docs/architecture.md); [`odd/urgent/04-operacion-monitoreo.md:15-17`](../urgent/04-operacion-monitoreo.md) | OpenTelemetry, Grafana, dashboards, alertas y `high_risk_predictions_total`; separar señales operativas de métricas que exigen ground truth | No | No |
+| 3 | Servicio `prevention` y ciclo de acciones preventivas | [`backend/docs/architecture.md:34`](../../backend/docs/architecture.md); [`Referencias/EP1_...:62-66`](../../Referencias/EP1_Equipo3_Armijo_Calderon_Saavedra2_produccion.md); [`odd/tasks/frontend/frontend-mockup/README.md:46-73`](../tasks/frontend/frontend-mockup/README.md) | Servicio entregado en la presentación (L13/L14); el backlog FWP03 fue su origen y ya no está propuesto | No | No |
+| 4 | Propagación de fallos terminales y replay de DLQ | [`backend/docs/architecture.md:42-46`](../../backend/docs/architecture.md); [`backend/README.md:121`](../../backend/README.md) | La DLQ conserva fallos; falta su replay y la propagación a estado terminal del job | No | No |
+| 5 | Observabilidad productiva y métricas de modelo | [`Referencias/tareas_...:361-411,484-491`](../../Referencias/tareas_verificacion_implementacion_IA.md); [`backend/docs/architecture.md:55-57`](../../backend/docs/architecture.md); [`odd/urgent/04-operacion-monitoreo.md:15-17`](../urgent/04-operacion-monitoreo.md) | OpenTelemetry y ground truth siguen pendientes; Grafana, dashboards y alertas ya existen (L26/L27); separar señales operativas de métricas que exigen ground truth | No | No |
 | 6 | Autoscaling/HPA, carga y medición p95/SLO | [`Referencias/tareas_...:289-301,320-357`](../../Referencias/tareas_verificacion_implementacion_IA.md); [`Actividad Dimensionamiento_...:34-48,153-157`](<../../Referencias/Actividad Dimensionamiento_FireWatch_produccion.md>) | Elegir herramienta, acordar objetivos y medir; las cifras de dimensionamiento son metas iniciales, no resultados | No | No |
 | 7 | Firma de imágenes, promoción de registry y rollout | [`backend/docs/architecture.md:57`](../../backend/docs/architecture.md); [`backend/docs/verification.md:62-68`](../../backend/docs/verification.md); [`Actividad C4_...:229-273`](<../../Referencias/Actividad C4_FireWatch_produccion.md>) | La CI ya produce SBOM/provenance; siguen pendientes firma, promoción y despliegue productivo verificado en Kubernetes | No | No |
 | 8 | Gobierno, seguridad y protección de datos/modelo (U1) | [`odd/urgent/01-seguridad-gobierno.md:1-23`](../urgent/01-seguridad-gobierno.md); requisitos: [`Referencias/tareas_...:51-187`](../../Referencias/tareas_verificacion_implementacion_IA.md) | Asignar responsable/aprobación y registrar controles de seguridad, procedencia, privacidad, aislamiento y respuesta | Sí | Sí |
-| 9 | Login real en navegador, móvil y accesibilidad | [`odd/tasks/README.md:77-88`](../tasks/README.md); [`odd/tasks/frontend/client-proposal-page.md:24-26,39-45`](../tasks/frontend/client-proposal-page.md) | La página existe; el recorrido browser/Keycloak y la revisión móvil/accesibilidad siguen sin cierre | No | No |
+| 9 | Login real en navegador, móvil y accesibilidad | [`odd/tasks/README.md:95`](../tasks/README.md); [`odd/tasks/frontend/client-proposal-page.md:24-26,39-45`](../tasks/frontend/client-proposal-page.md) | La página existe; el recorrido browser/Keycloak y la revisión móvil/accesibilidad se midieron después (L14/L23); los límites de prueba están en §10 | No | No |
 | 10 | OpenAPI como fuente de verdad y contract tests | [`odd/tasks/security/backend-hardening/08-openapi-errors.md:7-20`](../tasks/security/backend-hardening/08-openapi-errors.md); [`odd/urgent/README.md:44-48`](../urgent/README.md) | El OpenAPI consta validado **solo sintácticamente**; BH-08 exige contrastar respuestas reales con el contrato y probar handlers | No | No |
 | 11 | Hardening backend BH-01…BH-11 | [`odd/tasks/security/backend-hardening.md`](../tasks/security/backend-hardening.md) y sus unidades en `odd/tasks/security/backend-hardening/` | 12 unidades planificadas; BH-01…BH-11 pendientes, BH-12 diferida. El plan no acredita scans ni implementación | No | No |
 | 12 | Evaluación científica (sesgo, leakage, robustez, Champion/Challenger, drift) | [`odd/urgent/02-pruebas-datos.md:7-14`](../urgent/02-pruebas-datos.md); [`odd/urgent/03-pruebas-modelo.md:7-15`](../urgent/03-pruebas-modelo.md); [`Referencias/tareas_...:217-280,303-318`](../../Referencias/tareas_verificacion_implementacion_IA.md) | Bloqueada por datos, ground truth y umbrales aprobados; no puede cerrarse sin los pendientes permitidos | Sí | Sí |
@@ -73,10 +75,11 @@ Dos decisiones de la sesión A2 no aparecen arriba porque no son políticas de p
 
 - **Motor de datos productivo** (frente 14): decisión pendiente; hoy solo está aprobado PostGIS local.
 - **Responsables y firmas** (frentes 8, 12, 13): no avanzan sin acuerdo explícito del equipo.
-- **`prevention`**: el backlog FWP03 está **propuesto**, no aprobado como alcance — requiere revisión antes de implementarse (ver [`odd/tasks/frontend/frontend-mockup/README.md:48-54`](../tasks/frontend/frontend-mockup/README.md)).
+- **`prevention`**: implementado en la entrega de presentación (servicio, migración `009`, contrato congelado y vista `#actions`, L13/L14). La separación de la base de `risk` sigue como decisión de producción.
 - **Procedencia DIFROL** (frente 15): verificar antes de asumir la fuente lista.
 - **Entorno y accesos** para BH-02 (imágenes), BH-04/05/06/11, BH-10 y el escenario end-to-end de BH-07: no esperan una decisión de producto, sino infraestructura disponible (Docker/`trivy`, PostgreSQL y broker aislados, clúster).
-- **Merge del PR #29** y el **duplicado residual** `odd/tasks/backend-hardening/` en la raíz (`odd/tasks/README.md` §«Estado de la organización»).
+- **PR #29 y duplicado residual**: resueltos. El PR quedó contenido en `main` y se cerró con un comentario (L24); `odd/tasks/backend-hardening/` ya no existe (L2) y el índice lo registra como eliminado.
+- **Modelo entrenado real y fuente de datos real**: siguen siendo los dos pendientes permitidos; el resto del alcance de presentación está implementado y verificado (L22/L23).
 
 ## 5. Definición de terminado por frente
 
@@ -106,8 +109,8 @@ Cada frente tiene su propio documento con el contrato ODD (**Specs → Tasks →
 | G3 Robustez backend | 8 — Gobierno y seguridad (U1) | [`08-gobierno-seguridad-u1.md`](08-gobierno-seguridad-u1.md) | responsables/decisiones | Designar responsable y aprobar |
 | G4 Operación | 5 — Observabilidad y métricas de modelo | [`05-observabilidad.md`](05-observabilidad.md) | *ground truth* | Umbrales/herramientas — **resuelto, implementado (ver §8)** |
 | G4 Operación | 6 — Autoscaling, carga y p95/SLO | [`06-autoscaling-carga-slo.md`](06-autoscaling-carga-slo.md) | SLO/carga/RTO | Acordar objetivos — **resuelto, artefactos escritos (ver §8)** |
-| G5 Producto y cierre | 3 — Servicio `prevention` | [`03-prevention.md`](03-prevention.md) | FWP01–02 | **Alcance FWP03 propuesto** |
-| G5 Producto y cierre | 9 — Login browser/móvil/a11y | [`09-login-browser-a11y.md`](09-login-browser-a11y.md) | realm/cliente/clúster | Ajustes en Admin Console |
+| G5 Producto y cierre | 3 — Servicio `prevention` | [`03-prevention.md`](03-prevention.md) | FWP01–02 | **Implementado (L13/L14); separar la base es decisión de producción** |
+| G5 Producto y cierre | 9 — Login browser/móvil/a11y | [`09-login-browser-a11y.md`](09-login-browser-a11y.md) | realm/cliente/clúster | **Recorrido real medido (L14/L23); límites de prueba: sin certificación WCAG ni lector de pantalla** |
 | G5 Producto y cierre | 15 — Procedencia geoespacial (DIFROL) | [`15-procedencia-geoespacial.md`](15-procedencia-geoespacial.md) | metadatos geo | Validación DIFROL |
 | No cierra esta semana | 12 — Evaluación científica | [`12-evaluacion-cientifica.md`](12-evaluacion-cientifica.md) | datos + modelo | **Bloqueado por permitidos** |
 | No cierra esta semana | 13 — Go/No-Go y firma | [`13-go-no-go.md`](13-go-no-go.md) | datos + modelo + infra | **Bloqueado por permitidos** |
@@ -117,11 +120,13 @@ Cada frente tiene su propio documento con el contrato ODD (**Specs → Tasks →
 - **Sesión A (paralela):** frentes 4, 10, 11 (mismo frente de backend/hardening; superficies disjuntas, coordinar BH-07/BH-08 con 4/10). **Ejecutada y cerrada el 2026-10-16:** política acordada, BH-01/02/03/07/08/09 al día y el último hueco de recuperación resuelto; ver §9.
 - **Sesión B (paralela):** frente 5 y 6 (operación; comparten el acuerdo de umbrales/SLO — resolver ese acuerdo primero). **Ejecutada el 2026-10-16:** acuerdo resuelto, frente 5 implementado y verificado, frente 6 con artefactos escritos y ejecución pendiente. Ver §8.
 - **Sesión C (decisión):** frente 14 (decisión de motor) y frente 7 (registry/claves): son decisiones humanas que habilitan al resto.
-- **Sesión D:** frente 9 (frontend/browser) y frente 15 (DIFROL): acotadas y documentales.
+- **Sesión D:** frente 9 (frontend/browser) y frente 15 (DIFROL): el frente 9 se ejecutó (L14/L23); DIFROL sigue pendiente.
 - **Sesión E (gobierno):** frente 8 (U1) — requiere responsables.
-- **Detenidas hasta aprobación/datos:** frentes 1, 2, 3, 12, 13.
+- **Detenidas hasta aprobación/datos:** frentes 12 y 13 (modelo entrenado y evaluación); los frentes 1–3 quedaron implementados en la entrega de presentación, con la fuente/modelo real como pendientes permitidos.
 
 ## 8. Registro de avance — Sesión B (2026-10-16)
+
+**Sección histórica.** Describe el estado del 2026-10-16 y no se reescribe. Los ítems de código que deja abiertos —latencia/errores en `gateway` y `jobs`, y Grafana— se cerraron después (T10–T11, T25–T27); el estado vigente está en §10–§11.
 
 Sesión ejecutada sobre los frentes **5 (observabilidad)** y **6 (autoscaling/carga/SLO)**. El detalle autoritativo vive en el `## Log` de [`05-observabilidad.md`](05-observabilidad.md) (L2–L5) y [`06-autoscaling-carga-slo.md`](06-autoscaling-carga-slo.md) (L2–L3); esta sección es el resumen y el estado. **Ningún frente queda «terminado»** según §5: hay implementación y evidencia de código, pero **falta la medición**.
 
@@ -144,7 +149,7 @@ El acuerdo que los dos frentes compartían quedó aprobado y registrado:
 | **S3** | Método, herramienta y frecuencia de drift documentados (Evidently AI; Data vs Concept; por lote, mínimo diaria; reentrenar solo con evidencia). La comparación de calidad contra ground truth queda pendiente. | `backend/docs/operations.md` §4 |
 | **S4** | `backend/deploy/local/alerts.yml` con 6 reglas donde **cada alerta nombra su acción concreta** (`ALR-V3`); cargadas por `rule_files` y montadas en compose. Sin Alertmanager: se ven en la UI de Prometheus y como la serie `ALERTS`. | `backend/deploy/local/{alerts,prometheus}.yml`, `backend/docker-compose.yml` |
 
-Límite declarado: latencia/errores/recursos se implementaron **solo en el servicio `risk`**. `gateway` y `jobs` conservan por ahora sus contadores de entrega; su latencia y tasa de error no están medidas (cada servicio es un módulo Go propio, así que extenderlo implica duplicar `internal/metrics`).
+**Límite de entonces (histórico; cerrado después por T10–T11 y T25–T27):** latencia/errores/recursos se implementaron **solo en el servicio `risk`**. `gateway` y `jobs` conservan por ahora sus contadores de entrega; su latencia y tasa de error no están medidas (cada servicio es un módulo Go propio, así que extenderlo implica duplicar `internal/metrics`).
 
 ### 8.3 Frente 6 — artefactos escritos, **sin ejecutar**
 
@@ -175,6 +180,8 @@ Límite declarado: latencia/errores/recursos se implementaron **solo en el servi
 **Para retomar:** el detalle accionable por spec está en las tablas "Pendientes al cierre de la Sesión B" de [`05-observabilidad.md`](05-observabilidad.md) y [`06-autoscaling-carga-slo.md`](06-autoscaling-carga-slo.md).
 
 ## 9. Registro de avance — Sesión A (cerrada el 2026-10-16)
+
+**Sección histórica.** Describe el estado del 2026-10-16 y no se reescribe. El PR #29 quedó contenido en `main` y cerrado con un comentario (L24), el duplicado residual ya no existe y el estado vigente está en §10–§11.
 
 Sesión ejecutada sobre los frentes **4 (fallos terminales y replay), 10 (OpenAPI y contract tests) y 11 (hardening BH-01…BH-11)**, en la rama `fix/backend-hardening-bh`. El detalle autoritativo vive en el `## Log` de [`04-dlq-replay-terminal.md`](04-dlq-replay-terminal.md) (L3–L4), [`10-openapi-contract-tests.md`](10-openapi-contract-tests.md), [`11-hardening-bh.md`](11-hardening-bh.md) (L3) y en el documento de cada unidad (`../tasks/security/backend-hardening/NN-*.md`).
 
@@ -234,21 +241,21 @@ Registro trasladado desde el handoff de la sesión A2, retirado el 2026-10-17. L
 
 Los SHA de la sesión A cambiaron al reaplicarse sobre `main`: `ee215b4`→`02911d5`, `b91714b`→`750cd80`, `aed5e09`→`702aff6`, `678a13a`→`03baa09`. El detalle por unidad vive en su documento en [`../tasks/security/backend-hardening/`](../tasks/security/backend-hardening/).
 
-## 10. Pendientes consolidados (2026-10-16)
+## 10. Pendientes consolidados (2026-10-16; actualizado el 2026-10-18)
 
-Todo lo que sigue abierto de este plan, en un solo lugar, con **qué lo desbloquea**: una decisión humana, un entorno, otra sesión o otro frente. El estado por unidad de hardening vive en [`../tasks/security/backend-hardening/`](../tasks/security/backend-hardening/) y el índice del §5 se mantiene en [`../tasks/README.md`](../tasks/README.md).
+Todo lo que sigue abierto de este plan, en un solo lugar, con **qué lo desbloquea**: una decisión humana, un entorno, otra sesión o otro frente. El estado por unidad de hardening vive en [`../tasks/security/backend-hardening/`](../tasks/security/backend-hardening/) y el índice del §5 se mantiene en [`../tasks/README.md`](../tasks/README.md). **Actualización del 2026-10-18:** las filas de los frentes 1, 2, 3, 5 y 9 incorporan la evidencia de la entrega de presentación y de la ola de observabilidad; el detalle autoritativo vive en el `## Log` de [`../tasks/presentation-client-ready.md`](../tasks/presentation-client-ready.md) L22–L28.
 
 | Frente | Estado | Qué falta | Qué lo desbloquea |
 | --- | --- | --- | --- |
-| 1 — Ingesta y scheduler | Pendiente | Plan por spec listo; nada implementado | Acceso y periodicidad reales de las fuentes (decisión humana) y el frente 2 |
-| 2 — Servicio de inferencia | Pendiente | El *seam* está documentado, no implementado | Frente 1; modelo real y su política de aprobación |
-| 3 — `prevention` | Pendiente | Backlog FWP03 **propuesto**, no aprobado | Revisión de alcance por el equipo (§4) |
+| 1 — Ingesta y scheduler | **Parcial — seam y ciclo entregados** | La fuente de datos real y sus rangos de validación de producción (pendiente permitido) | Acceso y periodicidad reales de las fuentes (decisión humana) |
+| 2 — Servicio de inferencia | **Parcial — registro y segunda versión entregados** | El modelo entrenado real y su evaluación científica (frentes 12/13) | Modelo real y su política de aprobación |
+| 3 — `prevention` | **Listo — servicio entregado y verificado** | Nada del alcance de demo; separar la base de `risk` es una decisión de producción | Decisión de producción sobre la base |
 | 4 — Fallos terminales y replay | **Implementado y verificado** | El escenario end-to-end (interrumpir PostgreSQL, agotar reintentos, restaurar, reiniciar consumidores) y `-race` local | Entorno con PostgreSQL y broker |
-| 5 — Observabilidad | Parcial | Medición (RPS/p95/errores/memoria); `LOG-I3` (*ground truth*); latencia y errores **solo en `risk`**: falta instrumentar `gateway` y `jobs`; sin Alertmanager no hay enrutamiento | Entorno y *ground truth* para medir; **el ítem de código abierto no requiere entorno** |
+| 5 — Observabilidad | Parcial — monitoreo local completo | Medir los umbrales con carga; `LOG-I3` (*ground truth*); Alertmanager; monitoreo en Kubernetes | Entorno y *ground truth* para medir |
 | 6 — Autoscaling, carga y p95/SLO | Parcial | Ejecutar k6, verificar el HPA en clúster y medir el RTO | Entorno aislado y clúster de destino |
 | 7 — Firma, registry y rollout | Pendiente | Firma, promoción y despliegue verificado (la CI ya produce SBOM/provenance) | Decisión de registry y llaves, y clúster (accesos) |
 | 8 — Gobierno y seguridad (U1) | Pendiente | Controles y clasificación sin aprobar | Designar responsable y aprobar |
-| 9 — Login browser/móvil/a11y | Pendiente | Recorrido navegador con Keycloak vivo, móvil 390 px y accesibilidad | Realm y cliente vivos; el recorrido lo ejecuta el usuario con el guion |
+| 9 — Login browser/móvil/a11y | **Parcial — recorrido real medido** | Límites de prueba: sin certificación WCAG ni lector de pantalla; la aserción de foco a 390 px cierra sobre BODY | No es un bloqueo de producto; es el límite de lo medido |
 | 10 — OpenAPI y contract tests | **Implementado y re-verificado** | Nada propio; la re-verificación fue en línea porque la admisión rechazó al verificador independiente | — |
 | 11 — Hardening BH-01…BH-11 | Sesión A cerrada (detalle en §9) | BH-02 imágenes (inventario + `trivy`); BH-04/05/06 (entorno); BH-10 (DB y broker aislados); BH-11 (depende de BH-02/04/05/06); BH-12 (activación explícita) | Docker y `trivy`, entorno y accesos, y una decisión de activación para BH-12 |
 | 12 — Evaluación científica | **Bloqueado** | Nada avanza sin datos reales | Datos representativos, modelo evaluable, *ground truth* y umbrales acordados |
@@ -258,10 +265,10 @@ Todo lo que sigue abierto de este plan, en un solo lugar, con **qué lo desbloqu
 
 ### 10.1 Entrega y revisión
 
-- **PR #29** (`fix/backend-hardening-bh` → `main`, 83 archivos, +6 033/−188): abierto, `MERGEABLE` y con CI verde. **El merge es decisión del usuario.**
+- **PR #29** (`fix/backend-hardening-bh` → `main`, 83 archivos, +6 033/−188): quedó contenido en `main` y se cerró con un comentario (L24); no queda merge pendiente.
 - Conviene revisarlo **por rebanada** (una unidad por commit); el reparto está en §9.5 de este documento.
 - **Revisión nativa:** el candidato `b0f77f9..HEAD` se evaluó como `high` con `review_due`; la oferta se hizo una vez y el consentimiento quedó **declinado para este candidato** (`lineage_created: false`, sin autoridad consumida). Un cambio nuevo vuelve a tener su propia oferta.
-- **Duplicado pendiente de decisión humana:** `odd/tasks/backend-hardening/` sigue en la raíz del índice de tareas; su copia verificada vive en `odd/tasks/security/backend-hardening/`.
+- **Duplicado residual:** eliminado el 2026-10-17; la copia verificada vive en `odd/tasks/security/backend-hardening/`.
 
 ### 10.2 Registro
 
@@ -278,6 +285,8 @@ La entrega de esta semana tiene su propio plan, con specs, tareas y reparto por 
 | 1 | `feat/metrics-operacion` | T10–T11 | `gateway`, `jobs` |
 | 2 | `feat/frontend-completo` | T12–T15 | `frontend` |
 | cierre | `feat/presentacion-cliente` | T16–T19 | integración y verificación end-to-end |
+
+**Estado al 2026-10-18:** la entrega quedó en `main` con `f509666` (PR #31, issue #30) en su momento; la ola de monitoreo siguió en los PRs #33–#35 y el baseline actual es `0725a1b`. S2 y S1 se cerraron con la corrida en frío (L22) y el monitoreo S7 con T25–T27 (L27). Sigue fuera de alcance lo que exige modelo entrenado, fuente real, carga/RTO, firma/registry/rollout, gobierno, DIFROL y monitoreo en manifiestos de Kubernetes.
 
 Sigue en pie lo que este documento ya declara fuera: frentes 6, 7, 8, 12, 13, 14, 15 y las unidades BH que exigen entorno.
 

@@ -12,7 +12,7 @@ single-file, framework-free page; the reasons and the parity obligations are rec
 | `index.html` | Vite entry: the document and the `#root` mount point. No page content lives here |
 | `src/config.ts` | The two external origins, the identity provider, the consumed routes and the timing bounds |
 | `src/types/api.ts` | Declared payload shapes. Declarations, not guarantees: consumers validate at the boundary |
-| `src/app/routes.ts` | The seven views and their four navigation groups |
+| `src/app/routes.ts` | The eight views and their four navigation groups |
 | `src/app/useHashRoute.ts` | Hash routing: reads the view from the address bar, follows back/forward, normalises an unknown hash |
 | `src/components/Shell.tsx` | Sidebar, topbar, update bar and footer |
 | `src/components/ui.tsx` | Presentation primitives: `Icon`, `Chip`, `Metric`, `PanelHeading`, `DataList`, `StatusCopy`, `EmptyState`, the "not implemented" markers |
@@ -20,7 +20,7 @@ single-file, framework-free page; the reasons and the parity obligations are rec
 | `src/core/api.ts` | Transport: one function per consumed route, absolute gateway URLs, sequence fences, deadlines |
 | `src/core/session.ts` | OIDC PKCE, the in-memory token, the unverified role claim, logout |
 | `src/domain/` | Pure rules: validity, level mapping, fail-closed batch and provenance acceptance, readiness, history filters |
-| `src/views/` | The seven views |
+| `src/views/` | The eight views |
 | `src/styles/` | `tokens.css` (palette, level colours, type) and `app.css` (layout, components, responsive) |
 | `scripts/serve.mjs` | Static server for the build output: explicit allowlist, CSP, no directory listing, no SPA fallback |
 | `scripts/smoke.mjs` | Loopback check of that server against the build |
@@ -113,12 +113,7 @@ npm run verify     # lint → typecheck → tests → source gate → build → 
 
 ## What is not verified
 
-Automated checks do **not** establish visual correctness or accessibility, and they do not
-exercise the real login path. The cross-origin round trip — signing in from
-`http://localhost:4173` through Keycloak and logging out back to it — has **not** been executed
-end to end in a browser. Treat that round trip as the real acceptance check, and see
-[`backend/docs/keycloak-realm-setup.md`](../backend/docs/keycloak-realm-setup.md) for the realm
-settings it depends on.
+Automated checks do **not** establish visual correctness or full accessibility. The cross-origin round trip — signing in from `http://localhost:4173` through Keycloak and logging out back to it — **has** been executed end to end in a browser ([L14/L23](../odd/tasks/presentation-client-ready.md#log): PKCE for admin and viewer, RP logout, 401/403 with `request_id`), so the remaining limits are narrower and explicit: there is **no WCAG certification**, the automated 390 px focus assertion closes on **BODY** when the actions list is empty (the real controls still show a 3 px outline), and no screen reader or other assistive technology was exercised. See [`backend/docs/keycloak-realm-setup.md`](../backend/docs/keycloak-realm-setup.md) for the realm settings the round trip depends on.
 
 One layout property sits in that category deliberately, and it is the reason the sidebar carries
 its own scrollbar: whether the lower controls of the sidebar — the session card with **Cerrar

@@ -23,7 +23,7 @@ measured will be labelled *measured* and dated.
 
 ## 2. Signals exposed by `/metrics`
 
-Every service already exposes the delivery counters
+The `jobs` and `risk` services expose the delivery counters
 (`firewatch_http_requests_total`, `firewatch_broker_ready`,
 `firewatch_events_{published,processed,rejected}_total`,
 `firewatch_dead_letter_depth`, `firewatch_dead_letter_depth_age_seconds`).
@@ -43,11 +43,7 @@ The `risk` service adds:
 | Infrastructure | `firewatch_process_{goroutines,cpu_seconds_total,memory_bytes}` | process CPU and RAM (no GPU: the model is tabular) |
 | Data access | `firewatch_db_pool_{total,acquired,idle,max}_conns` | PostgreSQL/PostGIS pool health |
 
-**Scope limit:** the HTTP latency, error and runtime signals are implemented for
-the `risk` service today (`internal/metrics`). The `gateway` and `jobs` services
-do not expose them, so their latency and error rate are not measured yet; the
-end-to-end p95 comes from the k6 benchmark instead. `jobs` also exposes the
-queued-age signal above, which is an availability signal, not a latency one.
+**Scope (updated 2026-10-18):** the HTTP latency, error and runtime signals are implemented for all four services — `gateway`, `jobs`, `risk` and `prevention` — with the same `internal/metrics` pattern. Their series are collected by Prometheus; what remains unmeasured is the end-to-end p95 under load, which still comes from the k6 benchmark (front 6). `jobs` also exposes the queued-age signal above, which is an availability signal, not a latency one.
 
 ## 3. Alerts: threshold and action
 
@@ -207,7 +203,7 @@ operator surface.
 - No measured SLO/SLA, throughput, p95 or RTO: no benchmark or recovery run yet.
 - No cluster rollout or HPA-in-action verification.
 - No Alertmanager routing.
-- Latency/error/runtime signals exist only for the `risk` service.
+- End-to-end p95/RPS under load and the RTO are not measured; the per-service latency/error/runtime series exist for all four services but no load run has used them.
 - No drift evaluation, because there is no ground truth yet.
 - **A `queued` job's re-dispatch is an operator attestation, not proof.** The
   replay cannot see the broker, so it cannot know whether a copy of the request is

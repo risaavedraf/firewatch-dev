@@ -3,6 +3,8 @@
 **Veredicto: PARCIAL — no certificar todavía la entrega completa.**
 Código funcional verificado hasta `4ea6142`; los commits posteriores hasta `aba34fe` cambian solo `odd/tasks/presentation-client-ready.md`. No se modificó código de producto desde esta sesión, ni se hicieron commits, push o merges. Las correcciones las hizo la sesión autorizada `01a14b07`.
 
+> **Nota de vigencia (2026-10-18, conciliación documental issue #36).** Este informe es el registro histórico de la sesión de verificación sobre `4ea6142`; sus veredictos por spec se conservan como se escribieron. Después de él, y sin reescribirlo: **[L22](../presentation-client-ready.md#log)** ejecutó la corrida en frío de `MODEL_ID=firewatch-rule-v2` y aprobó S2 (y con ella S1); **[L23](../presentation-client-ready.md#log)** recreó la pila del operador, midió el panel de modelo y la frescura en una pasada read-only (53 nodos de contraste, 0 fallos) y declaró el límite de la aserción de foco sobre **BODY** a 390 px y la ausencia de certificación WCAG y de medición con lector de pantalla; **[L26](../presentation-client-ready.md#log)/[L27](../presentation-client-ready.md#log)** cerraron la ola de observabilidad (gateway, jobs y prevention en el scrape, y Grafana con panel versionado). La frase «Necesita decisión» de más abajo describe el estado de entonces, no el actual: la corrida diagnóstica se ejecutó una sola vez en L22.
+
 ## Veredicto por spec
 
 | Spec | Veredicto | Evidencia / límite |
