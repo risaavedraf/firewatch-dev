@@ -6,8 +6,11 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
+
+	"firewatch.local/prevention/internal/metrics"
 )
 
 // TestReadyHandlerReportsTheDatabaseDecision pins the readiness probe: the code
@@ -69,5 +72,55 @@ func TestReadyHandlerReportsTheDatabaseDecision(t *testing.T) {
 				t.Errorf("dependencies %v must contain only database", body.Dependencies)
 			}
 		})
+	}
+}
+
+// TestMetricsHandlerRendersTheServiceSignals pins the /metrics surface (T26):
+// the handler answers the Prometheus text format with the families the latency
+// and error alerts are written against, plus the process signals. A scrape
+// cannot obtain a token, so this route is answered before authentication, the
+// same posture health has.
+func TestMetricsHandlerRendersTheServiceSignals(t *testing.T) {
+	httpMetrics := &metrics.HTTPMetrics{}
+	httpMetrics.Observe(http.StatusCreated, 10*time.Millisecond)
+	httpMetrics.Observe(http.StatusServiceUnavailable, 20*time.Millisecond)
+	w := httptest.NewRecorder()
+	metricsHandler(httpMetrics.Text, metrics.RuntimeText).ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/metrics", nil))
+	if w.Code != http.StatusOK {
+		t.Fatalf("answered %d, want 200", w.Code)
+	}
+	if got := w.Header().Get("Content-Type"); got != "text/plain; version=0.0.4" {
+		t.Errorf("content type %q, want the Prometheus text format", got)
+	}
+	body := w.Body.String()
+	for _, want := range []string{
+		`firewatch_http_responses_total{class="2xx"} 1`,
+		`firewatch_http_responses_total{class="5xx"} 1`,
+		"firewatch_http_errors_total 1",
+		"firewatch_http_request_duration_seconds_bucket",
+		"firewatch_process_goroutines",
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("body omits %q:\n%s", want, body)
+		}
+	}
+}
+
+// TestStatusRecorderKeepsTheAnsweredStatus pins the one thing the middleware
+// needs from the writer: the status the client was answered with. A handler that
+// writes without calling WriteHeader is answered 200 by net/http, and the
+// recorder has to report that same code rather than zero.
+func TestStatusRecorderKeepsTheAnsweredStatus(t *testing.T) {
+	explicit := &statusRecorder{ResponseWriter: httptest.NewRecorder()}
+	explicit.WriteHeader(http.StatusConflict)
+	if explicit.status != http.StatusConflict {
+		t.Errorf("recorded %d, want 409", explicit.status)
+	}
+	implicit := &statusRecorder{ResponseWriter: httptest.NewRecorder()}
+	if _, err := implicit.Write([]byte("ok")); err != nil {
+		t.Fatal(err)
+	}
+	if implicit.status != http.StatusOK {
+		t.Errorf("recorded %d, want 200 for a write without WriteHeader", implicit.status)
 	}
 }
