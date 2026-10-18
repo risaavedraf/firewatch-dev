@@ -459,7 +459,7 @@ export function OverviewView() {
 
       <article className="panel model-panel" id="model-panel" aria-labelledby="model-panel-title">
         <PanelHeading
-          eyebrow="MODELO EN USO"
+          eyebrow="REGISTRO Y LOTE"
           titleId="model-panel-title"
           title="Versión de modelo activa"
           badge={
@@ -478,15 +478,17 @@ export function OverviewView() {
           </div>
           <div>
             <dt>Versión del último lote</dt>
-            <dd>{batchField(batchData?.model_version)}</dd>
+            <dd id="model-batch-version">{batchField(batchData?.model_version)}</dd>
           </div>
         </dl>
-        <p className="panel-note">
+        <p className="panel-note" id="model-panel-note">
           La marca sintética se reproduce tal como el servicio la declara. Una versión sin marca declarada se muestra
-          como no declarada; la página no la supone no sintética. Activar una versión mueve el registro, no el
-          clasificador que está en uso: el servicio fija su versión con <code>MODEL_ID</code> al arrancar, así que
-          adoptar la activa exige fijar ese valor y recrear el servicio; la versión elegida debe existir en el
-          registro con su huella congelada o el arranque falla cerrado.
+          como no declarada; la página no la supone no sintética. La fila del registro es la versión que el registro
+          presenta como activa; la fila del lote es la versión que de verdad lo clasificó, y ambas pueden diferir. Una
+          activación o su reversión rige para las publicaciones que resuelven su clasificador después de esa llamada:
+          las que ya estaban en curso conservan la instantánea que resolvieron. Antes de una activación explícita, el
+          clasificador en uso es el que fija <code>MODEL_ID</code> al arrancar, y que una fila del registro esté
+          sembrada como activa no prueba que el servicio la haya usado.
         </p>
       </article>
 

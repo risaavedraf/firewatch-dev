@@ -452,14 +452,23 @@ paths:
       description: >-
         Viewer/admin. The model registry: every version with its kind, frozen
         parameter fingerprint, approval instant, metrics and active flag. The
-        active row is first so the UI can show the version that judges new
-        assessments. Reading the registry promotes nothing. The active flag is
-        registry lifecycle metadata: the service selects the classifier it runs
-        from configuration at startup (MODEL_ID), so activating a version
-        changes the registry and not the running classifier. Adopting another
-        version means setting that configuration and recreating the service,
-        and the selected version must have a row here with the frozen
-        fingerprint or startup fails closed.
+        active row is first so the UI can show the version the registry presents
+        as active. Reading the registry promotes nothing.
+
+        The active flag alone does not prove which classifier ran. Rows the
+        migrations seed are already active before any operator decides anything,
+        and before an explicit activation the service runs the version selected
+        at startup (MODEL_ID). What selects inference is an EXPLICIT activation:
+        the activate route writes an activation record into metrics, and from
+        then on every publication that resolves its classifier after that
+        activation runs the activated version. MODEL_ID is only the startup
+        bootstrap until such an activation exists, and the selected version must
+        have a row here with the frozen fingerprint or startup fails closed.
+
+        A publication that already resolved its classifier before an activation
+        completes with that earlier version, so the active row here and the
+        version recorded on the newest batch can legitimately differ until the
+        next publication is resolved.
       responses:
         '200':
           description: Model registry ordered active first, then by version.
@@ -477,10 +486,20 @@ paths:
       description: >-
         Admin. Makes one model version active and records its approval in one
         transaction: the previously active row is cleared, approved_at is set
-        when it was null, and metrics records the activation. At most one
-        version is active. Reversion is activating the previous version through
-        this same route. A placeholder is refused with 409 because the schema
-        forbids it from ever being active, and nothing is written.
+        when it was null, and metrics records the activation, which is what makes
+        the row authoritative for inference. At most one version is active.
+        Reversion is activating the previous version through this same route.
+
+        Effect on inference: every publication whose classifier resolution
+        happens AFTER this call runs the activated version and records that
+        version with its policy. A publication already in flight that resolved
+        its classifier before the call is unaffected: it completes with the one
+        snapshot it resolved, and only its next publication sees the new version.
+        The activation needs no restart and does not depend on MODEL_ID once it
+        exists.
+
+        A placeholder is refused with 409 because the schema forbids it from ever
+        being active, and nothing is written.
       parameters:
         - in: path
           name: version
@@ -1014,7 +1033,13 @@ components:
         params_hash: {type: string, nullable: true, pattern: '^[0-9a-f]{64}$'}
         approved_at: {type: string, format: date-time, nullable: true}
         metrics: {type: object, additionalProperties: true}
-        active: {type: boolean}
+        active:
+          type: boolean
+          description: >-
+            Registry lifecycle flag, true for at most one row. A seeded row is
+            active before any operator acts, so this flag alone does not identify
+            the classifier a publication ran; an explicit activation (metrics
+            carries the activation record) is what selects inference.
       description: >-
         One registry row. params_hash is the fingerprint of the effective
         parameters, not a model artifact digest, and is null for a placeholder

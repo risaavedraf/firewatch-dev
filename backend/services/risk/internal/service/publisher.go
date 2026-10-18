@@ -63,12 +63,45 @@ func (e permanentError) Permanent() bool { return true }
 // It is the only place where data acquisition, classification and persistence
 // meet, which is what keeps a provider and a classifier interchangeable.
 type Publisher struct {
-	Provider   source.Provider
+	Provider source.Provider
+	// Classifier is the classifier that serves every publication when Classifiers
+	// is nil. It is the startup-selected (MODEL_ID) instance, kept so a deployment
+	// that resolves nothing per publication keeps working exactly as before.
 	Classifier classify.Classifier
-	Store      BatchWriter
+	// Classifiers resolves the classifier from the shared models registry once per
+	// publication, so an activation decides inference in every replica without a
+	// restart. When it is set it takes precedence over Classifier; when it is nil
+	// the static Classifier above is used. See RegistryClassifierSource for the
+	// documented registry/bootstrap precedence.
+	Classifiers ClassifierSource
+	Store       BatchWriter
 	// Outcomes records the level of every persisted assessment. It is optional:
 	// a nil observer means the outcome is logged but not counted.
 	Outcomes RiskObserver
+}
+
+// resolveClassifier returns the classifier that must serve one publication.
+//
+// The result is used for the whole publication and never re-read, so the
+// assessment, the version recorded with it and its policy reference all come from
+// one instance; that is what makes a concurrent activation unable to mix two
+// versions inside one batch. An unresolvable registry state is tagged so the
+// caller can dead-letter it, while a registry read failure stays retryable.
+func (p Publisher) resolveClassifier(ctx context.Context) (classify.Classifier, error) {
+	if p.Classifiers == nil {
+		if p.Classifier == nil {
+			return nil, errors.New("publisher is misconfigured: a classifier or a classifier source is required")
+		}
+		return p.Classifier, nil
+	}
+	classifier, err := p.Classifiers.ActiveClassifier(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if classifier == nil {
+		return nil, fmt.Errorf("%w: the classifier source returned no classifier", ErrClassifierUnresolvable)
+	}
+	return classifier, nil
 }
 
 // selectedProvider returns the provider that must serve one request.
@@ -103,8 +136,8 @@ func (p Publisher) selectedProvider(request v1.Event) (source.Provider, error) {
 // Publish runs the publication path for one explicitly requested job: the batch
 // is persisted through the store's completion seam, which settles the job.
 func (p Publisher) Publish(ctx context.Context, request v1.Event) error {
-	if p.Classifier == nil || p.Store == nil {
-		return errors.New("publisher is misconfigured: classifier and store are required")
+	if p.Store == nil {
+		return errors.New("publisher is misconfigured: a store is required")
 	}
 	return p.publish(ctx, request, p.Store.Publish)
 }
@@ -123,8 +156,8 @@ func (p Publisher) Publish(ctx context.Context, request v1.Event) error {
 // policy identity, logging and the outcome counter - is shared, so suppressing
 // the completion cannot become a way to skip a guard.
 func (p Publisher) PublishScheduled(ctx context.Context, request v1.Event) error {
-	if p.Classifier == nil || p.Store == nil {
-		return errors.New("publisher is misconfigured: classifier and store are required")
+	if p.Store == nil {
+		return errors.New("publisher is misconfigured: a store is required")
 	}
 	scheduled, ok := p.Store.(ScheduledBatchWriter)
 	if !ok {
@@ -139,27 +172,43 @@ func (p Publisher) PublishScheduled(ctx context.Context, request v1.Event) error
 //
 // The order is fixed and each step guards the next:
 //
-//  1. the two invariants - classifier and store - are checked by the entry point
-//     that owns the origin, and the provider selected below must not be absent,
-//     so a misconfigured process fails explicitly instead of panicking;
-//  2. the scenario metadata is resolved before anything else, so an unknown
+//  1. the store is checked by the entry point that owns the origin, and a
+//     classifier must be resolvable, so a misconfigured process fails explicitly
+//     instead of panicking and an active version this binary cannot execute fails
+//     closed before anything is read or written;
+//  2. the classifier is resolved ONCE, before any acquisition, and the same
+//     instance then serves the classification, the recorded version and the
+//     policy, so a concurrent activation cannot mix two versions in one batch;
+//  3. the scenario metadata is resolved before anything else, so an unknown
 //     scenario, a missing or zero instant, or an instant without a scenario is
 //     refused permanently before any acquisition or storage;
-//  3. the selected provider is fetched once with a zero window, because the
+//  4. the selected provider is fetched once with a zero window, because the
 //     provider contract carries no zone parameter and the provider's own coverage
 //     is the scope;
-//  4. the retrieval must declare itself complete, because a partial retrieval
+//  5. the retrieval must declare itself complete, because a partial retrieval
 //     must not be able to produce a determined assessment by accident;
-//  5. the retrieval is adapted into classifier features, which refuses a set
+//  6. the retrieval is adapted into classifier features, which refuses a set
 //     that mixes zones and, for a non-synthetic retrieval, a set whose own zone
 //     labels do not identify the requested zone;
-//  6. the classifier is asked for a level, its factors and its rationale;
-//  7. the assessment is validated before storage, so a non-canonical level can
+//  7. the resolved classifier is asked for a level, its factors and its
+//     rationale;
+//  8. the assessment is validated before storage, so a non-canonical level can
 //     never reach the database;
-//  8. the assessment is handed to persist, and the request's scenario metadata
-//     travels untouched into the persisted batch because the store copies the
-//     request.
+//  9. the assessment is handed to persist with the provenance-derived demo flag,
+//     and the request's scenario metadata travels untouched into the persisted
+//     batch because the store copies the request.
 func (p Publisher) publish(ctx context.Context, request v1.Event, persist func(context.Context, v1.Event, repository.Assessment) error) error {
+	classifier, err := p.resolveClassifier(ctx)
+	if err != nil {
+		if errors.Is(err, ErrClassifierUnresolvable) {
+			// The registry names a version this binary cannot execute, or it records
+			// no version at all: no retry can register a classifier in a running
+			// process, so the job is dead-lettered instead of blocking the queue.
+			return fmt.Errorf("resolve active classifier for job %s: %w", request.JobID, permanentError{err: err})
+		}
+		// A registry read failure is a dependency failure: it stays retryable.
+		return fmt.Errorf("resolve active classifier for job %s: %w", request.JobID, err)
+	}
 	provider, err := p.selectedProvider(request)
 	if err != nil {
 		// The catalogue and the request metadata are fixed, so this can never
@@ -209,15 +258,15 @@ func (p Publisher) publish(ctx context.Context, request v1.Event, persist func(c
 	if err != nil {
 		return fmt.Errorf("build features from provider %s: %w", descriptor.ID, err)
 	}
-	assessment, err := p.Classifier.Classify(ctx, features)
+	assessment, err := classifier.Classify(ctx, features)
 	if err != nil {
-		return fmt.Errorf("classify with %s: %w", p.Classifier.ID(), err)
+		return fmt.Errorf("classify with %s: %w", classifier.ID(), err)
 	}
 	if err := assessment.Validate(); err != nil {
 		// A non-canonical level is deterministic: the classifier would return the
 		// same assessment on every attempt. It is tagged permanent so the consumer
 		// dead-letters it instead of spending the whole retry budget on it.
-		return fmt.Errorf("classify with %s: %w", p.Classifier.ID(), permanentError{err: err})
+		return fmt.Errorf("classify with %s: %w", classifier.ID(), permanentError{err: err})
 	}
 	// Identity check before persistence: the assessment must not claim a frozen
 	// policy identifier while reporting a different fingerprint. Validate above
@@ -228,15 +277,20 @@ func (p Publisher) publish(ctx context.Context, request v1.Event, persist func(c
 		// A fingerprint mismatch is deterministic too: the classifier instance
 		// carries a fixed parameter set, so no retry can make it agree with the
 		// frozen fingerprint. It is permanent for the same reason as above.
-		return fmt.Errorf("classify with %s: %w", p.Classifier.ID(), permanentError{err: err})
+		return fmt.Errorf("classify with %s: %w", classifier.ID(), permanentError{err: err})
 	}
 	// The reference identifies the parameters actually used, not the default: it
 	// comes from the classifier instance that produced this assessment, and
 	// Validate above already proved its policy id and params hash are present. The
 	// address is taken of a local copy, never of a field of a temporary.
+	//
+	// ModelVersion is the PRODUCING classifier's identifier, never a version read
+	// from somewhere else: the batch is attributed to the exact instance that
+	// judged it, so an activation that lands between resolution and persistence
+	// cannot stamp this batch with a version that did not run.
 	policy := assessment.Policy
 	if err := persist(ctx, request, repository.Assessment{
-		ModelVersion: p.Classifier.ID(),
+		ModelVersion: classifier.ID(),
 		RiskLevel:    string(assessment.Level),
 		Factors:      assessment.Factors,
 		Rationale:    assessment.Rationale,
