@@ -32,10 +32,23 @@ export const routes = {
   jobsStatus: '/v1/jobs/status',
   scenarios: '/v1/risk/synthetic-scenarios',
   audit: '/v1/audit',
+  // The frozen `prevention` contract (T12) and the model registry (T13). Both
+  // are reached through the gateway, the only origin the page's `connect-src`
+  // allows besides the identity provider.
+  preventiveActions: '/v1/prevention/actions',
+  models: '/v1/models',
 } as const;
 
 export function jobRoute(id: string): string {
   return `/v1/jobs/${encodeURIComponent(id)}`;
+}
+
+export function preventiveActionRoute(id: string): string {
+  return `/v1/prevention/actions/${encodeURIComponent(id)}`;
+}
+
+export function preventiveTransitionRoute(id: string): string {
+  return `${preventiveActionRoute(id)}/transitions`;
 }
 
 // Bounds and deadlines the retired page enforced. They are policy, not

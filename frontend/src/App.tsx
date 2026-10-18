@@ -3,6 +3,7 @@ import { useEffect, type ReactElement } from 'react';
 import { useHashRoute } from './app/useHashRoute';
 import { Shell } from './components/Shell';
 import type { ViewId } from './app/routes';
+import { ActionsView } from './views/ActionsView';
 import { AuditView } from './views/AuditView';
 import { HistoryView } from './views/HistoryView';
 import { JobsView } from './views/JobsView';
@@ -14,6 +15,7 @@ import { SourcesView } from './views/SourcesView';
 const views: Record<ViewId, () => ReactElement> = {
   overview: OverviewView,
   history: HistoryView,
+  actions: ActionsView,
   sources: SourcesView,
   jobs: JobsView,
   session: SessionView,
