@@ -99,7 +99,7 @@ func TestGatewayContractUpstreamUnavailableResponse(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
 	target, _ := url.Parse(upstream.URL)
 	upstream.Close()
-	app := New(verifier{}, target, target, allowedOrigin)
+	app := New(verifier{}, target, target, target, allowedOrigin)
 
 	request := httptest.NewRequest(http.MethodGet, "/v1/risk/latest?zone_id=valparaiso-demo", nil)
 	request.Header.Set("Authorization", "Bearer valid")
