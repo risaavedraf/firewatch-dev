@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"slices"
 	"strings"
 	"time"
 
@@ -70,17 +71,34 @@ func Authorize(verifier Verifier, next http.Handler) http.Handler {
 			fail(w, 401, "unauthorized")
 			return
 		}
-		for _, role := range claims.Realm.Roles {
-			if role != "viewer" && role != "admin" {
-				continue
-			}
-			authorized := context.WithValue(r.Context(), subjectKey{}, token.Subject)
-			authorized = context.WithValue(authorized, adminKey{}, role == "admin")
-			next.ServeHTTP(w, r.WithContext(authorized))
+		if !holdsAnyAcceptedRole(claims.Realm.Roles) {
+			fail(w, 403, "forbidden")
 			return
 		}
-		fail(w, 403, "forbidden")
+		authorized := context.WithValue(r.Context(), subjectKey{}, token.Subject)
+		authorized = context.WithValue(authorized, adminKey{}, holdsAdmin(claims.Realm.Roles))
+		next.ServeHTTP(w, r.WithContext(authorized))
 	})
+}
+
+// holdsAnyAcceptedRole reports whether the token carries a role this service
+// accepts at all. Reads are open to viewer and admin; the write routes enforce
+// admin separately, so a viewer is 403 (authorized, not permitted), not 401.
+func holdsAnyAcceptedRole(roles []string) bool {
+	return slices.Contains(roles, "viewer") || slices.Contains(roles, "admin")
+}
+
+// holdsAdmin reports whether the verified token holds the admin role.
+//
+// It scans the WHOLE list on purpose. A token may carry several realm roles and
+// their order belongs to the identity provider, not to this service: an earlier
+// implementation stored the decision of the first recognised role, so a token
+// that listed `viewer` before `admin` — exactly what the demo realm issues for
+// its admin account — lost its admin rights. Reads kept answering 200 while every
+// write answered 403. The answer is about membership in the role set, never about
+// the first interesting element in it.
+func holdsAdmin(roles []string) bool {
+	return slices.Contains(roles, "admin")
 }
 
 func respond(w http.ResponseWriter, status int, value any) {
