@@ -96,6 +96,38 @@ document — so a hashed filename is not a hole and a stray file in `assets/` is
 with no directory listing, no SPA fallback (routing is hash-based) and `Referrer-Policy:
 no-referrer`. A real deployment must send an equivalent policy.
 
+## Preventive evidence, review and reassessment
+
+The actions view (`src/views/ActionsView.tsx`) carries the S2 half of the
+prevention contract. It is a transcription of the server rules, never a second
+authority:
+
+- An **admin-only** form records an evidence snapshot: a sufficiency criterion
+  and one http(s) reference per line. References are validated in the page for
+  immediate feedback and revalidated by the server; nothing is uploaded and no
+  URL is fetched.
+- The detail renders the append-only evidence snapshots and the human decisions.
+  The reviewer and the date come from the server (`reviewer_sub`, `reviewed_at`);
+  the page never sends an identity.
+- The **acceptance** transition is disabled while the server reports
+  `evidence_sufficient: false`, with the reason stated next to it. The server
+  remains the authority: a refusal is still rendered with its HTTP status, code
+  and `request_id`, including `409 insufficient_evidence`.
+- A **synthetic reassessment** reuses the existing authenticated job submission
+  and polling (`createJob` + the bounded `job` read). Only after a real published
+  batch does the page link the `job_id`; the batch, version and risk level are
+  server-derived. The panel states in Spanish that the classification is
+  synthetic and **not** causal proof of risk reduction. If the submission or the
+  link fails, the page keeps the job id and renders a retryable state instead of
+  claiming an association the server did not confirm.
+
+Viewers get the same read-only panels with every write control disabled. The
+transport validators fail closed on a malformed snapshot, review or reassessment,
+and refuse a reassessment that claims `causal_proof: true`.
+
+The backend rules are documented in
+[`backend/docs/preventive-evidence.md`](../backend/docs/preventive-evidence.md).
+
 ## Quality gates
 
 ```sh
