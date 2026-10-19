@@ -175,7 +175,14 @@ const sidebarRule = styles.match(/^\s*\.sidebar\s*\{[^}]*\}/m);
 assert.ok(sidebarRule, 'the .sidebar rule must exist');
 assert.match(sidebarRule[0], /position:\s*sticky/, 'the sticky column this rule protects is gone');
 assert.match(sidebarRule[0], /overflow-y:\s*(?:auto|scroll)/, 'the sidebar must declare its own vertical scroll');
-assert.match(sidebarRule[0], /height:\s*calc\(/, 'the sidebar must keep its bounded height, which is what the scroll is for');
+// The bound is the viewport itself. It used to be `calc(100vh - 34px)`, the
+// height of the demonstration strip the shell still sat below; the strip is no
+// longer rendered, so that offset only left a blank band under the column.
+assert.match(
+  sidebarRule[0],
+  /height:\s*(?:100vh|calc\(100vh[^;]*\))/,
+  'the sidebar must keep its height bounded by the viewport, which is what the scroll is for',
+);
 const sidebarNavRule = styles.match(/^\s*\.sidebar nav\s*\{[^}]*\}/m);
 assert.ok(sidebarNavRule, 'the .sidebar nav rule must exist');
 assert.match(sidebarNavRule[0], /overflow-y:\s*(?:auto|scroll)/, 'the navigation must declare its own vertical scroll');

@@ -37,13 +37,27 @@ code { font-size: 11px; }
 .demo-strip strong { color: #a6e1d4; letter-spacing: .08em; }
 
 /* ── Shell ──────────────────────────────────────────────────────────────── */
-.app-shell { min-height: calc(100vh - 34px); display: flex; }
-.sidebar { position: sticky; top: 0; width: 234px; height: calc(100vh - 34px); min-height: 560px; display: flex; flex-direction: column; padding: 30px 19px 22px; color: #d5e1db; background: var(--forest-900); overflow-y: auto; }
+/* The shell used to sit below the demonstration strip, so both the flex column
+   and the sidebar subtracted the strip's height. The strip is no longer
+   rendered (S15 moved its statement to the technical notice), and the residual
+   offset left a blank band under the sidebar: the column now fills the viewport
+   it actually has. */
+.app-shell { min-height: 100vh; display: flex; }
+.sidebar { position: sticky; top: 0; width: 234px; height: 100vh; min-height: 560px; display: flex; flex-direction: column; padding: 30px 19px 22px; color: #d5e1db; background: var(--forest-900); overflow-y: auto; }
 .brand { display: flex; align-items: center; gap: 10px; padding: 0 8px; margin-bottom: 26px; color: #fffdf4; }
 .brand-mark { width: 36px; height: 36px; display: grid; place-items: center; border-radius: 11px; background: #d7aa73; color: var(--forest-900); font-family: Georgia, serif; font-size: 20px; font-style: italic; }
 .brand strong, .brand small { display: block; }
 .brand strong { color: #f6fff9; font-size: 18px; font-weight: 650; letter-spacing: -.6px; }
 .brand small { margin-top: 2px; color: #a8c2b7; font-size: 8px; font-weight: 500; letter-spacing: 1.5px; text-transform: uppercase; }
+/* The workspace block. `Shell` renders these hooks and the retired mockup
+   declared them; the rule set was not carried over with the markup, so the
+   block fell back to raw stacked text (the scope label, the name and the map
+   icon each on its own line). Restored from
+   odd/urgent/rediseno-pagina/referencia-mockup/frontend/styles/app.css. */
+.workspace { display: flex; gap: 10px; align-items: center; padding: 13px 10px; border: 1px solid #41625b; border-radius: 9px; font-size: 12px; margin-bottom: 26px; }
+.workspace-mark { display: grid; place-items: center; background: #36564e; border-radius: 7px; width: 29px; height: 33px; color: #ebd8b4; }
+.workspace small { font-size: 9px; color: #acbfb6; }
+.workspace > .icon { width: 15px; margin-left: auto; color: #95b2a6; }
 .nav-label, .nav-group { margin: 21px 13px 9px; color: #90aaa0; font-size: 9px; font-weight: 800; letter-spacing: 1.4px; text-transform: uppercase; }
 /* The column's chrome — the brand, the workspace, the Gateway card and the
    session card that holds the only sign-out control — has to stay on screen at
@@ -149,7 +163,12 @@ main { width: min(1500px, 100%); margin: 0 auto; padding: 27px 34px 35px; }
 .panel-heading p { margin: 3px 0 0; color: var(--muted); font-size: 10px; }
 .panel-note { margin: 7px 0 12px; color: var(--muted); font-size: 9px; line-height: 1.6; }
 .panel-footnote { margin: 15px 0 0; color: var(--muted); font-size: 10px; line-height: 1.65; }
-.map-panel, .risk-panel, .history-panel, .auth-panel, .jobs-panel, .sources-panel, .pipeline-panel, .audit-panel, .access-panel, .pending-panel { padding: 18px; }
+/* The panel-body padding. Every `panel <modifier>` a view renders belongs in
+   this list: a panel whose modifier is missing here renders its body flush
+   against the border, which clips the right-aligned values of a data list
+   (`model-panel`, `cycle-panel` both shipped that way). `tests/styles/
+   layout-padding.test.tsx` reads this rule against the shipped markup. */
+.map-panel, .risk-panel, .history-panel, .auth-panel, .jobs-panel, .sources-panel, .pipeline-panel, .audit-panel, .access-panel, .pending-panel, .model-panel, .cycle-panel { padding: 18px; }
 .padded { padding: 22px; }
 .status-copy { min-height: 32px; margin: 13px 0 7px; color: var(--muted); font-size: 10px; line-height: 1.6; }
 .dashboard-grid { display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(340px, .8fr); gap: 16px; }
@@ -405,7 +424,7 @@ footer .icon { width: 13px; height: 13px; }
   main { padding: 20px 15px 28px; }
   .intro-row { align-items: flex-start; flex-direction: column; gap: 9px; }
   .intro-row h2 { font-size: 21px; }
-  .map-panel, .risk-panel, .history-panel, .auth-panel, .jobs-panel, .sources-panel, .pipeline-panel, .audit-panel, .access-panel { padding: 14px; }
+  .map-panel, .risk-panel, .history-panel, .auth-panel, .jobs-panel, .sources-panel, .pipeline-panel, .audit-panel, .access-panel, .model-panel, .cycle-panel { padding: 14px; }
   .metrics-three { grid-template-columns: 1fr; }
   .metric { padding: 14px; }
   .map-viewport, .map-svg { min-height: 220px; }

@@ -240,10 +240,12 @@ test('the sign-out control sits outside the sidebar region that scrolls (finding
   expect(navRule?.[0]).toMatch(/min-height:\s*0/);
   expect(navRule?.[0]).toMatch(/align-content:\s*start/);
 
-  // The fixed height this scroll depends on stays bounded on the desktop
-  // breakpoints and stays automatic where the layout is static.
+  // The viewport-bounded height this scroll depends on stays bounded on the
+  // desktop breakpoints and stays automatic where the layout is static. The
+  // bound is the viewport itself: the column no longer sits below the retired
+  // demonstration strip, so it reserves that strip's height nowhere.
   const sidebarRule = appCss.match(/^\.sidebar \{[^}]*\}/m);
-  expect(sidebarRule?.[0]).toMatch(/height:\s*calc\(/);
+  expect(sidebarRule?.[0]).toMatch(/height:\s*(?:100vh|calc\(100vh[^;]*\))/);
   const smallViewport = appCss.match(/@media\s*\(max-width:\s*720px\)[\s\S]*?\.sidebar\s*\{[^}]*\}/);
   expect(smallViewport?.[0]).toMatch(/height:\s*auto/);
 });
