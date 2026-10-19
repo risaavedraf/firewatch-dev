@@ -25,10 +25,17 @@ import (
 const DefaultInterval = 15 * time.Minute
 
 // Publisher is the publication seam. Its single method runs the whole
-// ingest-to-persist path for one zone, so the cycle does not reach into the
-// provider, the validator or the store.
+// ingest-to-persist path for one zone as an INTERNAL, automatic publication: the
+// batch is persisted but no job completion is emitted, because an automatic
+// cycle is not a job and Jobs never stored the id the cycle mints.
+//
+// The seam is a method of its own instead of a flag on the explicit job
+// publication, so the cycle cannot accidentally settle a job and the decision is
+// never derived from the actor string: a request whose ActorID happens to read
+// "cycle-scheduler" still settles its job when it arrives as a real delivery,
+// and a scheduled publication never does.
 type Publisher interface {
-	Publish(ctx context.Context, request v1.Event) error
+	PublishScheduled(ctx context.Context, request v1.Event) error
 }
 
 // DescriptorProvider is the read-only description of the active source, used to
@@ -144,9 +151,11 @@ func (r *Runner) id() string {
 }
 
 // RunOnce executes one full cycle synchronously: each configured zone is
-// published in order, a zone failure is recorded without aborting the rest, and
-// the resulting state is kept for Statuses. Running it is idempotent with respect
-// to its inputs: the clock and identifier generator decide every timestamp and id.
+// published in order through the scheduled seam, a zone failure is recorded
+// without aborting the rest, and the resulting state is kept for Statuses. Every
+// zone's batch is persisted, and no zone reports a job completion, because no
+// job row exists for an automatic cycle. Running it is idempotent with respect to
+// its inputs: the clock and identifier generator decide every timestamp and id.
 func (r *Runner) RunOnce(ctx context.Context) RunResult {
 	result := RunResult{
 		SourceID:  r.id(),
@@ -177,7 +186,10 @@ func (r *Runner) RunOnce(ctx context.Context) RunResult {
 			RequestedAt: result.StartedAt,
 			Demo:        synthetic,
 		}
-		if err := r.publisher.Publish(ctx, request); err != nil {
+		// The scheduled seam persists the batch and never reports a job completion.
+		// ActorID is descriptive metadata for logs and the batch's origin, never a
+		// routing decision: the seam decides the origin, not this string.
+		if err := r.publisher.PublishScheduled(ctx, request); err != nil {
 			result.Complete = false
 			result.Zones = append(result.Zones, ZoneResult{ZoneID: zone, Published: false, Error: err.Error()})
 			continue

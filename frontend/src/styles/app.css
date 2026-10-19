@@ -45,7 +45,14 @@ code { font-size: 11px; }
 .brand strong { color: #f6fff9; font-size: 18px; font-weight: 650; letter-spacing: -.6px; }
 .brand small { margin-top: 2px; color: #a8c2b7; font-size: 8px; font-weight: 500; letter-spacing: 1.5px; text-transform: uppercase; }
 .nav-label, .nav-group { margin: 21px 13px 9px; color: #90aaa0; font-size: 9px; font-weight: 800; letter-spacing: 1.4px; text-transform: uppercase; }
-.sidebar nav { display: grid; gap: 3px; }
+/* The column's chrome — the brand, the workspace, the Gateway card and the
+   session card that holds the only sign-out control — has to stay on screen at
+   the laptop heights this page is used at. The navigation is the one region that
+   can yield the space: it takes whatever height the chrome leaves and scrolls
+   inside itself, so a short viewport shortens the visible list instead of
+   pushing the sign-out control past the fold. The column keeps its own overflow
+   as the fallback for anything the navigation cannot absorb. */
+.sidebar nav { display: grid; gap: 3px; flex: 1 1 auto; min-height: 0; align-content: start; overflow-y: auto; }
 .nav-link { display: flex; align-items: center; gap: 12px; padding: 11px 13px; border: 1px solid transparent; border-radius: 7px; color: #c3d6cf; font-size: 12px; transition: background .15s; }
 .nav-link .icon { opacity: .8; }
 .nav-link:hover { background: #254d47; color: #effdf9; }
@@ -334,6 +341,16 @@ footer .icon { width: 13px; height: 13px; }
 .actions-create .actions-form > button { grid-column: 1 / -1; justify-self: start; }
 .actions-transitions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
 .actions-detail .filter-label { margin-top: 7px; max-width: 320px; }
+/* S2 evidence, review and reassessment panels. `word-break` keeps a long URL
+   inside its cell so the table never widens the page. */
+.reference-list { margin: 0; padding-left: 16px; }
+.reference-list a { word-break: break-all; }
+.actions-evidence-form { margin-top: 10px; }
+.actions-evidence-form > button { grid-column: 1 / -1; justify-self: start; }
+.actions-review, .actions-reassessment { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 8px; }
+.actions-review .panel-note, .actions-reassessment .panel-note { flex-basis: 100%; margin: 0; }
+#actions-sufficiency, #reassessment-status { margin-top: 6px; }
+#action-evidence, #action-evidence-reviews, #action-reassessments { min-width: 100%; }
 /* AA: the shared chip and tag keep the base palette everywhere else, but inside
    the actions view the status words and the panel badge are 8–10 px, so their
    colour is darkened until it clears 4.5:1 on its own background. */
@@ -405,6 +422,8 @@ footer .icon { width: 13px; height: 13px; }
   .actions-filters { flex-direction: column; align-items: stretch; }
   .actions-filters .filter-label, .actions-filters .filter-label input, .actions-filters .filter-label select { width: 100%; max-width: none; }
   .actions-transitions { width: 100%; }
+  .actions-review, .actions-reassessment { width: 100%; }
+  .actions-evidence-form > button { justify-self: stretch; }
   footer { align-items: flex-start; flex-direction: column; gap: 6px; margin-inline: 15px; }
   .toast { right: 16px; left: 16px; bottom: 16px; }
 }

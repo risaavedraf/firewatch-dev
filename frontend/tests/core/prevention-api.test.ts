@@ -84,6 +84,10 @@ function detail(): PreventiveActionDetail {
         created_at: '2026-10-17T10:00:00Z',
       },
     ],
+    evidence: [],
+    evidence_reviews: [],
+    reassessments: [],
+    evidence_sufficient: false,
   };
 }
 

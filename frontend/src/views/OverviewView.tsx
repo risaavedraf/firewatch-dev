@@ -21,6 +21,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 
 import {
   clearZoneState,
+  rememberZoneCatalogue,
   rememberZoneLevel,
   selectZone,
   useSelectedZone,
@@ -29,6 +30,7 @@ import {
 } from '../app/store';
 import { idleCopy } from '../app/sessionCopy';
 import { MapPanel, type MapLoadState, type ZoneLevelLookup } from '../components/map/MapPanel';
+import { zoneLabel } from '../components/map/projection';
 import { DataList, Metric, PanelHeading, StatusCopy, UnimplementedNote } from '../components/ui';
 import { history, latest, modelVersions, zones, type Failure, type Outcome } from '../core/api';
 import type { SessionState } from '../core/session';
@@ -115,6 +117,19 @@ function firstCatalogueCode(collection: ZoneCollection): string {
   }
   codes.sort((left, right) => left.localeCompare(right));
   return codes.length > 0 ? codes[0] : '';
+}
+
+// The display names the loaded catalogue carries, keyed by the code the shared
+// store selects on. Only a feature with a real code contributes: a label without
+// a key would name a zone the chip can never select, and the format is the map's
+// own `zoneLabel` so the selector and the chip can never disagree.
+function catalogueZoneLabels(collection: ZoneCollection): Map<string, string> {
+  const labels = new Map<string, string>();
+  for (const feature of collection.features) {
+    const code = feature?.properties?.code;
+    if (typeof code === 'string' && code !== '') labels.set(code, zoneLabel(feature.properties));
+  }
+  return labels;
 }
 
 interface RiskCopy {
@@ -232,6 +247,9 @@ export function OverviewView() {
         return;
       }
       setCatalogue({ kind: 'ready', collection: result.data });
+      // The labels are recorded with the selection, never before it: the chip may
+      // only name a zone whose catalogue this session actually loaded.
+      rememberZoneCatalogue(catalogueZoneLabels(result.data));
       const first = firstCatalogueCode(result.data);
       if (first !== '') selectZone(first);
     })();
@@ -459,7 +477,7 @@ export function OverviewView() {
 
       <article className="panel model-panel" id="model-panel" aria-labelledby="model-panel-title">
         <PanelHeading
-          eyebrow="MODELO EN USO"
+          eyebrow="REGISTRO Y LOTE"
           titleId="model-panel-title"
           title="Versión de modelo activa"
           badge={
@@ -478,15 +496,17 @@ export function OverviewView() {
           </div>
           <div>
             <dt>Versión del último lote</dt>
-            <dd>{batchField(batchData?.model_version)}</dd>
+            <dd id="model-batch-version">{batchField(batchData?.model_version)}</dd>
           </div>
         </dl>
-        <p className="panel-note">
+        <p className="panel-note" id="model-panel-note">
           La marca sintética se reproduce tal como el servicio la declara. Una versión sin marca declarada se muestra
-          como no declarada; la página no la supone no sintética. Activar una versión mueve el registro, no el
-          clasificador que está en uso: el servicio fija su versión con <code>MODEL_ID</code> al arrancar, así que
-          adoptar la activa exige fijar ese valor y recrear el servicio; la versión elegida debe existir en el
-          registro con su huella congelada o el arranque falla cerrado.
+          como no declarada; la página no la supone no sintética. La fila del registro es la versión que el registro
+          presenta como activa; la fila del lote es la versión que de verdad lo clasificó, y ambas pueden diferir. Una
+          activación o su reversión rige para las publicaciones que resuelven su clasificador después de esa llamada:
+          las que ya estaban en curso conservan la instantánea que resolvieron. Antes de una activación explícita, el
+          clasificador en uso es el que fija <code>MODEL_ID</code> al arrancar, y que una fila del registro esté
+          sembrada como activa no prueba que el servicio la haya usado.
         </p>
       </article>
 

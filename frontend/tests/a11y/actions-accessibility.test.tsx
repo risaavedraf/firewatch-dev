@@ -89,6 +89,29 @@ async function openAdminWithDetail(): Promise<void> {
           created_at: '2026-10-17T10:00:00Z',
         },
       ],
+      evidence: [
+        {
+          id: 5,
+          action_id: 'action-1',
+          criterion: 'Acta de la junta',
+          references: ['https://example.org/acta'],
+          created_by: 'admin-1',
+          created_at: '2026-10-18T12:00:00Z',
+        },
+      ],
+      evidence_reviews: [
+        {
+          id: 1,
+          action_id: 'action-1',
+          evidence_id: 5,
+          decision: 'suficiente',
+          reviewer_sub: 'reviewer-1',
+          note: 'revisado',
+          reviewed_at: '2026-10-18T12:05:00Z',
+        },
+      ],
+      reassessments: [],
+      evidence_sufficient: true,
     });
     await flush();
   });
@@ -122,18 +145,19 @@ test('every control in the actions view carries an accessible name', async () =>
 test('keyboard navigation reaches the filter, transition and creation controls in order', async () => {
   await openAdminWithDetail();
 
-  const reached: string[] = [];
-  for (let step = 0; step < 40; step += 1) {
-    await userEvent.tab();
-    const id = document.activeElement?.id ?? '';
-    if (id !== '') reached.push(id);
-  }
-
-  for (const id of [
+  const expected = [
     'actions-community-filter',
     'actions-status-filter',
     'actions-apply-filters',
     'actions-refresh',
+    'evidence-criterion',
+    'evidence-references',
+    'record-evidence',
+    'review-note',
+    'review-suficiente',
+    'review-insuficiente',
+    'reassessment-scenario',
+    'request-reassessment',
     'transition-note',
     'create-community',
     'create-title',
@@ -142,10 +166,20 @@ test('keyboard navigation reaches the filter, transition and creation controls i
     'create-assignee',
     'create-due-date',
     'create-action',
-  ]) {
-    expect(reached, `keyboard never reached ${id}`).toContain(id);
+  ];
+  const reached = new Set<string>();
+  // The loop stops as soon as every expected control has been reached, so it
+  // does not spend extra keyboard round trips after the last one.
+  for (let step = 0; step < 60 && reached.size < expected.length; step += 1) {
+    await userEvent.tab();
+    const id = document.activeElement?.id ?? '';
+    if (id !== '') reached.add(id);
   }
-});
+
+  for (const id of expected) {
+    expect(reached.has(id), `keyboard never reached ${id}`).toBe(true);
+  }
+}, 20_000);
 
 test('a transition button activates from the keyboard alone', async () => {
   await openAdminWithDetail();

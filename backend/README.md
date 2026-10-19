@@ -1,6 +1,6 @@
 # FireWatch backend — first executable slice
 
-Run an authenticated asynchronous workflow with four independently built Go services, PostgreSQL/PostGIS, RabbitMQ and Keycloak. The sample is explicitly synthetic: `demo: true`, classified by the version selected with `MODEL_ID` (the local compose default is `firewatch-rule-v2`; `academic-rule-v1` remains the code default when nothing is configured), with the level, its factors and its rationale stored in each batch.
+Run an authenticated asynchronous workflow with four independently built Go services, PostgreSQL/PostGIS, RabbitMQ and Keycloak. The sample is explicitly synthetic: `demo: true`, classified by the version an explicit registry activation selects (`MODEL_ID` is the startup bootstrap: the local compose default is `firewatch-rule-v2`, and `academic-rule-v1` remains the code default when nothing is configured), with the level, its factors and its rationale stored in each batch.
 
 ## Quick start
 
@@ -27,9 +27,11 @@ python scripts/smoke.py
 
 The endpoints bind only to host loopback. HTTP/password grants and the shared RabbitMQ development credential are local-only choices. PostgreSQL and the service APIs have no published host ports.
 
-### Optional classifier selection
+### Classifier selection and activation
 
-`MODEL_ID` selects the classifier version the `risk` service runs. The compose stack passes it through and defaults it to `firewatch-rule-v2`, so the local stack classifies with v2 unless `.env` sets `MODEL_ID` to another registered version; the code default, when nothing is configured at all, stays `academic-rule-v1`. The selected version must have a row in the `models` table that the migrations create and seed, or the service fails closed at startup. Loading a different version there does not change the classifier in a running container: the version is fixed when the service starts.
+`MODEL_ID` is the **startup bootstrap**, not the permanent choice. The `risk` service resolves the classifier it runs from the `models` registry once per publication: an **explicit activation** (the `activation` record `POST /v1/models/{version}/activate` writes into `metrics`) wins, and only while no such activation exists does the startup selection serve. The compose stack passes `MODEL_ID` through and defaults it to `firewatch-rule-v2`, so a fresh local stack classifies with v2 until somebody activates a version; the code default, when nothing is configured at all, stays `academic-rule-v1`. The selected version must have a row in the `models` table that the migrations create and seed, or the service fails closed at startup.
+
+Do not read the registry's `active` flag as proof of what ran: the migrations seed `academic-rule-v1` as active before any operator decides anything, and that seed is not evidence of runtime selection. After an explicit activation, every publication whose classifier resolution happens **after** the call runs the activated version and records that version with its policy, in every replica, without a restart. A publication already in flight that resolved its classifier before the call keeps the one snapshot it resolved. Reversion is activating the previous version through the same route. The full contract, precedence table and fail-closed rules are in [`docs/model-activation.md`](docs/model-activation.md).
 
 ### Cycle and freshness
 
@@ -68,7 +70,7 @@ Use the demo script or an API client to obtain a token from Keycloak's `/realms/
 | `GET /v1/risk/latest?zone_id=valparaiso-demo` | viewer/admin | Latest batch, GeoJSON point, emission/validity dates and freshness |
 | `GET /v1/risk/history?zone_id=valparaiso-demo` | viewer/admin | Last 100 batches |
 | `GET /v1/models` | viewer/admin | Registered classifier versions and the single `active` row |
-| `POST /v1/models/{version}/activate` | admin | Activates a registered version; `MODEL_ID` still selects the running classifier |
+| `POST /v1/models/{version}/activate` | admin | Activates a registered version; publications resolved after the call run it, in-flight ones keep their snapshot |
 | `POST /v1/risk/cycle/run` | admin | Runs the ingestion cycle immediately and reports completion |
 | `GET /v1/prevention/actions?community_code=&status=` | viewer/admin | Preventive actions, at most 200 rows |
 | `GET /v1/prevention/actions/{id}` | viewer/admin | Action detail with its history |

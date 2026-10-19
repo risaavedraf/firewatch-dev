@@ -10,9 +10,16 @@ import (
 	"testing"
 	"time"
 
+	v1 "firewatch.local/contracts/events/v1"
+	"firewatch.local/risk/internal/classify"
+	"firewatch.local/risk/internal/cycle"
 	"firewatch.local/risk/internal/handler"
 	"firewatch.local/risk/internal/messaging"
 	"firewatch.local/risk/internal/metrics"
+	"firewatch.local/risk/internal/repository"
+	"firewatch.local/risk/internal/service"
+	"firewatch.local/risk/internal/source"
+	"github.com/google/uuid"
 )
 
 func TestStatusEvaluator(t *testing.T) {
@@ -304,5 +311,104 @@ func TestReadinessHTTPUsesEffectiveSnapshot(t *testing.T) {
 				t.Fatalf("body reason=%q, want %q", body.Reason, tc.reason)
 			}
 		})
+	}
+}
+
+// publicationRecorder is the store the cycle and the explicit job path write to.
+// It records every persisted batch and, separately, the completion events the
+// explicit-job seam reports, so the jobs consumer below can decide what happens
+// to each one.
+type publicationRecorder struct {
+	batches     []v1.Event
+	completions []v1.Event
+}
+
+func (r *publicationRecorder) Publish(_ context.Context, request v1.Event, _ repository.Assessment) error {
+	r.batches = append(r.batches, request)
+	// The explicit seam reports the stored batch to jobs; the consumer's decision
+	// needs only the job id.
+	r.completions = append(r.completions, v1.Event{JobID: request.JobID})
+	return nil
+}
+
+func (r *publicationRecorder) PublishScheduled(_ context.Context, request v1.Event, _ repository.Assessment) error {
+	r.batches = append(r.batches, request)
+	return nil
+}
+
+// jobsConsumer models the jobs side of the contract without a broker or a
+// database: it knows which job ids it stored and refuses any completion for
+// another id, exactly as Store.Complete does (errNoMatchingJob, permanent).
+type jobsConsumer struct {
+	stored      map[string]bool
+	settled     int
+	deadLetters int
+}
+
+func (c *jobsConsumer) complete(event v1.Event) {
+	if c.stored[event.JobID] {
+		c.settled++
+		return
+	}
+	c.deadLetters++
+}
+
+// TestAutomaticCycleCannotGrowTheJobsDeadLetterQueue is the public,
+// integration-ready check for T1/S1: it composes the cycle exactly as run() does
+// - the real publication path over the deterministic fixture - and models the
+// jobs consumer's terminal decision. Jobs never stored the job id a cycle mints,
+// so a completion naming it is rejected and dead-lettered permanently. The batch
+// must still be persisted for every configured zone, and an explicitly requested
+// job must still settle exactly once.
+func TestAutomaticCycleCannotGrowTheJobsDeadLetterQueue(t *testing.T) {
+	recorder := &publicationRecorder{}
+	publisher := &service.Publisher{
+		Provider:   source.NewFixtureProvider(),
+		Classifier: classify.NewAcademicRuleV1(),
+		Store:      recorder,
+	}
+	instant := time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC)
+	runner := cycle.New(source.NewFixtureProvider(), publisher, cycle.Options{
+		Zones:    []string{"valparaiso-demo", "05101"},
+		Interval: cycle.DefaultInterval,
+		Now:      func() time.Time { return instant },
+	})
+	result := runner.RunOnce(context.Background())
+	if !result.Complete {
+		t.Fatalf("cycle result = %+v", result)
+	}
+	if len(recorder.batches) != 2 {
+		t.Fatalf("the cycle persisted %d batches, want one per configured zone (2)", len(recorder.batches))
+	}
+	// The consumer knows only the explicitly requested job created below: the
+	// automatic cycle never asked it to store one.
+	consumer := &jobsConsumer{stored: map[string]bool{}}
+	for _, completion := range recorder.completions {
+		consumer.complete(completion)
+	}
+	if len(recorder.completions) != 0 {
+		t.Fatalf("the automatic cycle reported %d job completions, want 0", len(recorder.completions))
+	}
+	if consumer.deadLetters != 0 || consumer.settled != 0 {
+		t.Fatalf("the automatic cycle settled=%d deadLetters=%d, want 0/0", consumer.settled, consumer.deadLetters)
+	}
+	// The explicit job lifecycle is unchanged: one requested delivery settles one
+	// stored job and dead-letters nothing.
+	explicit := v1.Event{
+		ID: uuid.NewString(), Type: v1.JobRequestedType, OccurredAt: instant, TraceID: uuid.NewString(),
+		JobID: uuid.NewString(), ActorID: "demo-admin", ZoneID: "valparaiso-demo", RequestedAt: instant, Demo: true,
+	}
+	consumer.stored[explicit.JobID] = true
+	if err := publisher.Publish(context.Background(), explicit); err != nil {
+		t.Fatalf("publish the requested job: %v", err)
+	}
+	if len(recorder.completions) != 1 {
+		t.Fatalf("the requested job produced %d completions, want exactly 1", len(recorder.completions))
+	}
+	for _, completion := range recorder.completions {
+		consumer.complete(completion)
+	}
+	if consumer.settled != 1 || consumer.deadLetters != 0 {
+		t.Fatalf("requested job settled=%d deadLetters=%d, want 1/0", consumer.settled, consumer.deadLetters)
 	}
 }

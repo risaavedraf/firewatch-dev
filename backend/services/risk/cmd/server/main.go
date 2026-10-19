@@ -162,6 +162,11 @@ func run() error {
 	// lifecycle, while the selected version already comes from MODEL_ID. The
 	// migrate path returns above, before this check, so creating the schema is not
 	// blocked by the row this check reads.
+	//
+	// The classifier this selection produces is the publication path's bootstrap:
+	// it keeps serving until the registry records an explicit activation, and from
+	// then on the activated version wins in every replica. See
+	// backend/docs/model-activation.md for the whole precedence.
 	storedHash, registered, err := store.ModelParamsHash(ctx, activeModel)
 	if err != nil {
 		return fmt.Errorf("verify classifier %q against the models registry: %w", activeModel, err)
@@ -181,7 +186,14 @@ func run() error {
 	// The model-outcome counters are shared between the publication path, which
 	// writes them, and /metrics, which reads them: one value, two surfaces.
 	outcomes := &metrics.RiskOutcomes{}
-	publisher := service.Publisher{Provider: provider, Classifier: active, Store: store, Outcomes: outcomes}
+	// The classifier is resolved from the registry once per publication, so an
+	// activation decides inference in every replica without a restart. The
+	// precedence, documented in backend/docs/model-activation.md, is: an explicit
+	// activation (the activation record ActivateModel writes) wins; otherwise the
+	// MODEL_ID selection above is the bootstrap. A version this binary cannot
+	// execute, or a frozen fingerprint mismatch, fails the publication closed.
+	classifierSource := service.RegistryClassifierSource{Models: store, Registry: classifiers, Bootstrap: active}
+	publisher := service.Publisher{Provider: provider, Classifiers: classifierSource, Store: store, Outcomes: outcomes}
 	// Validate both bounds before starting any broker worker.
 	dlqReadyMaxDepth, err := parseDLQReadyMaxDepth(os.Getenv("DLQ_READY_MAX_DEPTH"))
 	if err != nil {

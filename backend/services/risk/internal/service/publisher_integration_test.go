@@ -13,6 +13,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"strings"
 	"testing"
@@ -20,6 +21,7 @@ import (
 
 	v1 "firewatch.local/contracts/events/v1"
 	"firewatch.local/risk/internal/classify"
+	"firewatch.local/risk/internal/cycle"
 	"firewatch.local/risk/internal/repository"
 	"firewatch.local/risk/internal/source"
 	"github.com/google/uuid"
@@ -260,5 +262,157 @@ func TestPublisherPersistsScenarioMetadataThroughTheRealStore(t *testing.T) {
 	}
 	if strings.Contains(string(payload), "scenario_id") || strings.Contains(string(payload), "evaluated_at") {
 		t.Fatalf("a legacy result event grew scenario keys: %s", payload)
+	}
+}
+
+// S1 integration: an automatic cycle persists one batch per zone through the real
+// store and leaves no completion event behind. Jobs never stored the id the cycle
+// mints, so every completion would be refused as an unknown job and dead-lettered
+// permanently, once per zone per cycle. The explicit job keeps its own
+// completion, so closing the scheduled path did not weaken the lifecycle.
+func TestAutomaticCyclePersistsBatchesWithoutACompletionEvent(t *testing.T) {
+	if testing.Short() || os.Getenv("TEST_DATABASE_URL") == "" {
+		t.Skip("requires migrated disposable risk database")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	db, err := pgxpool.New(ctx, os.Getenv("TEST_DATABASE_URL"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	store := repository.Store{DB: db}
+	publisher := Publisher{Provider: source.NewFixtureProvider(), Classifier: classify.NewAcademicRuleV1(), Store: store}
+	instant := time.Now().UTC().Add(-time.Minute).Truncate(time.Second)
+	ids := make([]string, 0, 3)
+	runner := cycle.New(source.NewFixtureProvider(), &publisher, cycle.Options{
+		Zones:    []string{"valparaiso-demo"},
+		Interval: cycle.DefaultInterval,
+		Now:      func() time.Time { return instant },
+		NewID:    func() string { id := uuid.NewString(); ids = append(ids, id); return id },
+	})
+	if result := runner.RunOnce(ctx); !result.Complete {
+		t.Fatalf("cycle result = %+v", result)
+	}
+	// The batch is stored under the job id the cycle minted...
+	var jobID string
+	if err = db.QueryRow(ctx, `SELECT job_id::text FROM batches WHERE job_id::text = ANY($1::text[])`, ids).Scan(&jobID); err != nil {
+		t.Fatalf("the cycle persisted no batch under any id it minted: %v", err)
+	}
+	// ...and no completion event names any id the cycle minted, so the jobs
+	// consumer has nothing to refuse and dead-letter.
+	var completions int
+	if err = db.QueryRow(ctx, `SELECT count(*) FROM outbox WHERE routing_key=$1 AND payload->>'job_id' = ANY($2::text[])`, v1.BatchPublishedType, ids).Scan(&completions); err != nil || completions != 0 {
+		t.Fatalf("the automatic cycle emitted %d completion events, want 0: %v", completions, err)
+	}
+	explicit := v1.Event{ID: uuid.NewString(), Type: v1.JobRequestedType, OccurredAt: instant, TraceID: uuid.NewString(), JobID: uuid.NewString(), ActorID: "integration-test", ZoneID: "valparaiso-demo", RequestedAt: instant, Demo: true}
+	if err = publisher.Publish(ctx, explicit); err != nil {
+		t.Fatalf("publish the requested job: %v", err)
+	}
+	if err = db.QueryRow(ctx, `SELECT count(*) FROM outbox WHERE routing_key=$1 AND payload->>'job_id'=$2`, v1.BatchPublishedType, explicit.JobID).Scan(&completions); err != nil || completions != 1 {
+		t.Fatalf("the requested job emitted %d completions, want exactly 1: %v", completions, err)
+	}
+}
+
+// TestPublisherFollowsActivationAndReversalThroughTheRealStore is the acceptance
+// proof of this unit end to end: with the real transactional activation and the
+// real storage contract, activating v2 and then reverting to v1 must change the
+// version, the policy identifier and the policy fingerprint of the next persisted
+// batch. Before this unit the publication path never read the active row, so the
+// batch after an activation still carried the startup classifier.
+//
+// It runs against the disposable migrated database like the other integration
+// tests, so it skips without TEST_DATABASE_URL and runs in `make integration`.
+func TestPublisherFollowsActivationAndReversalThroughTheRealStore(t *testing.T) {
+	if testing.Short() || os.Getenv("TEST_DATABASE_URL") == "" {
+		t.Skip("requires migrated disposable risk database")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	db, err := pgxpool.New(ctx, os.Getenv("TEST_DATABASE_URL"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	store := repository.Store{DB: db}
+
+	registry := classify.NewRegistry()
+	if err := registry.Register(classify.NewAcademicRuleV1()); err != nil {
+		t.Fatalf("register academic-rule-v1: %v", err)
+	}
+	if err := registry.Register(classify.NewFirewatchRuleV2()); err != nil {
+		t.Fatalf("register firewatch-rule-v2: %v", err)
+	}
+	previous, err := store.ActiveModel(ctx)
+	if err == nil {
+		defer func() {
+			if _, err := store.ActivateModel(context.Background(), previous.Version); err != nil {
+				t.Errorf("could not restore the previously active version %q: %v", previous.Version, err)
+			}
+		}()
+	}
+
+	publisher := Publisher{
+		Provider: source.NewFixtureProvider(),
+		// No static Classifier on purpose: every publication must resolve the
+		// classifier from the registry, which is what the activation changes.
+		Classifiers: RegistryClassifierSource{Models: store, Registry: registry, Bootstrap: classify.NewAcademicRuleV1()},
+		Store:       store,
+	}
+	// publishAndReadBack activates nothing: it publishes the fixture and returns the
+	// batch this request persisted, matched by job id because the demo zone is
+	// shared with the other integration tests.
+	publishAndReadBack := func(t *testing.T) repository.Batch {
+		t.Helper()
+		now := time.Now().UTC()
+		request := v1.Event{
+			ID: uuid.NewString(), Type: v1.JobRequestedType, OccurredAt: now, TraceID: uuid.NewString(),
+			JobID: uuid.NewString(), ActorID: "integration-test", ZoneID: "valparaiso-demo",
+			RequestedAt: now.Add(-time.Minute), Demo: true,
+		}
+		if err := publisher.Publish(ctx, request); err != nil {
+			t.Fatalf("publish the fixture through the real store: %v", err)
+		}
+		batches, err := store.List(ctx, request.ZoneID, 100)
+		if err != nil {
+			t.Fatalf("list the persisted batches: %v", err)
+		}
+		for index := range batches {
+			if batches[index].JobID == request.JobID {
+				return batches[index]
+			}
+		}
+		t.Fatalf("the published job %s was not read back", request.JobID)
+		return repository.Batch{}
+	}
+
+	if _, err := store.ActivateModel(ctx, classify.AcademicRuleV1ID); err != nil {
+		t.Fatalf("activate academic-rule-v1: %v", err)
+	}
+	first := publishAndReadBack(t)
+	if first.ModelVersion != classify.AcademicRuleV1ID || first.Policy == nil || first.Policy.PolicyID != classify.AcademicRuleV1ID || first.Policy.ParamsHash != classify.AcademicRuleV1ParamsHash {
+		t.Fatalf("with v1 activated the batch carries %q policy %+v, want v1 with its own fingerprint", first.ModelVersion, first.Policy)
+	}
+
+	if _, err := store.ActivateModel(ctx, classify.FirewatchRuleV2ID); err != nil {
+		if errors.Is(err, repository.ErrModelNotFound) {
+			t.Skipf("the registry has no firewatch-rule-v2 row; this proof needs 008_firewatch_rule_v2 applied: %v", err)
+		}
+		t.Fatalf("activate firewatch-rule-v2: %v", err)
+	}
+	second := publishAndReadBack(t)
+	if second.ModelVersion != classify.FirewatchRuleV2ID || second.Policy == nil || second.Policy.PolicyID != classify.FirewatchRuleV2ID || second.Policy.ParamsHash != classify.FirewatchRuleV2ParamsHash {
+		t.Fatalf("after activating v2 the batch carries %q policy %+v, want v2 with its own fingerprint", second.ModelVersion, second.Policy)
+	}
+	if second.ModelVersion == first.ModelVersion || second.Policy.ParamsHash == first.Policy.ParamsHash {
+		t.Fatalf("activating v2 did not change the published batch: %q then %q", first.ModelVersion, second.ModelVersion)
+	}
+
+	if _, err := store.ActivateModel(ctx, classify.AcademicRuleV1ID); err != nil {
+		t.Fatalf("revert to academic-rule-v1: %v", err)
+	}
+	reverted := publishAndReadBack(t)
+	if reverted.ModelVersion != first.ModelVersion || reverted.Policy == nil || reverted.Policy.ParamsHash != first.Policy.ParamsHash {
+		t.Fatalf("after the reversal the batch carries %q policy %+v, want the original %q with its fingerprint", reverted.ModelVersion, reverted.Policy, first.ModelVersion)
 	}
 }

@@ -9,7 +9,7 @@ import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 
 import { gatewayOrigin, issuer, pkceTransactionKey, routes } from '../../src/config';
-import { clearZoneState } from '../../src/app/store';
+import { clearZoneState, getSelectedZoneLabel } from '../../src/app/store';
 import { completeLogin, getSessionSnapshot, resetSession } from '../../src/core/session';
 import type { RiskBatch, ZoneCollection, ZoneFeature } from '../../src/types/api';
 import { OverviewView } from '../../src/views/OverviewView';
@@ -267,6 +267,17 @@ test('metric cards report the real catalogue, history and read-zone counts', asy
   expect(textOf('metric-high')).toBe('0');
   expect(textOf('metric-batches')).toBe('—');
   expect(textOf('zone-count')).toBe('No informado');
+});
+
+test('the catalogue the view loads is the only source of the shared chip name', async () => {
+  await openSignedIn();
+  // Before any catalogue arrives there is no name to report, not a provisional one.
+  expect(getSelectedZoneLabel()).toBe('');
+
+  await serveCatalogue(catalogue([feature('05101', 'Valparaíso'), feature('05102', 'Casablanca')]));
+  // The auto-selected first code is named with the same label the map selector
+  // shows, and only because the served catalogue carried it.
+  expect(getSelectedZoneLabel()).toBe('Valparaíso (05101)');
 });
 
 test('a healthy session still renders the live catalogue count and keeps selection working', async () => {
@@ -643,4 +654,56 @@ test('the real default active row declares no synthetic mark, and a wrong envelo
   await settle();
   expect(textOf('model-active-version')).toBe('No informada');
   expect(textOf('model-synthetic')).toBe('NO DISPONIBLE');
+});
+
+// T2/S1 — the panel must present the registry version and the version that really
+// classified the newest batch as two different facts, and it must state when an
+// activation applies: to publications whose classifier resolution happens after
+// the call, never to one already in flight. The sentence this replaces claimed the
+// running classifier was fixed by MODEL_ID at startup and that activating a
+// version moved only the registry, which was exactly the defect.
+test('separates the registry version from the batch version and states when an activation applies (T2)', async () => {
+  await openSignedIn();
+  fetchStub.answer(MODELS_URL, {
+    models: [
+      {
+        version: 'firewatch-rule-v2',
+        kind: 'rule',
+        params_hash: '59259c4c0c470e5a0d512fe09f6c748c38fd29f9bc5d760d49754555c66e699b',
+        approved_at: '2026-10-18T12:00:00Z',
+        metrics: { official: false, activation: { at: '2026-10-18T12:00:00Z' } },
+        active: true,
+      },
+      {
+        version: 'academic-rule-v1',
+        kind: 'rule',
+        params_hash: 'e17aaa5600eb67c9a91340e90057aec100f4e80ef0895662f373cffee66564c7',
+        approved_at: null,
+        metrics: { official: false, calibrated_against_observed_fires: false },
+        active: false,
+      },
+    ],
+  });
+  await settle();
+  // The batch was resolved before the activation, so it still names v1 while the
+  // registry already presents v2. That difference is legitimate and the panel must
+  // show both instead of presenting one as the other.
+  await serveCatalogue(catalogue([feature('05101', 'Valparaíso')]));
+  await serveZone('05101', batch('05101', 'b', 'j', { model_version: 'academic-rule-v1' }), 200, [
+    batch('05101', 'b', 'j', { model_version: 'academic-rule-v1' }),
+  ]);
+
+  expect(textOf('model-active-version')).toBe('firewatch-rule-v2');
+  expect(textOf('model-batch-version')).toBe('academic-rule-v1');
+
+  const note = textOf('model-panel-note');
+  expect(note).toMatch(/registro/i);
+  expect(note).toMatch(/lote/i);
+  expect(note).toMatch(/después de esa llamada/i);
+  expect(note).toMatch(/en curso/i);
+  expect(note).toMatch(/MODEL_ID/);
+  expect(note).toMatch(/sembrada como activa/i);
+  expect(note).not.toMatch(/fija su versión con MODEL_ID al arrancar, así que/i);
+  expect(note).not.toMatch(/no el clasificador que está en uso/i);
+  expect(note).not.toMatch(/recrear el servicio/i);
 });

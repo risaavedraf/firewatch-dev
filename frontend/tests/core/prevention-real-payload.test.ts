@@ -41,6 +41,10 @@ function detail(history: unknown[]): Record<string, unknown> {
     due_date: '2026-11-01',
     updated_at: '2026-10-18T15:57:00.100000Z',
     history,
+    evidence: [],
+    evidence_reviews: [],
+    reassessments: [],
+    evidence_sufficient: false,
   };
 }
 

@@ -17,14 +17,16 @@ import (
 )
 
 // stubPublisher records the requests one cycle published and can be made to fail
-// on a chosen zone, so ordering and partial failure are both observable.
+// on a chosen zone, so ordering and partial failure are both observable. It
+// implements the scheduled seam only: the cycle has no way to ask for a job
+// completion.
 type stubPublisher struct {
 	calls int
 	zones []string
 	fail  map[string]error
 }
 
-func (p *stubPublisher) Publish(_ context.Context, request v1.Event) error {
+func (p *stubPublisher) PublishScheduled(_ context.Context, request v1.Event) error {
 	p.calls++
 	p.zones = append(p.zones, request.ZoneID)
 	if err := p.fail[request.ZoneID]; err != nil {
@@ -139,7 +141,8 @@ func TestStatusesBeforeAnyRunReportNeverRun(t *testing.T) {
 
 // T3 end to end without a database: the runner drives the real Publisher over the
 // deterministic fixture, so ingest, validation, classification and publication
-// all execute in one run and one assessed batch is persisted.
+// all execute in one run and one assessed batch is persisted through the
+// automatic-cycle seam.
 func TestRunnerDrivesTheRealPublisherOverTheFixture(t *testing.T) {
 	writer := &recordingWriter{}
 	publisher := &service.Publisher{
@@ -154,8 +157,8 @@ func TestRunnerDrivesTheRealPublisherOverTheFixture(t *testing.T) {
 		Now:      func() time.Time { return instant },
 	})
 	result := runner.RunOnce(context.Background())
-	if !result.Complete || writer.calls != 1 {
-		t.Fatalf("result = %+v, persisted = %d", result, writer.calls)
+	if !result.Complete || writer.scheduled != 1 {
+		t.Fatalf("result = %+v, persisted = %d", result, writer.scheduled)
 	}
 	if writer.assessment.ModelVersion != classify.AcademicRuleV1ID || writer.assessment.RiskLevel != string(classify.LevelAlto) {
 		t.Fatalf("persisted assessment = %+v", writer.assessment)
@@ -165,16 +168,61 @@ func TestRunnerDrivesTheRealPublisherOverTheFixture(t *testing.T) {
 	}
 }
 
+// S1 regression: the automatic cycle must never report a job completion. Jobs
+// never stored the job id the cycle mints, so a risk.batch.published.v1 naming it
+// is refused as an unknown job and dead-lettered permanently - once per zone per
+// cycle, forever. The batch itself must still be persisted for every zone, with
+// the same validation, classification and policy checks an explicit request
+// runs, so suppressing the completion cannot become a way to skip the pipeline.
+func TestAutomaticCyclePublicationNeverReportsAJobCompletion(t *testing.T) {
+	writer := &recordingWriter{}
+	publisher := &service.Publisher{
+		Provider:   source.NewFixtureProvider(),
+		Classifier: classify.NewAcademicRuleV1(),
+		Store:      writer,
+	}
+	instant := time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC)
+	runner := New(source.NewFixtureProvider(), publisher, Options{
+		Zones:    []string{"valparaiso-demo", "zona-b"},
+		Interval: 15 * time.Minute,
+		Now:      func() time.Time { return instant },
+	})
+	result := runner.RunOnce(context.Background())
+	if !result.Complete {
+		t.Fatalf("result = %+v", result)
+	}
+	if writer.scheduled != 2 {
+		t.Fatalf("persisted %d scheduled batches, want one per configured zone (2)", writer.scheduled)
+	}
+	if writer.completions != 0 {
+		t.Fatalf("the automatic cycle reported %d job completions, want 0: no job row exists for a cycle-minted id", writer.completions)
+	}
+	if writer.assessment.RiskLevel != string(classify.LevelAlto) || writer.assessment.Policy == nil {
+		t.Fatalf("the scheduled path skipped the shared assessment checks: %+v", writer.assessment)
+	}
+}
+
 // recordingWriter is the minimal BatchWriter the runner test needs; it proves the
-// real publication path was reached without a database.
+// real publication path was reached without a database. The two persistence
+// seams are counted separately: Publish settles an explicitly requested job and
+// PublishScheduled persists an automatic cycle's batch without reporting one, so
+// a test can prove the runner chose the scheduled seam.
 type recordingWriter struct {
-	calls      int
-	request    v1.Event
-	assessment repository.Assessment
+	completions int
+	scheduled   int
+	request     v1.Event
+	assessment  repository.Assessment
 }
 
 func (w *recordingWriter) Publish(_ context.Context, request v1.Event, assessment repository.Assessment) error {
-	w.calls++
+	w.completions++
+	w.request = request
+	w.assessment = assessment
+	return nil
+}
+
+func (w *recordingWriter) PublishScheduled(_ context.Context, request v1.Event, assessment repository.Assessment) error {
+	w.scheduled++
 	w.request = request
 	w.assessment = assessment
 	return nil
