@@ -692,122 +692,124 @@ export function ActionsView() {
 
   return (
     <section className="view" id="actions" data-view="actions" aria-labelledby="actions-title">
-      <PanelHeading
-        eyebrow="PREVENCIÓN"
-        title="Acciones preventivas"
-        titleId="actions-title"
-        badge={
-          <span className="neutral-tag" id="actions-badge">
-            {signedIn ? list.badge : 'SIN CONSULTAR'}
-          </span>
-        }
-      />
-      <p
-        id="actions-status"
-        className={list.phase === 'read' ? 'status-copy risk-good' : 'status-copy'}
-        role="status"
-        aria-live="polite"
-      >
-        {list.phase === 'unconsulted' ? idleCopy(session, LIST_ACTION) : list.message}
-      </p>
-      <p id="actions-role-note" className="panel-note">
-        {roleNote}
-      </p>
-      <p id="actions-notice" className="status-copy" role="status" aria-live="polite">
-        {notice}
-      </p>
-      <p className="panel-note">
-        El servicio acota la lista a 200 filas y ambos filtros son opcionales: un filtro vacío no acota nada. La
-        prioridad es texto libre validado por el servicio.
-      </p>
-
-      <form className="filter-bar actions-filters" onSubmit={applyFilters}>
-        <label className="filter-label" htmlFor="actions-community-filter">
-          Comunidad (CUT)
-          <input
-            id="actions-community-filter"
-            type="text"
-            value={communityFilter}
-            disabled={!signedIn}
-            onChange={event => setCommunityFilter(event.target.value)}
-          />
-        </label>
-        <label className="filter-label" htmlFor="actions-status-filter">
-          Estado
-          <select
-            id="actions-status-filter"
-            value={statusFilter}
-            disabled={!signedIn}
-            onChange={event => setStatusFilter(event.target.value)}
-          >
-            <option value="">Todos</option>
-            <option value="propuesta">Propuesta</option>
-            <option value="asignada">Asignada</option>
-            <option value="en_curso">En curso</option>
-            <option value="bloqueada">Bloqueada</option>
-            <option value="enviada">Enviada</option>
-            <option value="aceptada">Aceptada</option>
-            <option value="devuelta">Devuelta</option>
-            <option value="cancelada">Cancelada</option>
-          </select>
-        </label>
-        <button id="actions-apply-filters" className="secondary-button" type="submit" disabled={!signedIn}>
-          Aplicar filtros
-        </button>
-        <button
-          id="actions-refresh"
-          className="secondary-button"
-          type="button"
-          disabled={!signedIn || list.phase === 'loading'}
-          onClick={reload}
+      <article className="panel actions-panel">
+        <PanelHeading
+          eyebrow="PREVENCIÓN"
+          title="Acciones preventivas"
+          titleId="actions-title"
+          badge={
+            <span className="neutral-tag" id="actions-badge">
+              {signedIn ? list.badge : 'SIN CONSULTAR'}
+            </span>
+          }
+        />
+        <p
+          id="actions-status"
+          className={list.phase === 'read' ? 'status-copy risk-good' : 'status-copy'}
+          role="status"
+          aria-live="polite"
         >
-          Actualizar lista
-        </button>
-      </form>
+          {list.phase === 'unconsulted' ? idleCopy(session, LIST_ACTION) : list.message}
+        </p>
+        <p id="actions-role-note" className="panel-note">
+          {roleNote}
+        </p>
+        <p id="actions-notice" className="status-copy" role="status" aria-live="polite">
+          {notice}
+        </p>
+        <p className="panel-note">
+          El servicio acota la lista a 200 filas y ambos filtros son opcionales: un filtro vacío no acota nada. La
+          prioridad es texto libre validado por el servicio.
+        </p>
 
-      <div className="table-wrap">
-        <table id="actions-table">
-          <caption className="sr-only">Acciones preventivas devueltas por el servicio</caption>
-          <thead>
-            <tr>
-              <th scope="col">Acción</th>
-              <th scope="col">Comunidad</th>
-              <th scope="col">Estado</th>
-              <th scope="col">Prioridad</th>
-              <th scope="col">Responsable</th>
-              <th scope="col">Fecha límite</th>
-              <th scope="col">Detalle</th>
-            </tr>
-          </thead>
-          <tbody id="actions-rows">
-            {list.actions.map(action => (
-              <tr key={action.id} className={action.id === selectedId ? 'is-selected' : undefined}>
-                <td>{action.title}</td>
-                <td>{action.community_code}</td>
-                <td>
-                  <span className="chip" data-status={action.status}>
-                    <span className="chip-dot" aria-hidden="true" />
-                    {actionStatusLabel(action.status)}
-                  </span>
-                </td>
-                <td>{field(action.priority)}</td>
-                <td>{field(action.assignee)}</td>
-                <td>{field(action.due_date)}</td>
-                <td>
-                  <button
-                    type="button"
-                    className="button-text"
-                    data-action-id={action.id}
-                    onClick={() => openDetail(action.id)}
-                  >
-                    Ver detalle
-                  </button>
-                </td>
+        <form className="filter-bar actions-filters" onSubmit={applyFilters}>
+          <label className="filter-label" htmlFor="actions-community-filter">
+            Comunidad (CUT)
+            <input
+              id="actions-community-filter"
+              type="text"
+              value={communityFilter}
+              disabled={!signedIn}
+              onChange={event => setCommunityFilter(event.target.value)}
+            />
+          </label>
+          <label className="filter-label" htmlFor="actions-status-filter">
+            Estado
+            <select
+              id="actions-status-filter"
+              value={statusFilter}
+              disabled={!signedIn}
+              onChange={event => setStatusFilter(event.target.value)}
+            >
+              <option value="">Todos</option>
+              <option value="propuesta">Propuesta</option>
+              <option value="asignada">Asignada</option>
+              <option value="en_curso">En curso</option>
+              <option value="bloqueada">Bloqueada</option>
+              <option value="enviada">Enviada</option>
+              <option value="aceptada">Aceptada</option>
+              <option value="devuelta">Devuelta</option>
+              <option value="cancelada">Cancelada</option>
+            </select>
+          </label>
+          <button id="actions-apply-filters" className="secondary-button" type="submit" disabled={!signedIn}>
+            Aplicar filtros
+          </button>
+          <button
+            id="actions-refresh"
+            className="secondary-button"
+            type="button"
+            disabled={!signedIn || list.phase === 'loading'}
+            onClick={reload}
+          >
+            Actualizar lista
+          </button>
+        </form>
+
+        <div className="table-wrap">
+          <table id="actions-table">
+            <caption className="sr-only">Acciones preventivas devueltas por el servicio</caption>
+            <thead>
+              <tr>
+                <th scope="col">Acción</th>
+                <th scope="col">Comunidad</th>
+                <th scope="col">Estado</th>
+                <th scope="col">Prioridad</th>
+                <th scope="col">Responsable</th>
+                <th scope="col">Fecha límite</th>
+                <th scope="col">Detalle</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+            </thead>
+            <tbody id="actions-rows">
+              {list.actions.map(action => (
+                <tr key={action.id} className={action.id === selectedId ? 'is-selected' : undefined}>
+                  <td>{action.title}</td>
+                  <td>{action.community_code}</td>
+                  <td>
+                    <span className="chip" data-status={action.status}>
+                      <span className="chip-dot" aria-hidden="true" />
+                      {actionStatusLabel(action.status)}
+                    </span>
+                  </td>
+                  <td>{field(action.priority)}</td>
+                  <td>{field(action.assignee)}</td>
+                  <td>{field(action.due_date)}</td>
+                  <td>
+                    <button
+                      type="button"
+                      className="button-text"
+                      data-action-id={action.id}
+                      onClick={() => openDetail(action.id)}
+                    >
+                      Ver detalle
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </article>
 
       {selectedId !== '' ? (
         <article className="panel actions-detail" id="action-detail" aria-labelledby="action-detail-title">

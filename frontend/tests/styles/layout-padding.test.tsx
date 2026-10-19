@@ -7,6 +7,11 @@ import { routes } from '../../src/app/routes';
 import { Shell } from '../../src/components/Shell';
 import { gatewayOrigin } from '../../src/config';
 import { resetSession } from '../../src/core/session';
+import { ActionsView } from '../../src/views/ActionsView';
+import { AuditView } from '../../src/views/AuditView';
+import { HistoryView } from '../../src/views/HistoryView';
+import { JobsView } from '../../src/views/JobsView';
+import { PendingView } from '../../src/views/PendingView';
 
 import { createCryptoStub, createFetchStub } from '../core/harness';
 
@@ -96,7 +101,10 @@ function declaration(rule: CssRule, property: string): string | null {
   return declared === null || declared === undefined ? null : declared.slice(property.length + 1).trim();
 }
 
-// Every `className="panel <modifier> ..."` the shipped views render.
+// Every `panel <modifier>` the shipped views render. The modifier is read from a
+// plain `className="…"` and from a template literal that appends a state class —
+// `className={`panel history-panel${hasRows ? ' has-rows' : ''}`}` — because a
+// conditional state class must not hide the modifier from this scan.
 function panelModifiers(): string[] {
   const sources: string[] = [];
   const walk = (directory: string): void => {
@@ -110,9 +118,12 @@ function panelModifiers(): string[] {
 
   const modifiers = new Set<string>();
   for (const source of sources) {
-    for (const match of source.matchAll(/className="panel ([a-z0-9 _-]+)"/g)) {
-      const [modifier] = match[1].trim().split(/\s+/);
-      modifiers.add(modifier);
+    for (const match of source.matchAll(/className=(?:"([^"]*)"|\{`([^`]*)`\})/g)) {
+      const value = (match[1] ?? match[2] ?? '').replace(/\$\{[^}]*\}/g, ' ');
+      const tokens = value.split(/\s+/).filter(Boolean);
+      const panel = tokens.indexOf('panel');
+      const modifier = panel === -1 ? undefined : tokens[panel + 1];
+      if (modifier !== undefined) modifiers.add(modifier);
     }
   }
   return [...modifiers].sort();
@@ -177,4 +188,86 @@ test('every panel a view renders declares its own padding (S3)', () => {
   );
 
   expect(unpadded).toEqual([]);
+});
+
+// The five views that painted their body straight onto the canvas. The
+// stylesheet already declared a modifier for four of them; what the markup owes
+// is the card. The heading belongs inside the card when the view states its
+// title with a `panel-heading`, and stays outside when the view states it in an
+// `intro-row` above the body.
+const FLAT_VIEWS = [
+  {
+    modifier: 'history-panel',
+    element: <HistoryView />,
+    inside: ['history-query', 'history-state', 'history-rows'],
+    outside: ['history-title'],
+  },
+  {
+    modifier: 'audit-panel',
+    element: <AuditView />,
+    inside: ['audit-title', 'audit-status', 'audit-table', 'audit-count'],
+    outside: [],
+  },
+  {
+    modifier: 'jobs-panel',
+    element: <JobsView />,
+    inside: ['jobs-title', 'scenario-select', 'job-status', 'create-job'],
+    outside: [],
+  },
+  {
+    modifier: 'pending-panel',
+    element: <PendingView />,
+    inside: ['pending-title', 'pending-status', 'pending-rows'],
+    outside: [],
+  },
+  {
+    modifier: 'actions-panel',
+    element: <ActionsView />,
+    inside: ['actions-title', 'actions-community-filter', 'actions-table', 'actions-rows'],
+    outside: [],
+  },
+];
+
+test('the five flat views render their body inside the panel card their stylesheet pads (S3)', () => {
+  vi.stubGlobal('fetch', createFetchStub().fetch);
+  vi.stubGlobal('crypto', createCryptoStub());
+  window.sessionStorage.clear();
+  resetSession();
+
+  for (const view of FLAT_VIEWS) {
+    const { container } = render(view.element);
+    const panel = container.querySelector(`article.panel.${view.modifier}`);
+    expect(panel, `${view.modifier} must be the article that wraps the body`).not.toBeNull();
+
+    for (const id of view.inside) {
+      expect(panel?.querySelector(`#${id}`), `${view.modifier} must contain #${id}`).not.toBeNull();
+    }
+    // The eyebrow and the `h2` of an `intro-row` are the view's page heading, so
+    // they stay outside the card the way the overview renders them.
+    for (const id of view.outside) {
+      expect(panel?.querySelector(`#${id}`), `${view.modifier} must not contain #${id}`).toBeNull();
+      expect(container.querySelector(`#${id}`), `#${id} must still be rendered`).not.toBeNull();
+    }
+
+    // The card and the padded modifier travel together: a card whose modifier
+    // is missing from the shared padding rule renders its body flush.
+    expect(
+      baseRules(`.${view.modifier}`).some(rule =>
+        rule.declarations.some(part => part.trim().startsWith('padding:')),
+      ),
+      `${view.modifier} must declare a padding`,
+    ).toBe(true);
+  }
+
+  // The `has-rows` class the history card states conditionally only means
+  // anything while the rule that reads it exists, so both halves are pinned here.
+  expect(appCss).toMatch(
+    /\.history-panel:not\(\.has-rows\)\s*\.table-wrap\s*,\s*\.history-panel:not\(\.has-rows\)\s*\.filter-bar\s*\{\s*display:\s*none/,
+  );
+
+  // The actions list is one card; the detail and the creation keep their own.
+  const actions = render(<ActionsView />);
+  const listPanel = actions.container.querySelector('article.panel.actions-panel');
+  expect(listPanel?.querySelector('article.actions-create')).toBeNull();
+  expect(actions.container.querySelector('article.panel.actions-create')).not.toBeNull();
 });
