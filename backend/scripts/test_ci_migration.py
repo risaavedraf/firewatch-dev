@@ -497,9 +497,17 @@ class FakeDocker:
         (self.bin / "docker.cmd").write_text(
             f'@echo off\r\n"{sys.executable}" "%~dp0fake_docker.py" %*\r\n', encoding="utf-8"
         )
+        # The child runs with PATH pointing at this directory only, which is what
+        # makes the fake the sole resolvable docker. The POSIX shim therefore must
+        # not discover its own directory through the environment: `$(dirname "$0")`
+        # needs PATH, so on a Linux runner it expanded to nothing and the wrapper
+        # exec'd "/fake_docker.py". The absolute paths are baked in at write time
+        # (sys.executable is already absolute), so the shim depends on neither PATH
+        # nor dirname. Windows keeps %~dp0 for the same reason.
         posix = self.bin / "docker"
         posix.write_text(
-            f'#!/bin/sh\nexec "{sys.executable}" "$(dirname "$0")/fake_docker.py" "$@"\n', encoding="utf-8"
+            f'#!/bin/sh\nexec "{sys.executable}" "{self.bin / "fake_docker.py"}" "$@"\n',
+            encoding="utf-8",
         )
         posix.chmod(0o755)
         self.exe = self.bin / ("docker.cmd" if os.name == "nt" else "docker")
