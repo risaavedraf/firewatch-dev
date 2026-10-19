@@ -5,8 +5,10 @@
 //   1. every metric reports a real value with its own declared limit — the
 //      catalogue length served by `/v1/risk/zones`, the history rows actually
 //      returned for the selected zone, and the count of comunas whose level this
-//      session actually read. The API answers per zone and exposes no aggregate
-//      endpoint, so the "high level" card states that limit in its own note;
+//      session actually read. Those levels come from two reads: the per-zone
+//      `/v1/risk/latest` for the selected zone and the aggregate
+//      `/v1/risk/batches` read once per session, and the "high level" card states
+//      what the count means in either case;
 //   2. the batch evidence is fail-closed: a payload that did not survive the
 //      boundary guard is rendered as explicitly unavailable, never as a
 //      plausible severity. A 404 on `latest` is "no published batch", never low;
@@ -20,7 +22,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 
 import {
+  claimZoneBatchAggregateRead,
   clearZoneState,
+  getSelectedZone,
   rememberZoneCatalogue,
   rememberZoneLevel,
   selectZone,
@@ -32,7 +36,7 @@ import { idleCopy } from '../app/sessionCopy';
 import { MapPanel, type MapLoadState, type ZoneLevelLookup } from '../components/map/MapPanel';
 import { zoneLabel } from '../components/map/projection';
 import { DataList, Metric, PanelHeading, StatusCopy, UnimplementedNote } from '../components/ui';
-import { history, latest, modelVersions, zones, type Failure, type Outcome } from '../core/api';
+import { batches, history, latest, modelVersions, zones, type Failure, type Outcome } from '../core/api';
 import type { SessionState } from '../core/session';
 import {
   computeFactorBars,
@@ -107,8 +111,10 @@ function failureMessage(failure: Failure, action: string): string {
 }
 
 // The first comuna the catalogue offers, in the same order the map's selector
-// presents them. The retired page selected it on load; reproducing that keeps
-// the metrics real from the first read instead of waiting for a click.
+// presents them. The retired page selected it on load; reproducing that keeps the
+// metrics real from the first read instead of waiting for a click. It is only
+// used to fill an empty selection (S2): a zone the reader already chose outranks
+// it, and a remount must not move the selection back here.
 function firstCatalogueCode(collection: ZoneCollection): string {
   const codes: string[] = [];
   for (const feature of collection.features) {
@@ -250,13 +256,51 @@ export function OverviewView() {
       // The labels are recorded with the selection, never before it: the chip may
       // only name a zone whose catalogue this session actually loaded.
       rememberZoneCatalogue(catalogueZoneLabels(result.data));
-      const first = firstCatalogueCode(result.data);
-      if (first !== '') selectZone(first);
+      // S2 — the auto-selection only fills an EMPTY selection. This effect runs on
+      // every mount of this view, so selecting unconditionally replaced the zone
+      // the reader had chosen with the first catalogue code (Valparaíso, 05101)
+      // as soon as they left the map and came back. The selected zone is read from
+      // the store rather than from this render so the effect keeps running once
+      // per session instead of once per selection.
+      if (getSelectedZone() === '') {
+        const first = firstCatalogueCode(result.data);
+        if (first !== '') selectZone(first);
+      }
     })();
     return () => {
       active = false;
       controller.abort();
     };
+  }, [signedIn]);
+
+  // S1/S4 — one aggregate read per session, so every comuna's last published
+  // level is on the map without a click. It runs alongside the catalogue read and
+  // is claimed through the store, which is what makes it per-session rather than
+  // per-mount: coming back to this view finds the claim taken and issues nothing,
+  // while a new session claims it again.
+  //
+  // Each element is validated with the same fail-closed `presentBatch` the risk
+  // panel uses, and only a valid one may set a level. An element that fails
+  // validation, and a zone the answer omits, are left alone: never a level, never
+  // a default, never `bajo`. A failed, malformed, 401/403 or 503 answer paints
+  // nothing at all, leaving the map exactly as the per-zone reads leave it.
+  //
+  // The read deliberately carries no view-lifetime abort: it belongs to the
+  // session, so leaving the view mid-flight must still colour the map for the
+  // next visit. The transport's own fences protect it — the bounded deadline and
+  // the token check that discards an answer issued before a logout.
+  useEffect(() => {
+    if (!signedIn) return;
+    if (!claimZoneBatchAggregateRead()) return;
+    void (async () => {
+      const result = await batches();
+      if (!result.ok) return;
+      for (const entry of result.data) {
+        const presentation = presentBatch(entry);
+        if (!presentation.valid || presentation.level === '') continue;
+        rememberZoneLevel(entry.zone_id, presentation.level);
+      }
+    })();
   }, [signedIn]);
 
   // One selection reads both endpoints. The transport fences every response by
@@ -471,7 +515,14 @@ export function OverviewView() {
           icon="attention"
           attention
           value={<span id="metric-high">{highCount}</span>}
-          note="Cuenta solo las comunas cuyo último lote ya se leyó en esta sesión: la API responde por zona y no existe endpoint agregado."
+          note={
+            <>
+              Cuenta solo las comunas cuyo último lote esta página leyó y validó: lo que devolvió{' '}
+              <code>/v1/risk/batches</code> al iniciar la sesión, más la zona seleccionada. Si esa lectura agregada falla,
+              la cuenta refleja únicamente lo leído por zona. Una comuna sin lote publicado, o cuyo lote no pasó la
+              validación, queda sin nivel y no se cuenta.
+            </>
+          }
         />
       </section>
 

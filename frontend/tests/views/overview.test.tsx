@@ -9,7 +9,7 @@ import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 
 import { gatewayOrigin, issuer, pkceTransactionKey, routes } from '../../src/config';
-import { clearZoneState, getSelectedZoneLabel } from '../../src/app/store';
+import { clearZoneState, getSelectedZone, getSelectedZoneLabel, getZoneLevels } from '../../src/app/store';
 import { completeLogin, getSessionSnapshot, resetSession } from '../../src/core/session';
 import type { RiskBatch, ZoneCollection, ZoneFeature } from '../../src/types/api';
 import { OverviewView } from '../../src/views/OverviewView';
@@ -20,6 +20,10 @@ const ZONES_URL = `${gatewayOrigin}${routes.zones}`;
 const latestUrl = (zone: string): string => `${gatewayOrigin}${routes.latest}?zone_id=${zone}`;
 const historyUrl = (zone: string): string => `${gatewayOrigin}${routes.history}?zone_id=${zone}`;
 const MODELS_URL = `${gatewayOrigin}${routes.models}`;
+// `config.routes` carries the per-zone risk reads; the aggregate read is named
+// here the way the transport names it, so this suite pins the exact route the
+// page consumes.
+const BATCHES_URL = `${gatewayOrigin}/v1/risk/batches`;
 
 // Two stubs are shared by the whole file and rebuilt before every test, so no
 // test can inherit a pending request or a previous session from another.
@@ -111,12 +115,16 @@ async function settle(): Promise<void> {
   });
 }
 
-async function signIn(): Promise<void> {
+async function signInAgain(): Promise<void> {
   storageStub.storage.setItem(pkceTransactionKey, JSON.stringify({ state: 's', verifier: 'v' }));
   const login = completeLogin('?code=c&state=s');
   await flush();
   fetchStub.answer(TOKEN_URL, { access_token: jwt({ realm_access: { roles: ['viewer'] } }), id_token: jwt({ sub: 'u' }) });
   await login;
+}
+
+async function signIn(): Promise<void> {
+  await signInAgain();
   fetchStub.calls.length = 0;
 }
 
@@ -159,6 +167,10 @@ function latestCallCount(): number {
 
 function historyCallCount(): number {
   return fetchStub.calls.filter(call => call.url.includes(routes.history)).length;
+}
+
+function batchesCallCount(): number {
+  return fetchStub.calls.filter(call => call.url === BATCHES_URL).length;
 }
 
 function mapIsHidden(): boolean {
@@ -654,6 +666,170 @@ test('the real default active row declares no synthetic mark, and a wrong envelo
   await settle();
   expect(textOf('model-active-version')).toBe('No informada');
   expect(textOf('model-synthetic')).toBe('NO DISPONIBLE');
+});
+
+// S1/S4 — the aggregate read colours the territory on load, with no click: one
+// `/v1/risk/batches` answer carries every published level, so more than one comuna
+// is painted as soon as it settles. Nothing in this test selects anything.
+test('the aggregate read colours several comunas with no click (S1, S4)', async () => {
+  await openSignedIn();
+  await serveCatalogue(
+    catalogue([feature('05101', 'Valparaíso'), feature('05102', 'Casablanca'), feature('05103', 'Quilpué')]),
+  );
+  await serveZone('05101', null, 404, []);
+  expect(batchesCallCount()).toBe(1);
+
+  fetchStub.answer(BATCHES_URL, {
+    batches: [
+      batch('05101'),
+      batch('05102', 'batch-2', 'job-2', { risk_level: 'medio' }),
+      batch('05103', 'batch-3', 'job-3', { risk_level: 'bajo' }),
+    ],
+  });
+  await settle();
+
+  // The shared level map is what the map paints from, so it is asserted directly
+  // as well as through the rendered shape classes.
+  expect(getZoneLevels().get('05101')).toBe('alto');
+  expect(getZoneLevels().get('05102')).toBe('medio');
+  expect(getZoneLevels().get('05103')).toBe('bajo');
+  expect(document.querySelector('[data-zone="05102"]')?.getAttribute('class')).toContain('level-medio');
+  expect(document.querySelector('[data-zone="05103"]')?.getAttribute('class')).toContain('level-bajo');
+  // The count is what the page read and validated, not a regional total.
+  expect(textOf('metric-high')).toBe('1');
+});
+
+// S5 — an element that fails the fail-closed presentation check and a zone the
+// answer omits both leave their comuna neutral: never a level, never a default.
+test('a zone absent from the aggregate and an element that fails validation stay neutral (S5)', async () => {
+  await openSignedIn();
+  await serveCatalogue(
+    catalogue([feature('05101', 'Valparaíso'), feature('05102', 'Casablanca'), feature('05103', 'Quilpué')]),
+  );
+  await serveZone('05101', null, 404, []);
+
+  // `factors: []` passes the wire shape and fails `presentBatch` exactly as an
+  // incomplete batch from `/v1/risk/latest` would.
+  fetchStub.answer(BATCHES_URL, { batches: [batch('05102', 'batch-2', 'job-2', { factors: [] })] });
+  await settle();
+
+  expect(getZoneLevels().has('05102')).toBe(false);
+  expect(getZoneLevels().has('05103')).toBe(false);
+  expect(getZoneLevels().has('05101')).toBe(false);
+  for (const code of ['05101', '05102', '05103']) {
+    expect(document.querySelector(`[data-zone="${code}"]`)?.getAttribute('class')).toContain('zone-neutral');
+  }
+  expect(textOf('metric-high')).toBe('0');
+});
+
+// S5 — a failed aggregate answer must not paint anything nor support a claim: the
+// map stays exactly as the per-zone reads left it.
+test('a failed aggregate answer leaves the map as the per-zone reads leave it (S5)', async () => {
+  await openSignedIn();
+  await serveCatalogue(catalogue([feature('05101', 'Valparaíso'), feature('05102', 'Casablanca')]));
+  await serveZone('05101', batch('05101'), 200, [batch('05101')]);
+
+  fetchStub.answer(BATCHES_URL, { code: 'storage_unavailable' }, 503);
+  await settle();
+
+  expect(getZoneLevels().get('05101')).toBe('alto');
+  expect(getZoneLevels().has('05102')).toBe(false);
+  expect(document.querySelector('[data-zone="05102"]')?.getAttribute('class')).toContain('zone-neutral');
+  expect(textOf('metric-high')).toBe('1');
+});
+
+// S5 — a 401 is the one aggregate failure that changes the session: the transport
+// lowers it, so the map is emptied by the session ending rather than by anything
+// this read decided, and no comuna is painted from a refusal.
+test('a 401 on the aggregate read closes the session instead of painting the map (S5)', async () => {
+  await openSignedIn();
+  await serveCatalogue(catalogue([feature('05101', 'Valparaíso'), feature('05102', 'Casablanca')]));
+
+  fetchStub.answer(BATCHES_URL, { code: 'unauthorized' }, 401);
+  await settle();
+
+  expect(getSessionSnapshot().status).toBe('signed-out');
+  expect(getZoneLevels().size).toBe(0);
+  expect(selector().disabled).toBe(true);
+});
+
+// S2 — leaving the map and coming back must not move the selection back to the
+// first catalogue code (Valparaíso, 05101): the reader's comuna survives the
+// remount because the auto-selection only fills an EMPTY selection.
+test('the selected zone survives leaving the view and is not replaced by the first catalogue code (S2)', async () => {
+  await openSignedIn();
+  await serveCatalogue(catalogue([feature('05101', 'Valparaíso'), feature('05102', 'Casablanca')]));
+  await serveZone('05101', null, 404, []);
+
+  fireEvent.click(screen.getByRole('button', { name: 'Casablanca (05102)' }));
+  await settle();
+  await serveZone('05102', batch('05102'), 200, [batch('05102')]);
+  expect(getSelectedZone()).toBe('05102');
+  const latestForFirstCode = fetchStub.callsFor(latestUrl('05101')).length;
+
+  // Leave the map view and come back.
+  cleanup();
+  render(<OverviewView />);
+  await settle();
+  await serveCatalogue(catalogue([feature('05101', 'Valparaíso'), feature('05102', 'Casablanca')]));
+  await serveZone('05102', batch('05102'), 200, [batch('05102')]);
+
+  expect(getSelectedZone()).toBe('05102');
+  expect(selector().value).toBe('05102');
+  // The remount re-read the zone the reader chose, and never the first code.
+  expect(fetchStub.callsFor(latestUrl('05102')).length).toBeGreaterThan(1);
+  expect(fetchStub.callsFor(latestUrl('05101')).length).toBe(latestForFirstCode);
+});
+
+// S4 — the aggregate read is a per-session read, not a per-mount one: coming back
+// to the map must not re-issue it, while a new session must.
+test('the aggregate read runs once per session, not once per mount (S4)', async () => {
+  await openSignedIn();
+  await serveCatalogue(catalogue([feature('05101', 'Valparaíso')]));
+  await serveZone('05101', null, 404, []);
+  fetchStub.answer(BATCHES_URL, { batches: [batch('05101')] });
+  await settle();
+  expect(batchesCallCount()).toBe(1);
+
+  cleanup();
+  render(<OverviewView />);
+  await settle();
+  await serveCatalogue(catalogue([feature('05101', 'Valparaíso')]));
+  // The selected zone's own read runs again on the remount, as it should: this
+  // test is about the aggregate read, which must not.
+  await serveZone('05101', batch('05101'), 200, [batch('05101')]);
+
+  // Nothing was re-requested, and the level the session already bought is still
+  // on the map: the colour belongs to the session, not to the view.
+  expect(batchesCallCount()).toBe(1);
+  expect(getZoneLevels().get('05101')).toBe('alto');
+
+  // A new session buys the aggregate again.
+  act(() => {
+    resetSession();
+  });
+  await settle();
+  await signInAgain();
+  await settle();
+  expect(batchesCallCount()).toBe(2);
+  await serveCatalogue(catalogue([feature('05101', 'Valparaíso')]));
+  fetchStub.answer(BATCHES_URL, { batches: [] });
+  await settle();
+});
+
+// T2 — the "high level" note may no longer deny that an aggregate endpoint
+// exists, and it has to say honestly what the count means whether that read
+// succeeded or failed.
+test('the high-level metric note describes the aggregate read instead of denying it (T2)', async () => {
+  await openSignedIn();
+  await serveCatalogue(catalogue([feature('05101', 'Valparaíso')]));
+
+  const note = screen.getByText('Comunas con nivel alto').closest('article')?.querySelector('p')?.textContent ?? '';
+  expect(note).not.toMatch(/no existe endpoint agregado/i);
+  expect(note).toMatch(/\/v1\/risk\/batches/);
+  expect(note).toMatch(/validó/);
+  expect(note).toMatch(/sin lote publicado/i);
+  expect(note).toMatch(/sin nivel/i);
 });
 
 // T2/S1 — the panel must present the registry version and the version that really

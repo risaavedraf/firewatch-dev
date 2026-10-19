@@ -1,6 +1,7 @@
 import { gatewayOrigin, issuer, pkceTransactionKey } from '../../src/config';
 import {
   audit,
+  batches,
   createJob,
   history,
   job,
@@ -111,6 +112,7 @@ test('every gateway read is absolute on the gateway origin with the bearer, omit
   const zonesRead = zones();
   const latestRead = latest('05101');
   const historyRead = history('05101');
+  const batchesRead = batches();
   const sourcesRead = sources();
   const riskRead = riskStatus();
   const jobsRead = jobsStatus();
@@ -125,6 +127,7 @@ test('every gateway read is absolute on the gateway origin with the bearer, omit
     '/v1/risk/zones',
     '/v1/risk/latest?zone_id=05101',
     '/v1/risk/history?zone_id=05101',
+    '/v1/risk/batches',
     '/v1/risk/sources',
     '/v1/risk/status',
     '/v1/jobs/status',
@@ -149,6 +152,7 @@ test('every gateway read is absolute on the gateway origin with the bearer, omit
   fetchStub.answer(`${gatewayOrigin}/v1/risk/zones`, { type: 'FeatureCollection', features: [] });
   fetchStub.answer(`${gatewayOrigin}/v1/risk/latest?zone_id=05101`, batch());
   fetchStub.answer(`${gatewayOrigin}/v1/risk/history?zone_id=05101`, []);
+  fetchStub.answer(`${gatewayOrigin}/v1/risk/batches`, { batches: [] });
   fetchStub.answer(`${gatewayOrigin}/v1/risk/sources`, sourceBody());
   fetchStub.answer(`${gatewayOrigin}/v1/risk/status`, snapshot());
   fetchStub.answer(`${gatewayOrigin}/v1/jobs/status`, snapshot());
@@ -156,7 +160,20 @@ test('every gateway read is absolute on the gateway origin with the bearer, omit
   fetchStub.answer(`${gatewayOrigin}/v1/audit`, []);
   fetchStub.answer(`${gatewayOrigin}/v1/jobs/job-1`, jobFixture());
   fetchStub.answer(`${gatewayOrigin}/v1/jobs`, jobFixture());
-  await Promise.all([readyRead, zonesRead, latestRead, historyRead, sourcesRead, riskRead, jobsRead, scenariosRead, auditRead, jobRead, createRead]);
+  await Promise.all([
+    readyRead,
+    zonesRead,
+    latestRead,
+    historyRead,
+    batchesRead,
+    sourcesRead,
+    riskRead,
+    jobsRead,
+    scenariosRead,
+    auditRead,
+    jobRead,
+    createRead,
+  ]);
 });
 
 test('ready accepts only a 2xx gateway answer and never claims the pipeline', async () => {
@@ -447,4 +464,101 @@ test('scenarios publishes only usable catalogue entries', () => {
     { id: 'mild', description: 'Perfil suave' },
   ]);
   expect(parseScenarios([{ id: 'no-description' }])).toEqual([{ id: 'no-description', description: '' }]);
+});
+
+// ── The aggregate risk read (T2/S4) ────────────────────────────────────────
+//
+// `/v1/risk/batches` answers the newest published batch of every zone inside an
+// envelope, with no geometry. The transport proves that envelope and fails
+// closed, exactly like every other read: a collection is either usable as a
+// whole or it is not a collection the page may paint from.
+
+test('batches reads the aggregate envelope and keeps the bearer discipline of every other read', async () => {
+  const { fetchStub, token } = await connectedSession();
+  const outcome = batches();
+  await flush();
+
+  const call = fetchStub.callsFor(`${gatewayOrigin}/v1/risk/batches`)[0];
+  expect(call.init.credentials).toBe('omit');
+  expect(call.init.cache).toBe('no-store');
+  expect((call.init.headers as Record<string, string>).Authorization).toBe(`Bearer ${token}`);
+
+  // An element carries the per-zone members MINUS the batch geometry, which the
+  // aggregate route deliberately does not serve.
+  const first = batch('05101');
+  const second = batch('05102', 'batch-2', 'job-2');
+  fetchStub.answer(`${gatewayOrigin}/v1/risk/batches`, { batches: [first, second] });
+  expect(await outcome).toEqual({ ok: true, data: [first, second] });
+});
+
+test('an empty aggregate answer is a real empty collection, never a failure', async () => {
+  const { fetchStub } = await connectedSession();
+  const outcome = batches();
+  await flush();
+  fetchStub.answer(`${gatewayOrigin}/v1/risk/batches`, { batches: [] });
+  expect(await outcome).toEqual({ ok: true, data: [] });
+});
+
+test('the aggregate answer fails closed on anything but the served envelope', async () => {
+  const { fetchStub } = await connectedSession();
+
+  // `/history` serves a bare array; this route serves an envelope, and a bare
+  // array here is a contract change rather than a tolerated alternative.
+  const bareArray = batches();
+  await flush();
+  fetchStub.answer(`${gatewayOrigin}/v1/risk/batches`, [batch()]);
+  expect(expectFailure(await bareArray).kind).toBe('malformed');
+
+  const missingKey = batches();
+  await flush();
+  fetchStub.answer(`${gatewayOrigin}/v1/risk/batches`, { items: [] });
+  expect(expectFailure(await missingKey).kind).toBe('malformed');
+
+  // One unusable element rejects the whole answer: painting the others would
+  // publish a collection the service did not actually serve.
+  const brokenElement = batch('05102', 'batch-2', 'job-2');
+  delete (brokenElement as { policy?: unknown }).policy;
+  const badElement = batches();
+  await flush();
+  fetchStub.answer(`${gatewayOrigin}/v1/risk/batches`, { batches: [batch(), brokenElement] });
+  const elementFailure = expectFailure(await badElement);
+  expect(elementFailure.kind).toBe('malformed');
+  expect(elementFailure.reason).toBe('invalid_shape');
+
+  const malformedJson = batches();
+  await flush();
+  fetchStub.answerMalformedJson(`${gatewayOrigin}/v1/risk/batches`);
+  expect(expectFailure(await malformedJson).reason).toBe('malformed_json');
+});
+
+test('the aggregate read maps 403, 503 and 401 to their own outcomes', async () => {
+  const { fetchStub } = await connectedSession();
+
+  const denied = batches();
+  await flush();
+  fetchStub.answer(`${gatewayOrigin}/v1/risk/batches`, { code: 'forbidden' }, 403, 'req-403');
+  expect(expectFailure(await denied)).toEqual({ kind: 'forbidden', reason: 'forbidden', status: 403, requestId: 'req-403' });
+  expect(getSessionSnapshot().status).toBe('signed-in');
+
+  const unavailable = batches();
+  await flush();
+  fetchStub.answer(`${gatewayOrigin}/v1/risk/batches`, { code: 'storage_unavailable' }, 503, 'req-503');
+  expect(expectFailure(await unavailable)).toEqual({
+    kind: 'unavailable',
+    reason: 'storage_unavailable',
+    status: 503,
+    requestId: 'req-503',
+  });
+  expect(getSessionSnapshot().status).toBe('signed-in');
+
+  const rejected = batches();
+  await flush();
+  fetchStub.answer(`${gatewayOrigin}/v1/risk/batches`, { code: 'unauthorized' }, 401, 'req-401');
+  expect(expectFailure(await rejected)).toEqual({
+    kind: 'unauthorized',
+    reason: 'unauthorized',
+    status: 401,
+    requestId: 'req-401',
+  });
+  expect(getSessionSnapshot()).toEqual({ status: 'signed-out', roles: null, reason: 'rejected' });
 });

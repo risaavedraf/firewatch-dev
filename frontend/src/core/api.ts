@@ -17,6 +17,7 @@ import { gatewayOrigin, jobRoute, preventiveActionRoute, preventiveTransitionRou
 import type {
   ActionHistoryEntry,
   AuditEntry,
+  BatchCollection,
   Job,
   PreventiveAction,
   PreventiveActionDetail,
@@ -57,6 +58,7 @@ type RequestKind =
   | 'zones'
   | 'latest'
   | 'history'
+  | 'batches'
   | 'sources'
   | 'riskStatus'
   | 'jobsStatus'
@@ -403,6 +405,36 @@ export async function history(zoneId: string, signal?: AbortSignal): Promise<Out
     batches.push(entry);
   }
   return { ok: true, data: batches };
+}
+
+// The aggregate body is an envelope, not the bare array `/history` serves: a bare
+// array, a missing or non-array `batches`, or an element that is not a usable
+// batch rejects the WHOLE answer. The read exists to paint every comuna at once,
+// and painting the surviving subset would present a collection the service did
+// not serve. An element of the rejected answer is not repaired, skipped or
+// defaulted here either.
+function isBatchCollection(value: unknown): value is BatchCollection {
+  return record(value) && Array.isArray(value.batches);
+}
+
+// One request answers the newest published batch of every zone that has one, so
+// the map can be coloured on load instead of one read per comuna. A zone with no
+// published batch is simply absent, and this function invents nothing for it: the
+// caller decides what an absent zone means, and the honest answer is "no level".
+export async function batches(signal?: AbortSignal): Promise<Outcome<RiskBatch[]>> {
+  const result = await requestJson('batches', `${gatewayOrigin}${routes.batches}`, { authenticated: true }, signal);
+  if (result.state !== 'ok') return resultFailure<RiskBatch[]>(result);
+  if (!isBatchCollection(result.body)) {
+    return failureOutcome(failureSpec('malformed', 'invalid_shape', result.status, result.requestId));
+  }
+  const collection: RiskBatch[] = [];
+  for (const entry of result.body.batches) {
+    if (!isRiskBatch(entry)) {
+      return failureOutcome(failureSpec('malformed', 'invalid_shape', result.status, result.requestId));
+    }
+    collection.push(entry);
+  }
+  return { ok: true, data: collection };
 }
 
 // The served payload is nested under `geography` exactly as the declaration

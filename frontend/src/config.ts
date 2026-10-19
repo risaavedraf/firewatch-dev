@@ -27,6 +27,9 @@ export const routes = {
   zones: '/v1/risk/zones',
   latest: '/v1/risk/latest',
   history: '/v1/risk/history',
+  // The aggregate read that colours the whole territory on load: the newest
+  // published batch of every zone that has one, answered in a single request.
+  batches: '/v1/risk/batches',
   sources: '/v1/risk/sources',
   riskStatus: '/v1/risk/status',
   jobsStatus: '/v1/jobs/status',

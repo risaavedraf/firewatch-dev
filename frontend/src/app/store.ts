@@ -26,6 +26,11 @@ import type { RiskLevel } from '../types/api';
 let selectedZone = '';
 let zoneLevels: ReadonlyMap<string, RiskLevel> = new Map();
 let zoneLabels: ReadonlyMap<string, string> = new Map();
+// The aggregate read that colours every comuna on load is a per-session read, not
+// a per-mount one: the view claims it once and leaving the map and returning must
+// not issue it again. It lives with the rest of the zone state so the end of a
+// session drops it and the next session reads the aggregate for itself.
+let zoneBatchAggregateClaimed = false;
 const listeners = new Set<() => void>();
 
 function emit(): void {
@@ -70,6 +75,17 @@ export function rememberZoneLevel(code: string, level: RiskLevel | null): void {
   emit();
 }
 
+// Claims the session's single aggregate read of every zone's last batch. Only the
+// caller that receives `true` may issue it, so a remount (or a second reader)
+// finds the claim taken instead of re-reading the whole territory. No reader
+// renders this flag, so it deliberately does not notify: the claim is a decision,
+// not a fact on screen.
+export function claimZoneBatchAggregateRead(): boolean {
+  if (zoneBatchAggregateClaimed) return false;
+  zoneBatchAggregateClaimed = true;
+  return true;
+}
+
 // A defensive copy, because the caller keeps the collection it built: a later
 // mutation of that map must not change the name the page is showing.
 export function rememberZoneCatalogue(labels: ReadonlyMap<string, string>): void {
@@ -78,6 +94,9 @@ export function rememberZoneCatalogue(labels: ReadonlyMap<string, string>): void
 }
 
 export function clearZoneState(): void {
+  // The claim is dropped even when there is nothing else to clear: a session that
+  // has ended must leave the next one free to read the aggregate again.
+  zoneBatchAggregateClaimed = false;
   if (selectedZone === '' && zoneLevels.size === 0 && zoneLabels.size === 0) return;
   selectedZone = '';
   zoneLevels = new Map();
