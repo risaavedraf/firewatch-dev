@@ -5,7 +5,9 @@ import {
   clearZoneState,
   getHistoryFilters,
   getSelectedZone,
+  getSelectedZoneLabel,
   getZoneLevels,
+  rememberZoneCatalogue,
   rememberZoneLevel,
   resetHistoryFilters,
   selectZone,
@@ -81,6 +83,33 @@ test('a remembered level survives moving the selection away, and null clears it'
   // than keep claiming it.
   rememberZoneLevel('05109', null);
   expect(getZoneLevels().has('05109')).toBe(false);
+});
+
+// The shell's chip and the overview share one name, and that name may only come
+// from a catalogue this session actually loaded: a selected code the catalogue
+// never carried has no label, never a guessed one.
+test('a zone label is readable only after the catalogue that carries it was recorded', () => {
+  selectZone('05101');
+  expect(getSelectedZoneLabel()).toBe('');
+
+  const source = new Map([['05101', 'Valparaíso (05101)']]);
+  rememberZoneCatalogue(source);
+  expect(getSelectedZoneLabel()).toBe('Valparaíso (05101)');
+
+  // The store keeps its own copy, so a caller that mutates the map it handed in
+  // cannot change what the page shows.
+  source.set('05101', 'Otro nombre (05101)');
+  expect(getSelectedZoneLabel()).toBe('Valparaíso (05101)');
+
+  // The label describes the selected zone only: a code the catalogue never
+  // carried falls back to the empty label instead of an invented name.
+  selectZone('05999');
+  expect(getSelectedZoneLabel()).toBe('');
+
+  // Ending the session drops the catalogue with the rest of the private state.
+  selectZone('05101');
+  clearZoneState();
+  expect(getSelectedZoneLabel()).toBe('');
 });
 
 test('readers are not notified when there is nothing to clear', () => {

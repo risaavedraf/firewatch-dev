@@ -21,6 +21,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 
 import {
   clearZoneState,
+  rememberZoneCatalogue,
   rememberZoneLevel,
   selectZone,
   useSelectedZone,
@@ -29,6 +30,7 @@ import {
 } from '../app/store';
 import { idleCopy } from '../app/sessionCopy';
 import { MapPanel, type MapLoadState, type ZoneLevelLookup } from '../components/map/MapPanel';
+import { zoneLabel } from '../components/map/projection';
 import { DataList, Metric, PanelHeading, StatusCopy, UnimplementedNote } from '../components/ui';
 import { history, latest, modelVersions, zones, type Failure, type Outcome } from '../core/api';
 import type { SessionState } from '../core/session';
@@ -115,6 +117,19 @@ function firstCatalogueCode(collection: ZoneCollection): string {
   }
   codes.sort((left, right) => left.localeCompare(right));
   return codes.length > 0 ? codes[0] : '';
+}
+
+// The display names the loaded catalogue carries, keyed by the code the shared
+// store selects on. Only a feature with a real code contributes: a label without
+// a key would name a zone the chip can never select, and the format is the map's
+// own `zoneLabel` so the selector and the chip can never disagree.
+function catalogueZoneLabels(collection: ZoneCollection): Map<string, string> {
+  const labels = new Map<string, string>();
+  for (const feature of collection.features) {
+    const code = feature?.properties?.code;
+    if (typeof code === 'string' && code !== '') labels.set(code, zoneLabel(feature.properties));
+  }
+  return labels;
 }
 
 interface RiskCopy {
@@ -232,6 +247,9 @@ export function OverviewView() {
         return;
       }
       setCatalogue({ kind: 'ready', collection: result.data });
+      // The labels are recorded with the selection, never before it: the chip may
+      // only name a zone whose catalogue this session actually loaded.
+      rememberZoneCatalogue(catalogueZoneLabels(result.data));
       const first = firstCatalogueCode(result.data);
       if (first !== '') selectZone(first);
     })();

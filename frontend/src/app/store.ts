@@ -13,11 +13,19 @@ import type { RiskLevel } from '../types/api';
 // away: the page colours only what it has actually read this session, remembers
 // each level it read, and never issues an extra request to do it.
 //
+// The zone labels are the display names the loaded `/v1/risk/zones` catalogue
+// actually carried. They live here because the shell's chip and the overview's
+// map selector have to show the same name for the same selection, and because a
+// name may only be shown when a catalogue really loaded it: the chip falls back
+// to "Sin zona" rather than inventing one. Recording them here, once per loaded
+// catalogue, keeps every reader on the same honest source.
+//
 // Everything here is cleared when the session ends, so a logout cannot leave the
-// previous session's selection or colours on screen.
+// previous session's selection, colours or names on screen.
 
 let selectedZone = '';
 let zoneLevels: ReadonlyMap<string, RiskLevel> = new Map();
+let zoneLabels: ReadonlyMap<string, string> = new Map();
 const listeners = new Set<() => void>();
 
 function emit(): void {
@@ -30,6 +38,13 @@ export function getSelectedZone(): string {
 
 export function getZoneLevels(): ReadonlyMap<string, RiskLevel> {
   return zoneLevels;
+}
+
+// The name of the selected zone, or `''` when there is none: a zone whose label
+// the loaded catalogue did not carry has no name to show, never a fallback one.
+export function getSelectedZoneLabel(): string {
+  if (selectedZone === '') return '';
+  return zoneLabels.get(selectedZone) ?? '';
 }
 
 export function subscribeZoneState(listener: () => void): () => void {
@@ -55,10 +70,18 @@ export function rememberZoneLevel(code: string, level: RiskLevel | null): void {
   emit();
 }
 
+// A defensive copy, because the caller keeps the collection it built: a later
+// mutation of that map must not change the name the page is showing.
+export function rememberZoneCatalogue(labels: ReadonlyMap<string, string>): void {
+  zoneLabels = new Map(labels);
+  emit();
+}
+
 export function clearZoneState(): void {
-  if (selectedZone === '' && zoneLevels.size === 0) return;
+  if (selectedZone === '' && zoneLevels.size === 0 && zoneLabels.size === 0) return;
   selectedZone = '';
   zoneLevels = new Map();
+  zoneLabels = new Map();
   emit();
 }
 
@@ -112,6 +135,10 @@ export function useSelectedZone(): string {
 
 export function useZoneLevels(): ReadonlyMap<string, RiskLevel> {
   return useSyncExternalStore(subscribeZoneState, getZoneLevels, getZoneLevels);
+}
+
+export function useSelectedZoneLabel(): string {
+  return useSyncExternalStore(subscribeZoneState, getSelectedZoneLabel, getSelectedZoneLabel);
 }
 
 export function useSessionState(): SessionState {

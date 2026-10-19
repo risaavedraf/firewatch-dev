@@ -5,7 +5,15 @@ import { act, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
 import { routes } from '../../src/app/routes';
-import { getHistoryFilters, resetHistoryFilters, setHistoryQuery, setHistoryStatus } from '../../src/app/store';
+import {
+  clearZoneState,
+  getHistoryFilters,
+  rememberZoneCatalogue,
+  resetHistoryFilters,
+  selectZone,
+  setHistoryQuery,
+  setHistoryStatus,
+} from '../../src/app/store';
 import { Shell } from '../../src/components/Shell';
 import { gatewayOrigin, issuer, pkceTransactionKey } from '../../src/config';
 import { zones } from '../../src/core/api';
@@ -28,6 +36,7 @@ function setup(): void {
   vi.stubGlobal('crypto', createCryptoStub());
   window.sessionStorage.clear();
   resetSession();
+  clearZoneState();
   resetHistoryFilters();
 }
 
@@ -137,6 +146,32 @@ test('a rejected token is named in the session card and does not survive logout 
     resetSession();
   });
   expect(document.getElementById('session-detail')).toHaveTextContent('Token requerido para consultar');
+});
+
+// Finding 2 — the topbar chip used to be a dead literal that contradicted the
+// page body. It now mirrors the zone selected in the shared store and names it
+// only from the catalogue that was actually loaded.
+test('the topbar chip names the selected zone from the loaded catalogue and never invents one (finding: dead #zone-chip-name)', async () => {
+  renderShell();
+  await waitFor(() => expect(fetchStub.callsFor(READY_URL)).toHaveLength(1));
+  fetchStub.answer(READY_URL, null, 204);
+
+  const chip = () => document.getElementById('zone-chip-name')?.textContent ?? '';
+  // No catalogue was loaded and no zone is selected: the chip claims no zone.
+  expect(chip()).toBe('Sin zona');
+
+  act(() => {
+    rememberZoneCatalogue(new Map([['05101', 'Valparaíso (05101)']]));
+    selectZone('05101');
+  });
+  expect(chip()).toBe('Valparaíso (05101)');
+
+  // A code the loaded catalogue never carried is a zone without a name: the chip
+  // falls back to "Sin zona" instead of inventing one.
+  act(() => {
+    selectZone('05999');
+  });
+  expect(chip()).toBe('Sin zona');
 });
 
 // S5 — `#update-checked` stopped being a fixed literal: it states what the page

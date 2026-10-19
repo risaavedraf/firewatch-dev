@@ -2,7 +2,7 @@ import { useEffect, useState, type ReactNode } from 'react';
 
 import { navigationGroups, routes, type RouteDefinition } from '../app/routes';
 import { sessionDetailCopy } from '../app/sessionCopy';
-import { resetHistoryFilters, useSessionState } from '../app/store';
+import { resetHistoryFilters, useSelectedZoneLabel, useSessionState } from '../app/store';
 import { ready, type Outcome } from '../core/api';
 import { signOut } from '../core/session';
 import { Icon } from './ui';
@@ -71,6 +71,7 @@ function readinessFrom(outcome: Outcome<null>): Readiness {
 
 export function Shell({ route, children }: { route: RouteDefinition; children: ReactNode }) {
   const session = useSessionState();
+  const zoneLabel = useSelectedZoneLabel();
   const signedIn = session.status === 'signed-in';
   const [readiness, setReadiness] = useState<Readiness>({ state: 'checking', message: CHECKING });
   const [lastSettled, setLastSettled] = useState<SettledReview | null>(null);
@@ -199,7 +200,7 @@ export function Shell({ route, children }: { route: RouteDefinition; children: R
               <span aria-hidden="true">⌖</span>
               <div>
                 <small>ZONA</small>
-                <strong id="zone-chip-name">Sin zona</strong>
+                <strong id="zone-chip-name">{zoneLabel === '' ? 'Sin zona' : zoneLabel}</strong>
               </div>
             </div>
           </header>

@@ -9,7 +9,7 @@ import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 
 import { gatewayOrigin, issuer, pkceTransactionKey, routes } from '../../src/config';
-import { clearZoneState } from '../../src/app/store';
+import { clearZoneState, getSelectedZoneLabel } from '../../src/app/store';
 import { completeLogin, getSessionSnapshot, resetSession } from '../../src/core/session';
 import type { RiskBatch, ZoneCollection, ZoneFeature } from '../../src/types/api';
 import { OverviewView } from '../../src/views/OverviewView';
@@ -267,6 +267,17 @@ test('metric cards report the real catalogue, history and read-zone counts', asy
   expect(textOf('metric-high')).toBe('0');
   expect(textOf('metric-batches')).toBe('—');
   expect(textOf('zone-count')).toBe('No informado');
+});
+
+test('the catalogue the view loads is the only source of the shared chip name', async () => {
+  await openSignedIn();
+  // Before any catalogue arrives there is no name to report, not a provisional one.
+  expect(getSelectedZoneLabel()).toBe('');
+
+  await serveCatalogue(catalogue([feature('05101', 'Valparaíso'), feature('05102', 'Casablanca')]));
+  // The auto-selected first code is named with the same label the map selector
+  // shows, and only because the served catalogue carried it.
+  expect(getSelectedZoneLabel()).toBe('Valparaíso (05101)');
 });
 
 test('a healthy session still renders the live catalogue count and keeps selection working', async () => {
