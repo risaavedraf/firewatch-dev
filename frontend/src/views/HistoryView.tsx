@@ -145,6 +145,11 @@ export function HistoryView() {
   const loaded = status.kind === 'ready' || status.kind === 'empty';
   const countLabel = loaded ? String(rows.length) : '—';
   const visibleLabel = loaded ? historyVisibleCount(visible.length, rows.length) : '—';
+  // The stylesheet hides the empty table and the filter bar of a panel that does
+  // not carry `has-rows`, so this class reports the rows the API returned — not
+  // the rows that survived the filter. A search that narrows the table to zero
+  // rows must not hide the controls that clear it.
+  const hasRows = rows.length > 0;
 
   return (
     <section className="view" id="history" data-view="history" aria-labelledby="history-title">
@@ -157,68 +162,70 @@ export function HistoryView() {
           {countLabel}
         </span>
       </div>
-      <p className="panel-note">
-        Registros devueltos por <code>/v1/risk/history</code>; sin agregar métricas calculadas.
-      </p>
-      <div className="filter-bar">
-        <div className="search-field">
-          <Icon name="search" />
-          <input
-            id="history-query"
-            type="search"
-            aria-label="Buscar en el historial de la zona"
-            placeholder="Buscar por fecha, estado o lote"
-            value={query}
-            onChange={(event) => setHistoryQuery(event.target.value)}
-          />
+      <article className={`panel history-panel${hasRows ? ' has-rows' : ''}`}>
+        <p className="panel-note">
+          Registros devueltos por <code>/v1/risk/history</code>; sin agregar métricas calculadas.
+        </p>
+        <div className="filter-bar">
+          <div className="search-field">
+            <Icon name="search" />
+            <input
+              id="history-query"
+              type="search"
+              aria-label="Buscar en el historial de la zona"
+              placeholder="Buscar por fecha, estado o lote"
+              value={query}
+              onChange={(event) => setHistoryQuery(event.target.value)}
+            />
+          </div>
+          <label className="filter-label">
+            Estado del dato
+            <select
+              id="history-status-filter"
+              aria-label="Filtrar el historial por estado del dato"
+              value={statusFilter}
+              onChange={(event) => setHistoryStatus(event.target.value)}
+            >
+              <option value="">Todos los estados</option>
+              {options.map((option) => (
+                <option key={option} value={option}>
+                  {option}
+                </option>
+              ))}
+            </select>
+          </label>
+          <span className="result-count" id="history-visible-count">
+            {visibleLabel}
+          </span>
         </div>
-        <label className="filter-label">
-          Estado del dato
-          <select
-            id="history-status-filter"
-            aria-label="Filtrar el historial por estado del dato"
-            value={statusFilter}
-            onChange={(event) => setHistoryStatus(event.target.value)}
-          >
-            <option value="">Todos los estados</option>
-            {options.map((option) => (
-              <option key={option} value={option}>
-                {option}
-              </option>
-            ))}
-          </select>
-        </label>
-        <span className="result-count" id="history-visible-count">
-          {visibleLabel}
-        </span>
-      </div>
-      <div id="history-state" className={status.kind === 'failure' ? 'empty-state risk-error' : 'empty-state'}>
-        {stateMessage(status, idleCopy(session, 'consultar el historial'))}
-      </div>
-      <div className="table-wrap">
-        <table>
-          <thead>
-            <tr>
-              <th>Solicitado</th>
-              <th>Estado</th>
-              <th>Lote</th>
-            </tr>
-          </thead>
-          <tbody id="history-rows">
-            {visible.map((batch) => (
-              <tr key={batch.id}>
-                <td>{batch.requested_at ?? 'No informado'}</td>
-                <td>{batch.data_status ?? 'No informado'}</td>
-                <td>{batch.id}</td>
+        <div id="history-state" className={status.kind === 'failure' ? 'empty-state risk-error' : 'empty-state'}>
+          {stateMessage(status, idleCopy(session, 'consultar el historial'))}
+        </div>
+        <div className="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Solicitado</th>
+                <th>Estado</th>
+                <th>Lote</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-      <UnimplementedNote>
-        Historial de todas las zonas: <code>/v1/risk/history</code> exige <code>zone_id</code> y no existe endpoint
-        agregado, así que esta tabla muestra siempre la zona consultada.
-      </UnimplementedNote>
+            </thead>
+            <tbody id="history-rows">
+              {visible.map((batch) => (
+                <tr key={batch.id}>
+                  <td>{batch.requested_at ?? 'No informado'}</td>
+                  <td>{batch.data_status ?? 'No informado'}</td>
+                  <td>{batch.id}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        <UnimplementedNote>
+          Historial de todas las zonas: <code>/v1/risk/history</code> exige <code>zone_id</code> y no existe endpoint
+          agregado, así que esta tabla muestra siempre la zona consultada.
+        </UnimplementedNote>
+      </article>
     </section>
   );
 }

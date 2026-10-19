@@ -2,6 +2,7 @@ import { issuer, pkceTransactionKey } from '../../src/config';
 import { completeLogin, getSessionSnapshot, resetSession } from '../../src/core/session';
 import {
   bindZoneStateToSession,
+  claimZoneBatchAggregateRead,
   clearZoneState,
   getHistoryFilters,
   getSelectedZone,
@@ -112,8 +113,24 @@ test('a zone label is readable only after the catalogue that carries it was reco
   expect(getSelectedZoneLabel()).toBe('');
 });
 
-test('readers are not notified when there is nothing to clear', () => {
-  let notifications = 0;
+// S4 — the aggregate read of every zone's last batch is bought ONCE per session,
+// not once per mount. The claim is what makes "once" true across a view remount,
+// and dropping it with the rest of the zone state is what makes the next session
+// buy it again instead of showing the ended session's map.
+test('the aggregate read is claimed once per session and dropped with the zone state', () => {
+  expect(claimZoneBatchAggregateRead()).toBe(true);
+  // A remount asks again and is told the session already bought it: returning to
+  // the map must not issue the request a second time.
+  expect(claimZoneBatchAggregateRead()).toBe(false);
+  expect(claimZoneBatchAggregateRead()).toBe(false);
+
+  // The end of the session drops the claim, so the next one reads the aggregate.
+  clearZoneState();
+  expect(claimZoneBatchAggregateRead()).toBe(true);
+  clearZoneState();
+});
+
+test('readers are not notified when there is nothing to clear', () => {  let notifications = 0;
   const unsubscribe = subscribeZoneState(() => {
     notifications += 1;
   });

@@ -138,70 +138,72 @@ function AuditRegister({ session }: { session: SessionState }) {
 
   return (
     <section className="view" id="audit" data-view="audit" aria-labelledby="audit-title">
-      <PanelHeading
-        eyebrow="COORDINACIÓN"
-        title="Registro de actividad"
-        titleId="audit-title"
-        badge={
-          <span className="neutral-tag" id="audit-badge">
-            {state.badge}
-          </span>
-        }
-      />
-      <p
-        id="audit-status"
-        className={state.phase === 'read' ? 'status-copy risk-good' : 'status-copy'}
-        role="status"
-        aria-live="polite"
-      >
-        {message}
-      </p>
-      <p className="panel-note">
-        Endpoint de solo administradores. No acepta parámetros: el servicio acota la respuesta por sí mismo (hasta 100
-        eventos recientes) y esta página no pagina, no filtra ni ordena. Los identificadores son opacos, sin nombre para
-        mostrar.
-      </p>
-      <p id="audit-unimplemented" className="unimplemented-note">
-        Aún no implementado: el mockup retirado mostraba el nombre del perfil, un detalle de texto libre y su propio
-        identificador de evento. <code>/v1/audit</code> no entrega ninguno de esos datos, así que no se muestran ni se
-        simulan.
-      </p>
-      <div className="table-wrap" id="audit-table" hidden={!state.showTable}>
-        <table>
-          <caption className="sr-only">Registro de actividad devuelto por /v1/audit</caption>
-          <thead>
-            <tr>
-              <th scope="col">Actor (actor_id)</th>
-              <th scope="col">Acción</th>
-              <th scope="col">Trabajo (job_id)</th>
-              <th scope="col">Traza (trace_id)</th>
-              <th scope="col">Ocurrido (occurred_at)</th>
-            </tr>
-          </thead>
-          <tbody id="audit-rows">
-            {state.entries.map((entry, index) => (
-              // `/v1/audit` carries opaque identifiers, and the service, not the
-              // page, decides what is unique; the row position is the only stable
-              // key the page can honestly use.
-              <tr key={index}>
-                {AUDIT_FIELDS.map(field => (
-                  // An identifier the service omits is labelled in place: nothing
-                  // is filled in from another field and no name is derived from an id.
-                  <td key={field}>{nonempty(entry[field]) ? entry[field] : 'No informado'}</td>
-                ))}
+      <article className="panel audit-panel">
+        <PanelHeading
+          eyebrow="COORDINACIÓN"
+          title="Registro de actividad"
+          titleId="audit-title"
+          badge={
+            <span className="neutral-tag" id="audit-badge">
+              {state.badge}
+            </span>
+          }
+        />
+        <p
+          id="audit-status"
+          className={state.phase === 'read' ? 'status-copy risk-good' : 'status-copy'}
+          role="status"
+          aria-live="polite"
+        >
+          {message}
+        </p>
+        <p className="panel-note">
+          Endpoint de solo administradores. No acepta parámetros: el servicio acota la respuesta por sí mismo (hasta 100
+          eventos recientes) y esta página no pagina, no filtra ni ordena. Los identificadores son opacos, sin nombre para
+          mostrar.
+        </p>
+        <p id="audit-unimplemented" className="unimplemented-note">
+          Aún no implementado: el mockup retirado mostraba el nombre del perfil, un detalle de texto libre y su propio
+          identificador de evento. <code>/v1/audit</code> no entrega ninguno de esos datos, así que no se muestran ni se
+          simulan.
+        </p>
+        <div className="table-wrap" id="audit-table" hidden={!state.showTable}>
+          <table>
+            <caption className="sr-only">Registro de actividad devuelto por /v1/audit</caption>
+            <thead>
+              <tr>
+                <th scope="col">Actor (actor_id)</th>
+                <th scope="col">Acción</th>
+                <th scope="col">Trabajo (job_id)</th>
+                <th scope="col">Traza (trace_id)</th>
+                <th scope="col">Ocurrido (occurred_at)</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-      <div className="audit-foot">
-        <span className="count-badge" id="audit-count">
-          {count}
-        </span>
-        <button id="audit-refresh" className="secondary-button" type="button" disabled={disabled} onClick={refresh}>
-          Actualizar registro
-        </button>
-      </div>
+            </thead>
+            <tbody id="audit-rows">
+              {state.entries.map((entry, index) => (
+                // `/v1/audit` carries opaque identifiers, and the service, not the
+                // page, decides what is unique; the row position is the only stable
+                // key the page can honestly use.
+                <tr key={index}>
+                  {AUDIT_FIELDS.map(field => (
+                    // An identifier the service omits is labelled in place: nothing
+                    // is filled in from another field and no name is derived from an id.
+                    <td key={field}>{nonempty(entry[field]) ? entry[field] : 'No informado'}</td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        <div className="audit-foot">
+          <span className="count-badge" id="audit-count">
+            {count}
+          </span>
+          <button id="audit-refresh" className="secondary-button" type="button" disabled={disabled} onClick={refresh}>
+            Actualizar registro
+          </button>
+        </div>
+      </article>
     </section>
   );
 }

@@ -1,3 +1,6 @@
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+
 import { act, render, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
@@ -6,6 +9,10 @@ import { completeLogin, getSessionSnapshot, resetSession } from '../../src/core/
 import { ActionsView } from '../../src/views/ActionsView';
 
 import { createCryptoStub, createFetchStub, createStorageStub, flush, jwt } from '../core/harness';
+
+// S3 — the actions table marks the row whose detail is open. jsdom applies no
+// stylesheet, so the rule is read from the file the browser receives.
+const appCss = readFileSync(resolve(process.cwd(), 'src', 'styles', 'app.css'), 'utf8');
 
 // S3 / T12 — the preventive-action view against the frozen contract. The
 // transport and the session are stubbed exactly as the rest of the suite; the
@@ -372,6 +379,43 @@ test('a malformed list fails closed instead of showing partial rows', async () =
 
   expect(text('actions-badge')).toBe('NO DISPONIBLE');
   expect(document.getElementById('actions-rows')?.querySelectorAll('tr')).toHaveLength(0);
+});
+
+// S3 — the row whose detail is open must be visibly marked, and the rule that
+// marks it must sit after the plain hover tint: both carry the same specificity,
+// so only a later rule keeps the mark while the pointer is over the row. The
+// mark is visual only — the table gains no ARIA state its role does not support.
+test('the selected actions row carries is-selected and the stylesheet marks it', async () => {
+  await connect(ADMIN_TOKEN);
+  render(<ActionsView />);
+  await waitFor(() => expect(fetchStub.callsFor(ACTIONS_URL)).toHaveLength(1));
+  await answerList([actionFixture(), actionFixture({ id: 'action-2', title: 'Charla vecinal' })]);
+
+  expect(document.querySelectorAll('#actions-rows tr.is-selected')).toHaveLength(0);
+
+  await userEvent.click(document.querySelector('[data-action-id="action-1"]') as HTMLElement);
+  await waitFor(() => expect(fetchStub.callsFor(`${ACTIONS_URL}/action-1`)).toHaveLength(1));
+  await answerDetail(detailFixture());
+
+  const selected = document.querySelectorAll('#actions-rows tr.is-selected');
+  // Exactly one row is marked, and it is the one whose detail is open.
+  expect(selected).toHaveLength(1);
+  expect(selected[0]).toHaveTextContent('Despeje de vegetación');
+  // A visual mark only: the row keeps its table semantics.
+  expect(selected[0]).not.toHaveAttribute('aria-selected');
+
+  // The rule that paints the mark, and its place in the sheet.
+  const hoverAt = appCss.indexOf('tbody tr:hover');
+  const selectedAt = appCss.indexOf('tbody tr.is-selected');
+  expect(hoverAt).toBeGreaterThan(-1);
+  expect(selectedAt).toBeGreaterThan(hoverAt);
+  const rule = appCss.slice(selectedAt, appCss.indexOf('}', selectedAt));
+  expect(rule).toMatch(/background:\s*var\(--soft\)/);
+  // The accent itself is painted on the first cell: `border-collapse: collapse`
+  // drops a box-shadow declared on the row.
+  expect(appCss).toMatch(
+    /tbody tr\.is-selected td:first-child\s*\{[^}]*box-shadow:\s*inset 3px 0 0 var\(--forest-700\)/,
+  );
 });
 
 test('logout clears the list, the detail, the form and the notice', async () => {

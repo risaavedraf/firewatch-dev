@@ -90,6 +90,7 @@ for (const route of [
   '/v1/risk/zones',
   '/v1/risk/latest',
   '/v1/risk/history',
+  '/v1/risk/batches',
   '/v1/risk/sources',
   '/v1/risk/status',
   '/v1/jobs/status',
@@ -197,5 +198,5 @@ assert.match(
 );
 
 console.log(
-  `PASS: ${sources.size} shipped source files checked. The honesty statement is present (${required.length} required statements), no fixture, frozen clock, invented identity or alias ships, all eleven consumed routes and both external origins are present, no client-side role guard exists, tokens are never persisted, no secret is bundled, the sidebar keeps its bounded height with the navigation carrying the internal scroll, and no external asset or inline handler is served.`,
+  `PASS: ${sources.size} shipped source files checked. The honesty statement is present (${required.length} required statements), no fixture, frozen clock, invented identity or alias ships, all twelve consumed routes and both external origins are present, no client-side role guard exists, tokens are never persisted, no secret is bundled, the sidebar keeps its bounded height with the navigation carrying the internal scroll, and no external asset or inline handler is served.`,
 );

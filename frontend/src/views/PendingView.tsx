@@ -67,43 +67,45 @@ export const NOT_IMPLEMENTED: readonly UnimplementedCapability[] = [
 export function PendingView() {
   return (
     <section className="view" id="pending" data-view="pending" aria-labelledby="pending-title">
-      <PanelHeading
-        eyebrow="ALCANCE DE ESTA ENTREGA"
-        title="Aún no implementado"
-        titleId="pending-title"
-        badge={
-          <span id="pending-badge">
-            <UnimplementedBadge />
-          </span>
-        }
-      />
-      <StatusCopy id="pending-status">
-        Estas capacidades del mockup retirado no tienen respaldo en el backend actual. Declararlas es parte de la
-        entrega: no se simulan y ningún control de esta página las ofrece.
-      </StatusCopy>
-      <div className="table-wrap">
-        <table>
-          <caption className="sr-only">
-            Capacidades sin respaldo en el backend, con su motivo y su ubicación prevista
-          </caption>
-          <thead>
-            <tr>
-              <th scope="col">Capacidad</th>
-              <th scope="col">Por qué no está</th>
-              <th scope="col">Dónde iría</th>
-            </tr>
-          </thead>
-          <tbody id="pending-rows">
-            {NOT_IMPLEMENTED.map(entry => (
-              <tr key={entry.capability}>
-                <td>{entry.capability}</td>
-                <td>{entry.reason}</td>
-                <td>{entry.location}</td>
+      <article className="panel pending-panel">
+        <PanelHeading
+          eyebrow="ALCANCE DE ESTA ENTREGA"
+          title="Aún no implementado"
+          titleId="pending-title"
+          badge={
+            <span id="pending-badge">
+              <UnimplementedBadge />
+            </span>
+          }
+        />
+        <StatusCopy id="pending-status">
+          Estas capacidades del mockup retirado no tienen respaldo en el backend actual. Declararlas es parte de la
+          entrega: no se simulan y ningún control de esta página las ofrece.
+        </StatusCopy>
+        <div className="table-wrap">
+          <table>
+            <caption className="sr-only">
+              Capacidades sin respaldo en el backend, con su motivo y su ubicación prevista
+            </caption>
+            <thead>
+              <tr>
+                <th scope="col">Capacidad</th>
+                <th scope="col">Por qué no está</th>
+                <th scope="col">Dónde iría</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+            </thead>
+            <tbody id="pending-rows">
+              {NOT_IMPLEMENTED.map(entry => (
+                <tr key={entry.capability}>
+                  <td>{entry.capability}</td>
+                  <td>{entry.reason}</td>
+                  <td>{entry.location}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </article>
     </section>
   );
 }

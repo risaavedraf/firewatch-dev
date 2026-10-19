@@ -69,6 +69,7 @@ Use the demo script or an API client to obtain a token from Keycloak's `/realms/
 | `GET /v1/jobs/{id}` | admin | `queued` or `published`, with batch ID when published |
 | `GET /v1/risk/latest?zone_id=valparaiso-demo` | viewer/admin | Latest batch, GeoJSON point, emission/validity dates and freshness |
 | `GET /v1/risk/history?zone_id=valparaiso-demo` | viewer/admin | Last 100 batches |
+| `GET /v1/risk/batches` | viewer/admin | The newest published batch of every zone, one element per zone ordered by `zone_id`, without the batch `geometry`; a zone with no published batch is absent and nothing published is `{"batches":[]}` with `200`, never `404` |
 | `GET /v1/models` | viewer/admin | Registered classifier versions and the single `active` row |
 | `POST /v1/models/{version}/activate` | admin | Activates a registered version; publications resolved after the call run it, in-flight ones keep their snapshot |
 | `POST /v1/risk/cycle/run` | admin | Runs the ingestion cycle immediately and reports completion |

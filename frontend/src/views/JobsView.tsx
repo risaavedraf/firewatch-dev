@@ -386,77 +386,79 @@ export function JobsView() {
 
   return (
     <section className="view" id="jobs" data-view="jobs" aria-labelledby="jobs-title">
-      <div className="panel-heading">
-        <div>
-          <p className="eyebrow">LOTE DE DEMOSTRACIÓN</p>
-          <h2 id="jobs-title">Procesamiento asíncrono</h2>
-        </div>
-        <span className="admin-tag">ACCIÓN ADMINISTRATIVA</span>
-      </div>
-      <div className="job-layout">
-        <div>
-          <div className="scenario-field">
-            <label htmlFor="scenario-select">Escenario sintético</label>
-            <select
-              id="scenario-select"
-              aria-label="Escenario sintético a solicitar"
-              value={scenarioId}
-              disabled={selectorDisabled}
-              onChange={event => setScenarioId(event.target.value)}
-            >
-              <option value="">Sin escenario (fixture analítico heredado)</option>
-              {(catalogue ?? []).map(scenario => (
-                <option key={scenario.id} value={scenario.id}>
-                  {scenarioLabel(scenario)}
-                </option>
-              ))}
-            </select>
-            <p className="panel-note" id="scenario-note">
-              {scenarioNote}
-            </p>
+      <article className="panel jobs-panel">
+        <div className="panel-heading">
+          <div>
+            <p className="eyebrow">LOTE DE DEMOSTRACIÓN</p>
+            <h2 id="jobs-title">Procesamiento asíncrono</h2>
           </div>
-          <p className="panel-note">
-            Solicita el procesamiento de la zona seleccionada. Esta operación requiere permisos de administrador y crea
-            únicamente un trabajo sintético.
-          </p>
-          <button id="create-job" className="primary-button" type="button" disabled={createDisabled} onClick={requestBatch}>
-            Solicitar lote de la zona
-          </button>
+          <span className="admin-tag">ACCIÓN ADMINISTRATIVA</span>
         </div>
-        <div className="job-result">
-          <p className="eyebrow">ESTADO DEL TRABAJO</p>
-          <StatusCopy id="job-status">{status}</StatusCopy>
-          <dl className="data-list compact">
-            <div>
-              <dt>Estado</dt>
-              <dd id="job-state">{job ? job.state : 'Sin solicitud'}</dd>
+        <div className="job-layout">
+          <div>
+            <div className="scenario-field">
+              <label htmlFor="scenario-select">Escenario sintético</label>
+              <select
+                id="scenario-select"
+                aria-label="Escenario sintético a solicitar"
+                value={scenarioId}
+                disabled={selectorDisabled}
+                onChange={event => setScenarioId(event.target.value)}
+              >
+                <option value="">Sin escenario (fixture analítico heredado)</option>
+                {(catalogue ?? []).map(scenario => (
+                  <option key={scenario.id} value={scenario.id}>
+                    {scenarioLabel(scenario)}
+                  </option>
+                ))}
+              </select>
+              <p className="panel-note" id="scenario-note">
+                {scenarioNote}
+              </p>
             </div>
-            <div>
-              <dt>ID del trabajo</dt>
-              <dd id="job-id">{job ? job.id : '—'}</dd>
-            </div>
-            <div>
-              <dt>Solicitado</dt>
-              <dd id="job-requested">{job ? job.requested : '—'}</dd>
-            </div>
-          </dl>
-          <button
-            id="refresh-job"
-            className="secondary-button"
-            type="button"
-            disabled={!(job !== null && job.known)}
-            onClick={() => {
-              void loadJob();
-            }}
-          >
-            Actualizar estado
-          </button>
+            <p className="panel-note">
+              Solicita el procesamiento de la zona seleccionada. Esta operación requiere permisos de administrador y crea
+              únicamente un trabajo sintético.
+            </p>
+            <button id="create-job" className="primary-button" type="button" disabled={createDisabled} onClick={requestBatch}>
+              Solicitar lote de la zona
+            </button>
+          </div>
+          <div className="job-result">
+            <p className="eyebrow">ESTADO DEL TRABAJO</p>
+            <StatusCopy id="job-status">{status}</StatusCopy>
+            <dl className="data-list compact">
+              <div>
+                <dt>Estado</dt>
+                <dd id="job-state">{job ? job.state : 'Sin solicitud'}</dd>
+              </div>
+              <div>
+                <dt>ID del trabajo</dt>
+                <dd id="job-id">{job ? job.id : '—'}</dd>
+              </div>
+              <div>
+                <dt>Solicitado</dt>
+                <dd id="job-requested">{job ? job.requested : '—'}</dd>
+              </div>
+            </dl>
+            <button
+              id="refresh-job"
+              className="secondary-button"
+              type="button"
+              disabled={!(job !== null && job.known)}
+              onClick={() => {
+                void loadJob();
+              }}
+            >
+              Actualizar estado
+            </button>
+          </div>
         </div>
-      </div>
-      <UnimplementedNote>
-        Publicar lote, el avance manual del estado y la reevaluación: no existen como endpoint; el servidor decide y
-        publica por su cuenta, y esta página solo solicita el trabajo y lee el resultado.
-      </UnimplementedNote>
+        <UnimplementedNote>
+          Publicar lote, el avance manual del estado y la reevaluación: no existen como endpoint; el servidor decide y
+          publica por su cuenta, y esta página solo solicita el trabajo y lee el resultado.
+        </UnimplementedNote>
+      </article>
     </section>
   );
 }

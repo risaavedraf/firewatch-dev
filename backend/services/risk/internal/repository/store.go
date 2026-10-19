@@ -48,7 +48,10 @@ type Batch struct {
 	Demo         bool      `json:"demo"`
 	// Geometry is current catalogue territory, not an observed location or a
 	// frozen historical boundary. Only valparaiso-demo uses an illustrative point.
-	Geometry   json.RawMessage `json:"geometry"`
+	// The aggregate read (LatestPerZone) deliberately leaves it empty, and an
+	// empty value is omitted from the response instead of being sent as null: that
+	// answer carries no geometry at all, because the zones route already serves it.
+	Geometry   json.RawMessage `json:"geometry,omitempty"`
 	DataStatus string          `json:"data_status"`
 	RiskLevel  string          `json:"risk_level"`
 	Factors    json.RawMessage `json:"factors"`
@@ -426,45 +429,102 @@ func (s Store) List(ctx context.Context, zone string, limit int) ([]Batch, error
 		if err := rows.Scan(&b.ID, &b.JobID, &b.ZoneID, &b.RequestedAt, &b.PublishedAt, &b.ValidUntil, &b.ModelVersion, &b.Demo, &b.RiskLevel, &factors, &b.Rationale, &policy, &scenario, &b.EvaluatedAt, &geometry); err != nil {
 			return nil, err
 		}
-		// Only the optional synthetic evaluation instant is canonicalised. pgx may
-		// decode a timestamptz in the connection's location, and the read-back must
-		// expose the same instant in UTC; requested_at and published_at keep their
-		// stored representation untouched.
-		if b.EvaluatedAt != nil {
-			utc := b.EvaluatedAt.UTC()
-			b.EvaluatedAt = &utc
-		}
-		b.Factors = json.RawMessage(factors)
-		if scenario != nil {
-			b.ScenarioID = *scenario
+		if err := b.readAssessment(factors, policy, scenario); err != nil {
+			return nil, err
 		}
 		if geometry == nil {
 			return nil, fmt.Errorf("zone %s has no catalogue geometry", b.ZoneID)
 		}
 		b.Geometry = json.RawMessage(*geometry)
-		// A stored reference that cannot be read is a defect, not something to
-		// swallow: the row claims a policy it can no longer reproduce. Only the
-		// SQL NULL literal means "no reference was recorded".
-		if policy != "null" {
-			var ref classify.PolicyRef
-			if err := json.Unmarshal([]byte(policy), &ref); err != nil {
-				return nil, fmt.Errorf("unmarshal policy ref: %w", err)
-			}
-			b.Policy = &ref
+		batches = append(batches, b)
+	}
+	return batches, rows.Err()
+}
+
+// LatestPerZone reads the newest published batch of every zone in one query.
+//
+// It exists so a map of the whole territory can be painted on load without one
+// request per zone. DISTINCT ON (b.zone_id) keeps exactly one row per zone; the
+// ORDER BY decides which one - newest requested_at first, with the batch id as a
+// deterministic tie-break - and then orders the answer by zone_id so the response
+// is stable across calls. Because the ORDER BY leads with zone_id, a zone with no
+// published batch simply produces no row, so it is absent from the answer instead
+// of being served an invented level.
+//
+// The catalogue geometry is deliberately NOT read here: the aggregate response
+// carries no geometry at all. The zones route already serves every commune
+// polygon, and repeating them in this answer would be payload no caller needs.
+// For the same reason a zone whose catalogue geometry is missing cannot make this
+// read fail, which is the opposite of List - the join stays because a batch is
+// only meaningful for a catalogue zone, but nothing of the zone row is selected.
+//
+// An empty result is a valid answer, not an error.
+func (s Store) LatestPerZone(ctx context.Context) ([]Batch, error) {
+	rows, err := s.DB.Query(ctx, `SELECT DISTINCT ON (b.zone_id) b.id::text,b.job_id::text,b.zone_id,b.requested_at,b.published_at,b.valid_until,b.model_version,b.demo,b.risk_level,coalesce(b.factors, '[]'::jsonb),coalesce(b.rationale, ''),coalesce(b.policy_ref, 'null'::jsonb),b.scenario_id,b.evaluated_at FROM batches b JOIN zones z ON z.code=b.zone_id ORDER BY b.zone_id,b.requested_at DESC,b.id DESC`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	batches := make([]Batch, 0)
+	for rows.Next() {
+		var b Batch
+		var factors, policy string
+		var scenario *string
+		if err := rows.Scan(&b.ID, &b.JobID, &b.ZoneID, &b.RequestedAt, &b.PublishedAt, &b.ValidUntil, &b.ModelVersion, &b.Demo, &b.RiskLevel, &factors, &b.Rationale, &policy, &scenario, &b.EvaluatedAt); err != nil {
+			return nil, err
 		}
-		b.DataStatus = "current"
-		if !time.Now().Before(b.ValidUntil) {
-			b.DataStatus = "stale"
-		}
-		// Notice is derived from the persisted assessment rather than stored: a
-		// stored notice could drift from the level it explains.
-		switch {
-		case b.Demo:
-			b.Notice = "Synthetic demonstration input; no real observations were used."
-		case b.RiskLevel == string(classify.LevelDesconocido):
-			b.Notice = "Insufficient data: the risk level could not be determined."
+		if err := b.readAssessment(factors, policy, scenario); err != nil {
+			return nil, err
 		}
 		batches = append(batches, b)
 	}
 	return batches, rows.Err()
+}
+
+// readAssessment completes a batch from the column values both read paths share:
+// the optional evaluation instant is canonicalised to UTC, the JSON columns are
+// kept verbatim, the recorded policy reference is decoded, and the derived
+// data_status and notice are computed from the persisted assessment instead of
+// being read from storage, so they cannot drift from the level they describe.
+//
+// It is shared rather than copied because a second copy of these rules is a
+// second definition of what a batch means: the per-zone read and the aggregate
+// read must serve the same element shape or the map would validate the two
+// differently.
+func (b *Batch) readAssessment(factors, policy string, scenario *string) error {
+	// Only the optional synthetic evaluation instant is canonicalised. pgx may
+	// decode a timestamptz in the connection's location, and the read-back must
+	// expose the same instant in UTC; requested_at and published_at keep their
+	// stored representation untouched.
+	if b.EvaluatedAt != nil {
+		utc := b.EvaluatedAt.UTC()
+		b.EvaluatedAt = &utc
+	}
+	b.Factors = json.RawMessage(factors)
+	if scenario != nil {
+		b.ScenarioID = *scenario
+	}
+	// A stored reference that cannot be read is a defect, not something to
+	// swallow: the row claims a policy it can no longer reproduce. Only the
+	// SQL NULL literal means "no reference was recorded".
+	if policy != "null" {
+		var ref classify.PolicyRef
+		if err := json.Unmarshal([]byte(policy), &ref); err != nil {
+			return fmt.Errorf("unmarshal policy ref: %w", err)
+		}
+		b.Policy = &ref
+	}
+	b.DataStatus = "current"
+	if !time.Now().Before(b.ValidUntil) {
+		b.DataStatus = "stale"
+	}
+	// Notice is derived from the persisted assessment rather than stored: a
+	// stored notice could drift from the level it explains.
+	switch {
+	case b.Demo:
+		b.Notice = "Synthetic demonstration input; no real observations were used."
+	case b.RiskLevel == string(classify.LevelDesconocido):
+		b.Notice = "Insufficient data: the risk level could not be determined."
+	}
+	return nil
 }

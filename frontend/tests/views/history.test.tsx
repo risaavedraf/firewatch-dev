@@ -254,6 +254,46 @@ test('logout clears the rows and returns the panel to the connect state', async 
   expect(count()).toBe('—');
 });
 
+// S3 — the stylesheet hides the rows table and the filter bar of a history
+// panel that carries no `has-rows` (`.history-panel:not(.has-rows) .table-wrap,
+// .history-panel:not(.has-rows) .filter-bar { display: none }`), so the class is
+// the view's to state and it must be right in both directions: a missing class
+// hides the controls that clear a filter, and a stale one keeps an empty table
+// on screen.
+test('the history panel carries has-rows exactly when the read returned rows', async () => {
+  const { fetchStub } = await connect();
+  selectZone(ZONE);
+  render(<HistoryView />);
+  await flush();
+
+  const panel = (): Element | null => document.querySelector('#history article.panel.history-panel');
+  expect(panel()).not.toBeNull();
+  // No rows have been read yet: the class is absent.
+  expect(panel()).not.toHaveClass('has-rows');
+
+  fetchStub.answer(HISTORY_URL, [batch('lote-uno')]);
+  await waitFor(() => expect(count()).toBe('1'));
+  expect(panel()).toHaveClass('has-rows');
+
+  // The class reports what the API returned, not what survived the filter: a
+  // search that narrows the table to zero rows must not hide the filter bar.
+  fireEvent.change(screen.getByLabelText('Buscar en el historial de la zona'), { target: { value: 'no-existe' } });
+  expect(tbody().children).toHaveLength(0);
+  expect(panel()).toHaveClass('has-rows');
+
+  // A second zone whose read answers with no rows reads the same way, and the
+  // logout that clears the rows drops the class with them.
+  selectZone('05103');
+  await waitFor(() => expect(state()).toHaveTextContent('Consultando historial…'));
+  fetchStub.answer(`${gatewayOrigin}/v1/risk/history?zone_id=05103`, []);
+  await waitFor(() => expect(state()).toHaveTextContent('La API devolvió un historial vacío.'));
+  expect(panel()).not.toHaveClass('has-rows');
+
+  resetSession();
+  await waitFor(() => expect(state()).toHaveTextContent('Conecta un token autorizado para consultar el historial.'));
+  expect(panel()).not.toHaveClass('has-rows');
+});
+
 test('history returned for another zone is discarded with a terminal state', async () => {
   const { fetchStub } = await connect();
   selectZone(ZONE);

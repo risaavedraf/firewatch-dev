@@ -47,6 +47,15 @@ export type GeoGeometry =
   | { type: 'MultiPolygon'; coordinates: number[][][][] }
   | { type: 'Point'; coordinates: number[] };
 
+// `/v1/risk/batches` serves the aggregate inside an envelope rather than as the
+// bare array `/v1/risk/history` serves: one element per zone that has a published
+// batch, and no zone with none. Each element carries the members of the per-zone
+// read EXCEPT the batch geometry, because the map takes geometry from
+// `/v1/risk/zones` and the contract deliberately does not repeat every polygon.
+export interface BatchCollection {
+  batches: RiskBatch[];
+}
+
 export interface ZoneProperties {
   code: string;
   name: string;
