@@ -88,10 +88,17 @@ groups:
   - name: firewatch-availability
     rules:
       - alert: FireWatchTargetDown
-        expr: up{job=~"jobs|risk|gateway"} == 0
+        # Every application target Prometheus scrapes is covered here, including
+        # prevention: it publishes its own /metrics on its contract port, so a
+        # prevention that stops answering is a target that goes down, not a
+        # target that was never watched.
+        expr: up{job=~"jobs|risk|gateway|prevention"} == 0
         for: 2m
         labels:
           severity: critical
         annotations:
           summary: "Scrape target {{ $labels.job }} is down"
-          action: "Check the pod and its readiness. For jobs/risk, /health/ready routes on the bounded database ping alone."
+          action: >-
+            Check the pod and its readiness. For jobs/risk/prevention,
+            /health/ready routes on the bounded database ping alone; the
+            gateway's answers a static 204.
