@@ -10,7 +10,7 @@
 
 Rutas relativas a la raíz del repositorio. «¿Dato?» y «¿Modelo?» marcan los frentes que dependen de los dos pendientes permitidos.
 
-**Base de planificación histórica (2026-10-16).** Las descripciones de «qué especifica» resumen cada documento fuente en su fecha; no son el estado actual. El estado vigente está en §10 y §11: la entrega de presentación quedó en `f509666` (PR #31) y el baseline actual es `0725a1b` (PRs #33–#35).
+**Base de planificación histórica (2026-10-16).** Las descripciones de «qué especifica» resumen cada documento fuente en su fecha; no son el estado actual. El estado vigente está en §10 y §11: la entrega de presentación quedó en `f509666` (PR #31) y el baseline actual es `ef686c0` (PRs #33–#41).
 
 | # | Frente pendiente | Documentación real (redirección) | Qué especifica | ¿Dato? | ¿Modelo? |
 |--:|---|---|---|:--:|:--:|
@@ -286,7 +286,7 @@ La entrega de esta semana tiene su propio plan, con specs, tareas y reparto por 
 | 2 | `feat/frontend-completo` | T12–T15 | `frontend` |
 | cierre | `feat/presentacion-cliente` | T16–T19 | integración y verificación end-to-end |
 
-**Estado al 2026-10-18:** la entrega quedó en `main` con `f509666` (PR #31, issue #30) en su momento; la ola de monitoreo siguió en los PRs #33–#35 y el baseline actual es `0725a1b`. S2 y S1 se cerraron con la corrida en frío (L22) y el monitoreo S7 con T25–T27 (L27). Sigue fuera de alcance lo que exige modelo entrenado, fuente real, carga/RTO, firma/registry/rollout, gobierno, DIFROL y monitoreo en manifiestos de Kubernetes.
+**Estado al 2026-10-18:** la entrega quedó en `main` con `f509666` (PR #31, issue #30) en su momento; la ola de monitoreo siguió en los PRs #33–#35 y el baseline actual es `ef686c0`. S2 y S1 se cerraron con la corrida en frío (L22) y el monitoreo S7 con T25–T27 (L27). Sigue fuera de alcance lo que exige modelo entrenado, fuente real, carga/RTO, firma/registry/rollout, gobierno, DIFROL y monitoreo en manifiestos de Kubernetes.
 
 Sigue en pie lo que este documento ya declara fuera: frentes 6, 7, 8, 12, 13, 14, 15 y las unidades BH que exigen entorno.
 

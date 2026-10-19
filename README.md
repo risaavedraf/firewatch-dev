@@ -37,4 +37,4 @@ Open it as `localhost`, never as `127.0.0.1`. The identity provider and the gate
 
 The current backend uses demonstration data only. It does not estimate real wildfire risk.
 
-**Delivery status (2026-10-18).** The presentation delivery landed on `main` at `f509666` (PR #31, issue #30): ingestion cycle, model v2, preventive actions and browser login. The local monitoring wave followed in PRs #33–#35, so the current `main` baseline is `0725a1b` (the PR #35 merge). The trained model and real data sources are still pending. See the [task index](odd/tasks/README.md) for the delivered/missing state and its limits.
+**Delivery status (2026-10-18).** The presentation delivery landed on `main` at `f509666` (PR #31, issue #30): ingestion cycle, model v2, preventive actions and browser login. The local monitoring wave followed in PRs #33–#35, so the current `main` baseline is `ef686c0` (the PR #41 merge). The trained model and real data sources are still pending. See the [task index](odd/tasks/README.md) for the delivered/missing state and its limits.
