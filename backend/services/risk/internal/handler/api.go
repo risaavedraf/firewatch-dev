@@ -6,6 +6,7 @@ import (
 	"errors"
 	"math"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -16,6 +17,10 @@ import (
 
 type Repository interface {
 	List(context.Context, string, int) ([]repository.Batch, error)
+	// LatestPerZone reads the newest published batch of every zone in one query,
+	// ordered by zone_id. A zone with no published batch is absent from the
+	// answer, and an empty result is a valid answer rather than an error.
+	LatestPerZone(ctx context.Context) ([]repository.Batch, error)
 	// ZoneExists reports whether the zone catalogue holds code. Membership is a
 	// property of the data, not of a literal compiled into this service, so the
 	// read path asks the catalogue instead of comparing to a hardcoded zone.
@@ -91,6 +96,7 @@ func NewWithCycle(store Repository, verifier Verifier, check StatusCheck, runner
 	}
 	mux.HandleFunc("GET /v1/risk/latest", get(true))
 	mux.HandleFunc("GET /v1/risk/history", get(false))
+	mux.HandleFunc("GET /v1/risk/batches", latestPerZone(store))
 	mux.HandleFunc("GET /v1/risk/zones", listZones(store))
 	mux.HandleFunc("GET /v1/risk/synthetic-scenarios", listSyntheticScenarios())
 	// Model registry: the list is a read route; activation is admin-only through
@@ -104,6 +110,34 @@ func NewWithCycle(store Repository, verifier Verifier, check StatusCheck, runner
 	}
 	mux.HandleFunc("GET /v1/risk/sources", sourcesWithCycle(provider, runner))
 	return Authorize(verifier, mux)
+}
+
+// batchCollection is the aggregate read's body. Batches is never nil, so an empty
+// publication state serialises as {"batches":[]} rather than JSON null: nothing
+// published is an answer, not a failure, and it is never a 404.
+type batchCollection struct {
+	Batches []repository.Batch `json:"batches"`
+}
+
+// latestPerZone serves the newest published batch of every zone that has one, so
+// the map can be coloured on load from one request instead of one read per zone.
+// It takes no parameter, it never writes, and it is admitted by the same bearer
+// gate as the per-zone reads: 401 and 403 are answered before storage is touched.
+//
+// The query already answers in zone_id order; sorting here keeps the documented
+// order a property of this route rather than of whichever storage answered it.
+func latestPerZone(store Repository) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		batches, err := store.LatestPerZone(r.Context())
+		if err != nil {
+			fail(w, 503, "storage_unavailable")
+			return
+		}
+		ordered := make([]repository.Batch, len(batches))
+		copy(ordered, batches)
+		sort.SliceStable(ordered, func(i, j int) bool { return ordered[i].ZoneID < ordered[j].ZoneID })
+		respond(w, 200, batchCollection{Batches: ordered})
+	}
 }
 
 // zoneFeatureCollection is an RFC 7946 FeatureCollection of catalogue zones.

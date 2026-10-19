@@ -35,6 +35,11 @@ type fakeStore struct {
 	modelsErr   error
 	activateErr error
 	activated   []string
+	// latestPerZone answers the aggregate read, and the counters prove the route
+	// asks storage once for every zone instead of once per zone.
+	latestPerZone []repository.Batch
+	aggregateErr  error
+	aggregateCall int
 }
 
 func (s *fakeStore) ListModels(context.Context) ([]repository.ModelVersion, error) {
@@ -65,6 +70,16 @@ func (s *fakeStore) ActivateModel(_ context.Context, version string) (repository
 func (s *fakeStore) List(context.Context, string, int) ([]repository.Batch, error) {
 	s.calls++
 	return s.batches, nil
+}
+
+// LatestPerZone stands in for the single aggregate query so the route's ordering,
+// empty state and failure vocabulary are exercised without a database.
+func (s *fakeStore) LatestPerZone(context.Context) ([]repository.Batch, error) {
+	s.aggregateCall++
+	if s.aggregateErr != nil {
+		return nil, s.aggregateErr
+	}
+	return s.latestPerZone, nil
 }
 
 // ZoneExists stands in for the zones catalogue so the handler path that decides
@@ -246,6 +261,135 @@ func authorizedServerWith(t *testing.T, role string, store Repository, runner Cy
 		t.Fatal(err)
 	}
 	return NewWithCycle(store, verifier, nil, runner, providers...), token
+}
+
+// TestBatchesEndpoint pins the aggregate read the map needs on load: every zone's
+// newest published batch in one answer, ordered by zone_id, an empty array when
+// nothing is published, and the same storage_unavailable vocabulary its
+// neighbouring read routes use.
+func TestBatchesEndpoint(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		// stored is what storage answered, deliberately in the order a set of
+		// zones was published in rather than in response order.
+		stored      []repository.Batch
+		storageErr  error
+		wantStatus  int
+		wantZones   []string
+		wantNoZone  string
+		wantEmpty   bool
+		wantNoGeo   bool
+		wantStore   int
+		wantPerZone int
+	}{
+		{
+			name: "every zone ordered by zone_id",
+			stored: []repository.Batch{
+				{ID: "b-1", ZoneID: "valparaiso-demo", RiskLevel: "bajo", DataStatus: "current", Demo: true},
+				{ID: "b-2", ZoneID: "05201", RiskLevel: "medio", DataStatus: "stale", Demo: false},
+				{ID: "b-3", ZoneID: "05101", RiskLevel: "alto", DataStatus: "current", Demo: false},
+			},
+			wantStatus: 200,
+			wantZones:  []string{"05101", "05201", "valparaiso-demo"},
+			wantNoGeo:  true,
+			wantStore:  1,
+		},
+		{
+			name:       "nothing published is an empty array",
+			stored:     nil,
+			wantStatus: 200,
+			wantEmpty:  true,
+			wantStore:  1,
+		},
+		{
+			name:        "storage failure is storage_unavailable",
+			storageErr:  errors.New("storage unavailable"),
+			wantStatus:  503,
+			wantStore:   1,
+			wantPerZone: 0,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			store := &fakeStore{latestPerZone: tc.stored, aggregateErr: tc.storageErr}
+			handler, token := authorizedServer(t, "viewer", store)
+			w := getZones(t, handler, token, "/v1/risk/batches")
+			if w.Code != tc.wantStatus {
+				t.Fatalf("got %d want %d: %s", w.Code, tc.wantStatus, w.Body.String())
+			}
+			// One aggregate query, never one query per zone: a fan-out of 38 reads is
+			// what this route exists to avoid.
+			if store.aggregateCall != tc.wantStore || store.calls != tc.wantPerZone {
+				t.Fatalf("aggregate calls=%d per-zone calls=%d, want %d and %d", store.aggregateCall, store.calls, tc.wantStore, tc.wantPerZone)
+			}
+			if tc.wantStatus != 200 {
+				if !strings.Contains(w.Body.String(), `"code":"storage_unavailable"`) {
+					t.Fatalf("unexpected failure body: %s", w.Body.String())
+				}
+				return
+			}
+			var body struct {
+				Batches []repository.Batch `json:"batches"`
+			}
+			if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+				t.Fatalf("response is not JSON: %v: %s", err, w.Body.String())
+			}
+			if tc.wantEmpty {
+				// An empty publication state is an answer, not a 404 and not null.
+				if !strings.Contains(w.Body.String(), `"batches":[]`) {
+					t.Fatalf("empty aggregate is not an empty array: %s", w.Body.String())
+				}
+				return
+			}
+			got := make([]string, 0, len(body.Batches))
+			for _, batch := range body.Batches {
+				got = append(got, batch.ZoneID)
+			}
+			if len(got) != len(tc.wantZones) {
+				t.Fatalf("zones %v want %v: %s", got, tc.wantZones, w.Body.String())
+			}
+			for index, zone := range tc.wantZones {
+				if got[index] != zone {
+					t.Fatalf("zones %v want %v", got, tc.wantZones)
+				}
+			}
+			if tc.wantNoGeo && strings.Contains(w.Body.String(), `"geometry"`) {
+				t.Fatalf("the aggregate repeats the catalogue geometry: %s", w.Body.String())
+			}
+		})
+	}
+}
+
+// TestBatchesEndpointKeepsTheReadVerificationPath pins that the aggregate route
+// is a read like every other one: the shared bearer gate answers 401 and 403
+// before storage is touched, and an admitted read never mutates.
+func TestBatchesEndpointKeepsTheReadVerificationPath(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		role  string
+		want  int
+		store *fakeStore
+	}{
+		{"anonymous is refused", "", 401, &fakeStore{}},
+		{"a role outside the read gate is forbidden", "operator", 403, &fakeStore{latestPerZone: []repository.Batch{{ID: "b-1", ZoneID: "05101"}}}},
+		{"viewer reads", "viewer", 200, &fakeStore{latestPerZone: []repository.Batch{{ID: "b-1", ZoneID: "05101"}}}},
+		{"admin reads", "admin", 200, &fakeStore{latestPerZone: []repository.Batch{{ID: "b-1", ZoneID: "05101"}}}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			handler, token := authorizedServer(t, tc.role, tc.store)
+			r := httptest.NewRequest("GET", "/v1/risk/batches", nil)
+			if tc.role != "" {
+				r.Header.Set("Authorization", "Bearer "+token)
+			}
+			w := httptest.NewRecorder()
+			handler.ServeHTTP(w, r)
+			if w.Code != tc.want {
+				t.Fatalf("got %d want %d: %s", w.Code, tc.want, w.Body.String())
+			}
+			if tc.want != 200 && tc.store.aggregateCall != 0 {
+				t.Fatal("a refused request reached storage")
+			}
+		})
+	}
 }
 
 func getZones(t *testing.T, handler http.Handler, token, target string) *httptest.ResponseRecorder {

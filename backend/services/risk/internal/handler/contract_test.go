@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"firewatch.local/risk/internal/classify"
 	"firewatch.local/risk/internal/cycle"
 	"firewatch.local/risk/internal/repository"
 	"firewatch.local/risk/internal/source"
@@ -146,6 +147,52 @@ func TestRiskContractNewSurfacesMatchTheContract(t *testing.T) {
 		t.Fatalf("cycle run got %d: %s", w.Code, w.Body.String())
 	}
 	assertResponseMatchesContract(t, contract, "/v1/risk/cycle/run", http.MethodPost, w)
+}
+
+// S4: the map reads every zone's last published batch from one aggregate route,
+// so the document must declare it and both its populated and its empty body must
+// validate. The aggregate element deliberately omits the catalogue geometry, so
+// this pins that the documented schema can express a body without it.
+func TestRiskContractAggregateBatchesMatchTheContract(t *testing.T) {
+	contract := loadContract(t)
+	published := time.Date(2026, 10, 19, 12, 0, 0, 0, time.UTC)
+	policy := classify.PolicyRef{PolicyID: "academic-rule-v1", Parameters: map[string]string{"alto": "0.7"}, ParamsHash: "59259c4c0c470e5a0d512fe09f6c748c38fd29f9bc5d760d49754555c66e699b"}
+	batch := repository.Batch{
+		ID:           uuid.NewString(),
+		JobID:        uuid.NewString(),
+		ZoneID:       "05101",
+		RequestedAt:  published,
+		PublishedAt:  published.Add(time.Minute),
+		ValidUntil:   published.Add(15 * time.Minute),
+		ModelVersion: "academic-rule-v1",
+		Demo:         false,
+		DataStatus:   "current",
+		RiskLevel:    "alto",
+		Factors:      json.RawMessage(`[{"name":"temperatura","known":true,"value":32,"contribution":0.85,"note":"lectura de alta temperatura"}]`),
+		Rationale:    "Puntaje ponderado alto.",
+		Notice:       "",
+		Policy:       &policy,
+	}
+
+	for _, tc := range []struct {
+		name  string
+		store *fakeStore
+		want  int
+	}{
+		{"populated aggregate", &fakeStore{latestPerZone: []repository.Batch{batch}}, http.StatusOK},
+		{"nothing published", &fakeStore{}, http.StatusOK},
+		{"storage unavailable", &fakeStore{aggregateErr: errors.New("storage unavailable")}, http.StatusServiceUnavailable},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			base, token := authorizedServer(t, "viewer", tc.store)
+			app := withCorrelationID(base)
+			w := request(t, app, token, "/v1/risk/batches")
+			if w.Code != tc.want {
+				t.Fatalf("got %d want %d: %s", w.Code, tc.want, w.Body.String())
+			}
+			assertResponseMatchesContract(t, contract, "/v1/risk/batches", http.MethodGet, w)
+		})
+	}
 }
 
 // S3: "dependencia no disponible" — a storage failure is answered 503 with the

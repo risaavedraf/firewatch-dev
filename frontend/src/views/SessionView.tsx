@@ -38,7 +38,7 @@ export type PermissionRow = {
 //   backend/services/risk/internal/handler/security.go:58-59 accepts a token
 //     whose realm_access.roles contains "viewer" OR "admin"; line 64 answers any
 //     other role with 403 (an unverifiable token is 401 instead).
-//   backend/services/risk/internal/handler/api.go:106 wraps the whole risk mux.
+//   backend/services/risk/internal/handler/api.go:112 wraps the whole risk mux.
 //   backend/services/jobs/internal/handler/security.go:43-44 accepts ONLY "admin";
 //     line 49 answers a verified viewer with 403.
 //   backend/services/jobs/internal/handler/api.go:236 wraps the whole jobs mux:
@@ -69,9 +69,9 @@ export const PERMISSION_MATRIX: readonly PermissionRow[] = [
     viewer: 'Sí',
     admin: 'Sí',
     guards: [
-      'backend/services/risk/internal/handler/api.go:53',
+      'backend/services/risk/internal/handler/api.go:58',
       'backend/services/risk/internal/handler/security.go:59',
-      'backend/services/risk/internal/handler/api.go:106',
+      'backend/services/risk/internal/handler/api.go:112',
     ],
   },
   {
@@ -79,7 +79,17 @@ export const PERMISSION_MATRIX: readonly PermissionRow[] = [
     viewer: 'Sí',
     admin: 'Sí',
     guards: [
-      'backend/services/risk/internal/handler/api.go:92',
+      'backend/services/risk/internal/handler/api.go:97',
+      'backend/services/risk/internal/handler/security.go:59',
+    ],
+  },
+  {
+    capability:
+      'Consultar el último lote de todas las zonas · GET /v1/risk/batches (la lectura agregada que pinta el mapa al cargar)',
+    viewer: 'Sí',
+    admin: 'Sí',
+    guards: [
+      'backend/services/risk/internal/handler/api.go:99',
       'backend/services/risk/internal/handler/security.go:59',
     ],
   },
@@ -88,7 +98,7 @@ export const PERMISSION_MATRIX: readonly PermissionRow[] = [
     viewer: 'Sí',
     admin: 'Sí',
     guards: [
-      'backend/services/risk/internal/handler/api.go:93',
+      'backend/services/risk/internal/handler/api.go:98',
       'backend/services/risk/internal/handler/security.go:59',
     ],
   },
@@ -97,7 +107,7 @@ export const PERMISSION_MATRIX: readonly PermissionRow[] = [
     viewer: 'Sí',
     admin: 'Sí',
     guards: [
-      'backend/services/risk/internal/handler/api.go:94',
+      'backend/services/risk/internal/handler/api.go:100',
       'backend/services/risk/internal/handler/security.go:59',
     ],
   },
@@ -106,7 +116,7 @@ export const PERMISSION_MATRIX: readonly PermissionRow[] = [
     viewer: 'Sí',
     admin: 'Sí',
     guards: [
-      'backend/services/risk/internal/handler/api.go:95',
+      'backend/services/risk/internal/handler/api.go:101',
       'backend/services/risk/internal/handler/security.go:59',
     ],
   },
@@ -115,7 +125,7 @@ export const PERMISSION_MATRIX: readonly PermissionRow[] = [
     viewer: 'Sí',
     admin: 'Sí',
     guards: [
-      'backend/services/risk/internal/handler/api.go:105',
+      'backend/services/risk/internal/handler/api.go:111',
       'backend/services/risk/internal/handler/security.go:59',
     ],
   },

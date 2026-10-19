@@ -290,6 +290,31 @@ paths:
         '429': {$ref: '#/components/responses/RateLimited'}
         '502': {$ref: '#/components/responses/UpstreamUnavailable'}
         '503': {$ref: '#/components/responses/StorageUnavailable'}
+  /v1/risk/batches:
+    get:
+      operationId: listLatestBatchesPerZone
+      description: >-
+        Viewer/admin. The newest published batch of every zone, in one answer,
+        ordered by zone_id ascending, so a client can present the whole
+        territory without one request per zone. A zone with no published batch
+        is absent from the array; nothing published at all is an empty array
+        with 200, never 404. Each element carries the members the per-zone read
+        serves except geometry: the catalogue geometry is served by
+        /v1/risk/zones and is deliberately not repeated here. This is a read
+        route; it takes no parameter and stores nothing.
+      responses:
+        '200':
+          description: >-
+            Newest published batch per zone, ordered by zone_id. The array is
+            empty when no zone has a published batch.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/BatchCollection'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '429': {$ref: '#/components/responses/RateLimited'}
+        '502': {$ref: '#/components/responses/UpstreamUnavailable'}
+        '503': {$ref: '#/components/responses/StorageUnavailable'}
   /v1/risk/synthetic-scenarios:
     get:
       operationId: listSyntheticScenarios
@@ -1610,8 +1635,12 @@ components:
             Server-assigned synthetic evaluation instant, fixed once per
             scenario job; null or absent for legacy jobs. Not an observation
             cutoff, actual source freshness, or forecast horizon.
-    Batch:
+    BatchCore:
       type: object
+      description: >-
+        Every member a batch response serves, whichever read produced it. It
+        exists so the per-zone reads and the aggregate read cannot drift: the
+        aggregate element is this core without the geometry.
       required:
         - id
         - job_id
@@ -1621,7 +1650,6 @@ components:
         - valid_until
         - model_version
         - demo
-        - geometry
         - data_status
         - risk_level
         - notice
@@ -1665,14 +1693,6 @@ components:
           description: >-
             Derived from the provenance of the provider that contributed the
             data; true means synthetic or demonstrative input.
-        geometry:
-          allOf:
-            - $ref: '#/components/schemas/Geometry'
-          description: >-
-            Current catalogue territory for the commune, not an observed
-            location or a frozen historical boundary. The legacy
-            valparaiso-demo point is illustrative only. Missing commune
-            geometry is an error, never a fallback to the demo point.
         data_status: {type: string, enum: [current, stale]}
         risk_level: {type: string, enum: [bajo, medio, alto, desconocido]}
         notice: {type: string}
@@ -1708,6 +1728,45 @@ components:
               type: object
               additionalProperties: {type: string}
             params_hash: {type: string}
+    Batch:
+      description: >-
+        A published batch as the per-zone reads serve it: the shared core plus
+        the catalogue geometry.
+      allOf:
+        - $ref: '#/components/schemas/BatchCore'
+        - type: object
+          required: [geometry]
+          properties:
+            geometry:
+              allOf:
+                - $ref: '#/components/schemas/Geometry'
+              description: >-
+                Current catalogue territory for the commune, not an observed
+                location or a frozen historical boundary. The legacy
+                valparaiso-demo point is illustrative only. Missing commune
+                geometry is an error, never a fallback to the demo point.
+    ZoneBatch:
+      description: >-
+        A published batch as the aggregate read serves it: the shared core
+        without the batch geometry. The map takes geometry from the zones
+        route, so repeating every commune polygon in this answer would be
+        payload no caller needs. No other member is dropped, so the same
+        fail-closed check validates an aggregate element.
+      allOf:
+        - $ref: '#/components/schemas/BatchCore'
+    BatchCollection:
+      type: object
+      description: >-
+        The aggregate read's body. The array is empty when no zone has a
+        published batch; it is never null and the empty case is never a 404.
+      required: [batches]
+      properties:
+        batches:
+          type: array
+          description: >-
+            One element per zone with at least one published batch, ordered by
+            zone_id ascending. A zone with no published batch is absent.
+          items: {$ref: '#/components/schemas/ZoneBatch'}
     Geometry:
       type: object
       description: >-
