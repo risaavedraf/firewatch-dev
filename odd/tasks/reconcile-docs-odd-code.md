@@ -1,7 +1,7 @@
 # Reconciliación de `docs/` y `odd/` contra el código
 
 **Objetivo:** cerrar la contradicción entre los tres conjuntos —`docs/` (contratos y evidencia), `odd/` (bitácora y estado) y el código— que una auditoría de lectura dejó sobre la mesa, sin reescribir la historia registrada y sin dejar afirmaciones que el código contradiga.
-**Rama:** `docs/reconcile-docs-odd-code` · **Estrategia de entrega:** una rama, commits por unidad de trabajo · **Verificador:** `python -B odd/tools/check_md_links.py`, `python -B backend/docs/code-explanation/verify_structure.py`, `npm test` (frontend), parseo YAML + `kubectl kustomize` (manifiestos).
+**Rama:** `docs/reconcile-docs-odd-code` (desde `main` en `ef686c0`) · **Estrategia de entrega:** una rama, siete commits por unidad de trabajo · **Verificador:** `python -B odd/tools/check_md_links.py`, `python -B backend/docs/code-explanation/verify_structure.py`, `npm test` (frontend), parseo YAML + `kubectl kustomize` + `docker compose config` (manifiestos).
 
 ## Specs
 
@@ -23,10 +23,10 @@
 
 | ID | Spec | Ruta | Descripción | Estado | Commit |
 |---|---|---|---|---|---|
-| T1 | S3, S8 | `backend/deploy/**` | HPA de `prevention` y `FireWatchTargetDown` con `prevention` | hecha | `deploy/hpa-alert-prevention` |
-| T2 | S4, S5, S8 | `backend/docs/**` | Conteos de servicios/módulos, frase del selector y anclas desviadas | hecha | `docs/fix-drifted-citations` |
-| T3 | S1 | `frontend/docs/react-migration-plan.md` | Cierre como documento superado | hecha | `docs/close-react-migration-plan` |
-| T4 | S2, S6, S9 | `odd/**`, `README.md` | Anotación de L14/L15, índice y baseline | hecha | `docs/refresh-odd-index-and-baseline` |
+| T1 | S3, S8 | `backend/deploy/**` | HPA de `prevention` y `FireWatchTargetDown` con `prevention` | hecha | `2c6ea95` |
+| T2 | S4, S5, S8 | `backend/docs/**` | Conteos de servicios/módulos, frase del selector y anclas desviadas | hecha | `64d7f6a`, `07073dc` |
+| T3 | S1 | `frontend/docs/react-migration-plan.md` | Cierre como documento superado | hecha | `6c16734` |
+| T4 | S2, S6, S9 | `odd/**`, `README.md` | Anotación de L14/L15, índice y baseline | hecha | `284a928`, `4a1c372` |
 
 ## Log
 
