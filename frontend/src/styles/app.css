@@ -45,7 +45,14 @@ code { font-size: 11px; }
 .brand strong { color: #f6fff9; font-size: 18px; font-weight: 650; letter-spacing: -.6px; }
 .brand small { margin-top: 2px; color: #a8c2b7; font-size: 8px; font-weight: 500; letter-spacing: 1.5px; text-transform: uppercase; }
 .nav-label, .nav-group { margin: 21px 13px 9px; color: #90aaa0; font-size: 9px; font-weight: 800; letter-spacing: 1.4px; text-transform: uppercase; }
-.sidebar nav { display: grid; gap: 3px; }
+/* The column's chrome — the brand, the workspace, the Gateway card and the
+   session card that holds the only sign-out control — has to stay on screen at
+   the laptop heights this page is used at. The navigation is the one region that
+   can yield the space: it takes whatever height the chrome leaves and scrolls
+   inside itself, so a short viewport shortens the visible list instead of
+   pushing the sign-out control past the fold. The column keeps its own overflow
+   as the fallback for anything the navigation cannot absorb. */
+.sidebar nav { display: grid; gap: 3px; flex: 1 1 auto; min-height: 0; align-content: start; overflow-y: auto; }
 .nav-link { display: flex; align-items: center; gap: 12px; padding: 11px 13px; border: 1px solid transparent; border-radius: 7px; color: #c3d6cf; font-size: 12px; transition: background .15s; }
 .nav-link .icon { opacity: .8; }
 .nav-link:hover { background: #254d47; color: #effdf9; }

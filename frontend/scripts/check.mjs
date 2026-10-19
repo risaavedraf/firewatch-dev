@@ -159,13 +159,16 @@ for (const [name, source] of sources) {
   assert.doesNotMatch(source, /@import\s+(?:url\()?["']?(?:https?:|\/\/)/i, `no remote stylesheet import: ${name}`);
 }
 
-// ── 7. The sidebar must keep the scroll that makes it usable ─────────────────
+// ── 7. The sidebar must keep the scroll that keeps its controls visible ─────
 // This is the one layout property a static gate can honestly protect. The column
-// is a fixed-height sticky box, so without a vertical scroll declaration
-// everything past the fold — including the session card with the only sign-out
-// control — is unreachable rather than merely off screen. Geometry still needs a
-// browser: this rule cannot tell whether the controls fit, only that the
-// declaration which lets the reader reach them is still there.
+// is a fixed-height sticky box whose content is taller than the box at common
+// laptop heights. The column keeping its own overflow is necessary but not
+// sufficient: scrolling the whole column is exactly what pushed the session card
+// with the only sign-out control below the fold. The navigation is the region
+// that yields the space, so it must carry the internal scroll while the fixed
+// bottom block stays inside the visible box. Geometry still needs a browser: this
+// rule cannot tell whether the controls fit, only that the declarations which
+// keep the reader able to reach them are still there.
 const styles = sources.get(path.join('src', 'styles', 'app.css'));
 assert.ok(styles, 'src/styles/app.css must exist');
 const sidebarRule = styles.match(/^\s*\.sidebar\s*\{[^}]*\}/m);
@@ -173,6 +176,11 @@ assert.ok(sidebarRule, 'the .sidebar rule must exist');
 assert.match(sidebarRule[0], /position:\s*sticky/, 'the sticky column this rule protects is gone');
 assert.match(sidebarRule[0], /overflow-y:\s*(?:auto|scroll)/, 'the sidebar must declare its own vertical scroll');
 assert.match(sidebarRule[0], /height:\s*calc\(/, 'the sidebar must keep its bounded height, which is what the scroll is for');
+const sidebarNavRule = styles.match(/^\s*\.sidebar nav\s*\{[^}]*\}/m);
+assert.ok(sidebarNavRule, 'the .sidebar nav rule must exist');
+assert.match(sidebarNavRule[0], /overflow-y:\s*(?:auto|scroll)/, 'the navigation must declare its own vertical scroll');
+assert.match(sidebarNavRule[0], /flex:\s*1 1 auto/, 'the navigation must be the region that yields height');
+assert.match(sidebarNavRule[0], /min-height:\s*0/, 'the navigation must be allowed to shrink below its content');
 // The mobile breakpoint must keep dropping the fixed height: that is what makes
 // the scroll declaration harmless at small widths.
 assert.match(
@@ -182,5 +190,5 @@ assert.match(
 );
 
 console.log(
-  `PASS: ${sources.size} shipped source files checked. The honesty statement is present (${required.length} required statements), no fixture, frozen clock, invented identity or alias ships, all eleven consumed routes and both external origins are present, no client-side role guard exists, tokens are never persisted, no secret is bundled, the sidebar still declares its own vertical scroll, and no external asset or inline handler is served.`,
+  `PASS: ${sources.size} shipped source files checked. The honesty statement is present (${required.length} required statements), no fixture, frozen clock, invented identity or alias ships, all eleven consumed routes and both external origins are present, no client-side role guard exists, tokens are never persisted, no secret is bundled, the sidebar keeps its bounded height with the navigation carrying the internal scroll, and no external asset or inline handler is served.`,
 );

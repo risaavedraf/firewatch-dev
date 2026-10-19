@@ -1,3 +1,6 @@
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+
 import { act, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
@@ -15,6 +18,7 @@ import { createCryptoStub, createFetchStub, flush, jwt } from '../core/harness';
 // asserted here because each is visible on every view.
 const READY_URL = `${gatewayOrigin}/health/ready`;
 const TOKEN_URL = `${issuer}/protocol/openid-connect/token`;
+const appCss = readFileSync(resolve(process.cwd(), 'src', 'styles', 'app.css'), 'utf8');
 
 let fetchStub: ReturnType<typeof createFetchStub>;
 
@@ -158,4 +162,53 @@ test('the update bar states the real review state and never contradicts the avai
   const down = document.getElementById('update-checked')?.textContent ?? '';
   expect(down).toMatch(/no respondió/i);
   expect(down).not.toMatch(/disponible/i);
+});
+
+// Finding 1 — the sign-out control must be visible without scrolling the column.
+// jsdom has no layout engine, so the geometry (the control inside the sidebar's
+// visible box at 1024x768, 1280x720, 1366x768 and 1440x900) is measured in a
+// browser and recorded under tmp/e2e-sidebar/. What a suite can pin is the
+// structure that makes it true: the session card with the only sign-out control
+// belongs to the sidebar's fixed bottom block, never to the navigation that
+// absorbs the height the column is missing. Before this fix the whole column
+// scrolled, which pushed `#logout` roughly 190-235 px below the fold at those
+// four viewports.
+test('the sign-out control sits outside the sidebar region that scrolls (finding: clipped #logout)', async () => {
+  renderShell();
+  await waitFor(() => expect(fetchStub.callsFor(READY_URL)).toHaveLength(1));
+  fetchStub.answer(READY_URL, null, 204);
+  await waitFor(() => expect(document.querySelector('.health-dot.ready')).not.toBeNull());
+
+  const sidebar = document.querySelector('aside.sidebar');
+  const nav = sidebar?.querySelector('nav');
+  const bottom = sidebar?.querySelector('.sidebar-bottom');
+  const logout = document.getElementById('logout');
+  expect(sidebar).not.toBeNull();
+  expect(nav).not.toBeNull();
+  expect(bottom).not.toBeNull();
+  expect(logout).not.toBeNull();
+
+  // The control is part of the bottom block...
+  expect(bottom?.contains(logout as Node)).toBe(true);
+  // ...which comes after the navigation and is not inside it: the scrolling
+  // region cannot clip a control it does not contain.
+  expect(nav?.contains(logout as Node)).toBe(false);
+  const children = Array.from(sidebar?.children ?? []);
+  expect(children.indexOf(bottom as Element)).toBeGreaterThan(children.indexOf(nav as Element));
+
+  // The declared counterpart: the navigation is what yields the space, and it
+  // keeps its rows at their natural height when there is room to spare.
+  const navRule = appCss.match(/^\.sidebar nav \{[^}]*\}/m);
+  expect(navRule).not.toBeNull();
+  expect(navRule?.[0]).toMatch(/overflow-y:\s*(?:auto|scroll)/);
+  expect(navRule?.[0]).toMatch(/flex:\s*1 1 auto/);
+  expect(navRule?.[0]).toMatch(/min-height:\s*0/);
+  expect(navRule?.[0]).toMatch(/align-content:\s*start/);
+
+  // The fixed height this scroll depends on stays bounded on the desktop
+  // breakpoints and stays automatic where the layout is static.
+  const sidebarRule = appCss.match(/^\.sidebar \{[^}]*\}/m);
+  expect(sidebarRule?.[0]).toMatch(/height:\s*calc\(/);
+  const smallViewport = appCss.match(/@media\s*\(max-width:\s*720px\)[\s\S]*?\.sidebar\s*\{[^}]*\}/);
+  expect(smallViewport?.[0]).toMatch(/height:\s*auto/);
 });
