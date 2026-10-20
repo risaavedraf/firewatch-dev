@@ -1,6 +1,6 @@
 {
   "algorithm": "SHA-256",
-  "basis": "raw file bytes; no Git revision available",
+  "basis": "file bytes with CRLF normalised to LF; no Git revision available",
   "files": {
     "services/gateway/cmd/server/main.go": {
       "sha256": "3b9801fbce4043bb3f101d73ab5f4dfdf97c8001173e7e69dca92a0b0ead132b",
@@ -23,8 +23,8 @@
       "lines": 1204
     },
     "services/gateway/Dockerfile": {
-      "sha256": "f1c82088551f7ac76e29c496822c39c5afc39080e1e6df688ec3a23dbeac4e18",
-      "bytes": 651,
+      "sha256": "8414ee5788816fa3ac0e5e7e9141ac21ddebc873a23d2e64ebc2315941d11a29",
+      "bytes": 635,
       "lines": 16
     },
     "services/gateway/internal/handler/quota_description_test.go": {
@@ -73,8 +73,8 @@
       "lines": 42
     },
     "services/gateway/go.mod": {
-      "sha256": "3bf7d2da0f335007eb14ac3c611881ec48da78b32d3e6759ec47b4feb96a1e05",
-      "bytes": 820,
+      "sha256": "b627a840b851f4f1f1f6d6c5418e2e089eab5bebf316ed07abe481a70b788d04",
+      "bytes": 797,
       "lines": 23
     },
     "services/jobs/cmd/server/main.go": {
@@ -218,13 +218,13 @@
       "lines": 23
     },
     "services/jobs/migrations/004_job_failure_state.sql": {
-      "sha256": "a474c152a3946ef1b9f96993bcf116d943504b7b1c36b599cd2b1f3770e734eb",
-      "bytes": 1182,
+      "sha256": "11a9b0b52cc5d8798cc97e2e2d1fb8e4d14e3d940b75a346c76767974eedf281",
+      "bytes": 1163,
       "lines": 19
     },
     "services/jobs/Dockerfile": {
-      "sha256": "6e6225155ecc710919746c900264eb9bfe7a1b523a1f1a9e6a0c306be69e46dd",
-      "bytes": 680,
+      "sha256": "eeef998c445c1efdd708974ae82aae655450ccf228c89f360c7f39138c040f5b",
+      "bytes": 663,
       "lines": 17
     },
     "services/jobs/migrations/synthetic_scenarios_test.go": {
@@ -233,8 +233,8 @@
       "lines": 55
     },
     "services/jobs/go.mod": {
-      "sha256": "9993b88ed13a72eda8d1a66146d9cacc687f084c0d93bc9d3113d2b54cd91015",
-      "bytes": 652,
+      "sha256": "987a81c88df3b2bed256c97697519336d9957a45e1e220093b6c8610b011fde4",
+      "bytes": 629,
       "lines": 23
     },
     "services/risk/cmd/server/main.go": {
@@ -243,8 +243,8 @@
       "lines": 442
     },
     "services/prevention/Dockerfile": {
-      "sha256": "0e9f2fc77740c42c3580bf1bba283284fe4564ca77ccdee722b6c7234fc6654c",
-      "bytes": 788,
+      "sha256": "11f6698e1d0ffb0a8a4eab9eeaf4ca0800eb9001b97ce6976947b5b4f2c36ebe",
+      "bytes": 770,
       "lines": 18
     },
     "services/prevention/cmd/server/main.go": {
@@ -258,8 +258,8 @@
       "lines": 126
     },
     "services/prevention/go.mod": {
-      "sha256": "a2bf80f02b88a1e8fa75cbdf7996ad8737d19ea1d41facd0bdad10ad3777069d",
-      "bytes": 522,
+      "sha256": "0fbe120d745da05aaa900063ac34636db72f786e7fe205670f96e6266a2576bd",
+      "bytes": 503,
       "lines": 19
     },
     "services/prevention/internal/evidence/evidence.go": {
@@ -343,13 +343,13 @@
       "lines": 167
     },
     "services/prevention/migrations/009_preventive_actions.sql": {
-      "sha256": "16730afc1f3926a6b5fd160db5aed0f55b5f6c1e2dff8738aad8c8e0932bd4fd",
-      "bytes": 4257,
+      "sha256": "6782188afd7d12c269640eda7f659eb732bb74446699be5a4e68f6d2450724dc",
+      "bytes": 4179,
       "lines": 78
     },
     "services/prevention/migrations/011_preventive_evidence.sql": {
-      "sha256": "debeebb3febb75beb89e2ad854063c74b00acf63744cd94e76585d1a7dbaa41b",
-      "bytes": 5562,
+      "sha256": "58189204e27d96f9f3fddd09249ea7ec8dec9388899757e9d0c6246723a6c560",
+      "bytes": 5467,
       "lines": 95
     },
     "services/prevention/migrations/embed.go": {
@@ -708,13 +708,13 @@
       "lines": 25
     },
     "services/risk/migrations/008_firewatch_rule_v2.sql": {
-      "sha256": "2f3adc41a4f588257842f9f0191a154462292f0fbd9806c75bb2c955a399885f",
-      "bytes": 1244,
+      "sha256": "2f9fb34cf2ba7b02414462e0b64defd24d06d3cb09da42272497a917d7c5a335",
+      "bytes": 1225,
       "lines": 19
     },
     "services/risk/migrations/010_models_activation_grant.sql": {
-      "sha256": "86fcbdde13e1735013e3a33d5c7ba6d7a60e6f52c457be4f4c7e6faa8959558b",
-      "bytes": 1116,
+      "sha256": "177a6bfe8a4283c8d1668ca8c50b8fb02c07177195220e5c8ee51cc0fb5e20d1",
+      "bytes": 1097,
       "lines": 19
     },
     "services/risk/migrations/migrations_test.go": {
@@ -723,8 +723,8 @@
       "lines": 276
     },
     "services/risk/Dockerfile": {
-      "sha256": "5c66bfffe86ce99978172fb1fa8e942202670e7f68d2295347662ddf4eac940c",
-      "bytes": 1156,
+      "sha256": "1c00e225f582f6446561ed6d295c5c1f03df32896f3427166b309a4b492e856c",
+      "bytes": 1132,
       "lines": 24
     },
     "services/risk/migrations/models_activation_grant_test.go": {
@@ -733,8 +733,8 @@
       "lines": 81
     },
     "services/risk/go.mod": {
-      "sha256": "58f8365673b6cf5261c33cbe174fb1ad5fbd7a2b39958928aa3d85e789c35628",
-      "bytes": 1263,
+      "sha256": "250188a30bdedcc1ed43a3732817713e52dade31075d3cbde21de21bd5036318",
+      "bytes": 1229,
       "lines": 34
     },
     "contracts/gen/events/v1/events.go": {
@@ -758,8 +758,8 @@
       "lines": 1
     },
     "contracts/gen/go.mod": {
-      "sha256": "495f8e185a360dd66cdd51d77eb0d086dd0948d07fcc9b4dc28fe0e089f32e61",
-      "bytes": 47,
+      "sha256": "0ba1c0557ca8a7285ce7fede75da8e5c4029076b21e5cd067ce924ae7e01de95",
+      "bytes": 44,
       "lines": 3
     },
     "contracts/gen/geo/valparaiso-comunas.provenance.json": {
@@ -783,8 +783,8 @@
       "lines": 26
     },
     "contracts/openapi/firewatch-v1.yaml": {
-      "sha256": "44bf28c68d40465cc1bcdaac8fef65670ec60e6672b85c31f5131799f2e53ae1",
-      "bytes": 92285,
+      "sha256": "166a75308b7e8a609b08b6644c2c1215b2a1f26409aea13b804aae5d1c663cfb",
+      "bytes": 90160,
       "lines": 2125
     },
     "deploy/local/postgres-init.sh": {
@@ -798,8 +798,8 @@
       "lines": 105
     },
     "deploy/load/k6-risk.js": {
-      "sha256": "a31a79c0707f14020a6c203ac52ad2e2dcbdf9ceeaef22d4feb4d42087a6a6cb",
-      "bytes": 2137,
+      "sha256": "ba0349b2f957d077b8c18e2a757ed44981e21c1538bdae2f7f8a2d0127ca24e7",
+      "bytes": 2083,
       "lines": 54
     },
     "deploy/local/alerts.yml": {
@@ -833,8 +833,8 @@
       "lines": 1
     },
     "deploy/k8s/base/config.yaml": {
-      "sha256": "76cd4a050627c2663a6d136a5b65c18bb964e7d003e3b165b7256178e4de67f0",
-      "bytes": 567,
+      "sha256": "85238125184c3887126364fdeda7024ea78804ebca5ddd702c08f4778286654b",
+      "bytes": 548,
       "lines": 19
     },
     "deploy/k8s/base/ingress.yaml": {
@@ -843,8 +843,8 @@
       "lines": 22
     },
     "deploy/k8s/base/kustomization.yaml": {
-      "sha256": "a145a8006515ee1ed4550b2c829be18bdeb598005161b308dc70eeb1f331f1d9",
-      "bytes": 215,
+      "sha256": "8c693ef5988b4e52983652c9e9c10291e49497d6f25fd61b5080b163ea2e1ed4",
+      "bytes": 205,
       "lines": 10
     },
     "deploy/k8s/base/namespace.yaml": {
@@ -853,18 +853,18 @@
       "lines": 6
     },
     "deploy/k8s/base/network.yaml": {
-      "sha256": "d2e454f875ea8cc3222146aa15e44f6df25f46d5fb078a1380675494e5bf1333",
-      "bytes": 3197,
+      "sha256": "e19dffe3473dadf32b57fed7577c4cd2adde465460e9f0fc1e9d9e344a984148",
+      "bytes": 3098,
       "lines": 99
     },
     "deploy/k8s/base/workloads.yaml": {
-      "sha256": "89def019cebb719af57292094870e4291cc3b970a1797e314997949dbc73f6e0",
-      "bytes": 6718,
+      "sha256": "044097c6db0c9d9e3d531dd47e013fdec6f6ce1c1dacb0ac9dd084be0fc2e475",
+      "bytes": 6484,
       "lines": 234
     },
     "deploy/k8s/README.md": {
-      "sha256": "0a33a07f35d31ef27b15969b8f952dacfd863f5c1dde0df700b46cddeffbea7e",
-      "bytes": 4831,
+      "sha256": "39bc90c0ec03c3aae28f04d85068af9ec2176c5a541d2bff8cee2992f92e2050",
+      "bytes": 4801,
       "lines": 30
     },
     "scripts/fetch_comunas.py": {
@@ -873,13 +873,13 @@
       "lines": 391
     },
     "scripts/init_env.py": {
-      "sha256": "efd226c43a4a55eaed171e12f2f27b2c59950e9500fe946929e38fbdc8afada5",
-      "bytes": 818,
+      "sha256": "4cdc5ab10b58122a7dc6a3cc584415e3d390e6d5af821c24f315f14e4c24a82d",
+      "bytes": 800,
       "lines": 18
     },
     "scripts/smoke.py": {
-      "sha256": "7d10c93522866ba9f8d5175491b325b8aba3e58ab0e348c9941731dd958e577a",
-      "bytes": 8285,
+      "sha256": "456b8a09e304390e5fdd7e3eb63d2d3a2b0022c0a71e9a2c960214da7f6dd0b3",
+      "bytes": 8117,
       "lines": 168
     },
     "scripts/test_fetch_comunas.py": {
@@ -888,8 +888,8 @@
       "lines": 228
     },
     "scripts/test_ci_migration.py": {
-      "sha256": "9f52f62aeeefd0bd80bb859417c964c611a1ed6aa6dba967399fafc675701f50",
-      "bytes": 31317,
+      "sha256": "73cb274dd1b178f4c9178834bcf775fbecf61ee4eef3dc30a35a5b1aa7e9dfa7",
+      "bytes": 30574,
       "lines": 743
     },
     ".dockerignore": {
@@ -903,13 +903,13 @@
       "lines": 412
     },
     "scripts/verify_ci_migration.py": {
-      "sha256": "3b00d1c2cb5edf35b54e183df8111acbb7b1fff69542b23228e52d65f7bc12ff",
-      "bytes": 22616,
+      "sha256": "7d14192bfe7a04d4158d3d9ae91f5b3da43ec09fbfc4b3673857010c9e83298d",
+      "bytes": 22102,
       "lines": 514
     },
     "scripts/verify_synthetic.py": {
-      "sha256": "de6c3baff6f4e153dcea20ec54bc48b1243fee7b901d4df0633d5af4a01ba7be",
-      "bytes": 48487,
+      "sha256": "f950d5818c338e7914282ea9c36956dd4bdcab16521681e57e46bc18da22f573",
+      "bytes": 47444,
       "lines": 1043
     },
     "docker-compose.yml": {
@@ -918,8 +918,8 @@
       "lines": 273
     },
     "go.work": {
-      "sha256": "6b9a04f8d6c7f4650241e988aeb36695a842047584a429bf7c2d1df391c7c5c3",
-      "bytes": 122,
+      "sha256": "1aad8c7e34df8baadca91c885c1e5566adafe8a4e08d8404970c3514d9a78c20",
+      "bytes": 113,
       "lines": 9
     },
     "Makefile": {
@@ -928,73 +928,73 @@
       "lines": 20
     },
     "README.md": {
-      "sha256": "5caac58466239cc888c7a0e033b679bbf88a3388b31b57f95c37dad0460c6b1b",
-      "bytes": 16298,
+      "sha256": "27967699ae019ad791a2eac3d3808d016acabd858b7a82ad9d8d99186d654301",
+      "bytes": 16172,
       "lines": 126
     },
     "docs/architecture.md": {
-      "sha256": "3c05d9157500c8fbc01d82258c2e391b836870f6086e8aa4b649263b06191a1a",
-      "bytes": 9662,
+      "sha256": "7af9f52c99e91f32bc20880b15c12e12f11f553f42606a2c6adf03513a343ad8",
+      "bytes": 9599,
       "lines": 63
     },
     "docs/keycloak-realm-setup.md": {
-      "sha256": "2a95ad299699ebe2ed45609d701ee1e0a6da9a349897e65477fa21bf5ac48e9b",
-      "bytes": 4706,
+      "sha256": "6426b760c75694f2c2401bd8e2bf4c8f6be5e33f6b93a1b9443573e735f5a134",
+      "bytes": 4648,
       "lines": 58
     },
     "docs/checklist-evidence-u1.md": {
-      "sha256": "036dadc5f6734b075625be284e931a0d63f498d0c3521e80ad91fbf2c79585bf",
-      "bytes": 26099,
+      "sha256": "be6c838551da07193163f9c1e9c0cce5c6e2cd8cbe599799d5a10d2236a4f387",
+      "bytes": 25926,
       "lines": 173
     },
     "docs/checklist-evidence-u2-u3.md": {
-      "sha256": "8bbf26564fac4707651810b8350ce6079df81612bcac45de8669df3371bcc6ba",
-      "bytes": 12994,
+      "sha256": "1bd4618fb60e2693c76c190a093e7e9156b8d412a68ad57aea1f85a508e48f87",
+      "bytes": 12884,
       "lines": 110
     },
     "docs/checklist-evidence-u4.md": {
-      "sha256": "4b961ac6146e2e1ee9427e26ff38d807f63b4a20150c15b24273370277531931",
-      "bytes": 18123,
+      "sha256": "2423beebec9e0b0d4bf11109c57eec0212abb50ab7c684ad785e883fed692331",
+      "bytes": 17970,
       "lines": 153
     },
     "docs/checklist-evidence-u5.md": {
-      "sha256": "c1df39b3524e8ac0fa08a7c34a66b3f7ad4e6b9e531c472c36f6bb78465e2fa0",
-      "bytes": 17858,
+      "sha256": "253b3f328d60d06e51f809a733f74a4d40d98e8d4254f4533780b5b937e8ea91",
+      "bytes": 17712,
       "lines": 146
     },
     "docs/ci-migration-readiness.md": {
-      "sha256": "d39782a38016c5d7ab817a52ccbf58950fec54f19cb689b81d4cc73725926b43",
-      "bytes": 8614,
+      "sha256": "22f5c8b7de9ebb1d2b14ed549e6c767a10959b3fbc0821e03aa03c6298f8f614",
+      "bytes": 8455,
       "lines": 159
     },
     "docs/verification.md": {
-      "sha256": "f26f8f9b9a8f505411e802a8e99cc615a8ae4401886be8970e799e441840df52",
-      "bytes": 8110,
+      "sha256": "3b59091b249fb0b557963397284fb8155315d4e4ba67e1c25e6a3cff285220cb",
+      "bytes": 8036,
       "lines": 74
     },
     "docs/model-activation.md": {
-      "sha256": "4e7cc40bd3009a7ecea5a2a5af46ca31d788332869c3a9bfe3487d7017c917d1",
-      "bytes": 8686,
+      "sha256": "2360e06b99f91b9547698f898c9129d0afdf6cb31a18722fed21d8f30e6423d1",
+      "bytes": 8526,
       "lines": 160
     },
     "docs/operations.md": {
-      "sha256": "f93a3568bd83973f557df55331b50efd3c28623fdb72467f2bfa9a6b37d1a917",
-      "bytes": 13014,
+      "sha256": "e3b80a8b03f7fcd49181abd714b99023e5eae0f8682ba967b76ecc31e5363e8e",
+      "bytes": 12799,
       "lines": 215
     },
     "docs/preventive-evidence.md": {
-      "sha256": "f199e5a35864925b14e25413ae6ef212240b78d24e9a2d0a1fd83cc37b8b9dd7",
-      "bytes": 8865,
+      "sha256": "28515f2bfb83e74cddec90a7f21110eaea3b425393a2db41fbf61ab16adea24f",
+      "bytes": 8707,
       "lines": 158
     },
     "docs/scheduler-publication.md": {
-      "sha256": "daa84ae7ea5c657175aa5db2aa2e75e17b1506e9cc633420c41fd2f1c980801f",
-      "bytes": 4413,
+      "sha256": "6ef2ef11e152b29b50de7d7a7bc5d09a618ea6ad5135c01ba29d6c518b70690e",
+      "bytes": 4328,
       "lines": 85
     },
     "docs/synthetic-scenarios.md": {
-      "sha256": "bfebbf6da330a704e9584f1d662aee4b9fc16bfecef9abd3524e5d1f832d71f5",
-      "bytes": 8467,
+      "sha256": "c705d4b07d55f29879a5ad4d0bdc2650fbb5a995100f93d8fd3bf7fa82767e4d",
+      "bytes": 8400,
       "lines": 67
     },
     "docs/synthetic-verification.md": {

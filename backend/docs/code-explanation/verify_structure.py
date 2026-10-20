@@ -24,7 +24,10 @@ def source_bytes(relative):
     path = (ROOT / relative).resolve()
     if not path.is_relative_to(ROOT) or forbidden(path):
         raise ValueError(f"Forbidden source: {relative}")
-    return path.read_bytes()
+    # Line endings belong to the checkout, not to the source: a CRLF working tree
+    # and an LF one hold the same file. Hash the normalised bytes so the manifest
+    # describes the repository instead of one machine.
+    return path.read_bytes().replace(b"\r\n", b"\n")
 
 
 def headings(text):
@@ -62,7 +65,10 @@ def main():
     actual = {p.relative_to(ROOT).as_posix() for p in ROOT.rglob("*") if p.is_file() and not p.is_relative_to(HERE) and not generated(p)}
     for name in sorted(actual - set(names)):
         errors.append(f"Uninventoried file: {name}")
-    for name in sorted(set(names) - actual):
+    # An excluded file is recorded by name only and never opened. Its absence is
+    # not a defect: .env is local, git-ignored and created by the bootstrap.
+    excluded_rows = {name for name, _, status in ledger if status == "Excluido"}
+    for name in sorted(set(names) - actual - excluded_rows):
         errors.append(f"Missing inventory file: {name}")
     snapshot = {}
     for name, interval, status in ledger:
@@ -76,7 +82,7 @@ def main():
             errors.append(f"Whole-file range mismatch: {name}: {interval}, actual 1-{total}")
         snapshot[name] = {"sha256": hashlib.sha256(data).hexdigest(), "bytes": len(data), "lines": total}
     if args.snapshot:
-        MANIFEST.write_text(json.dumps({"algorithm": "SHA-256", "basis": "raw file bytes; no Git revision available", "files": snapshot}, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+        MANIFEST.write_text(json.dumps({"algorithm": "SHA-256", "basis": "file bytes with CRLF normalised to LF; no Git revision available", "files": snapshot}, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
     elif not MANIFEST.exists():
         errors.append("Missing source manifest")
     else:
