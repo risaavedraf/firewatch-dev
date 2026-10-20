@@ -1,7 +1,7 @@
 # Frente 9 — Login real en navegador, móvil y accesibilidad
 
 - **Grupo de entrega:** G5 — Producto y cierre.
-- **Estado:** Pendiente — planificación. La página existe; el recorrido browser/Keycloak y la revisión móvil/accesibilidad siguen sin cierre.
+- **Estado:** Parcial — el recorrido browser/Keycloak y la revisión móvil/accesibilidad se midieron en L14/L23 (Chrome, 390 px, teclado y contraste calculado). **Falta:** certificación WCAG y prueba con lector de pantalla; los límites están en README §7.
 - **Riesgo (Task Size):** medio — ítem 6 si no hay prueba automatizada que capture regresiones de login; sin datos/seguridad nuevos más allá del flujo OIDC existente.
 - **Depende de:** realm Keycloak inicializado, cliente `firewatch-demo` configurado y entorno navegador/API disponible.
 - **Seam / superficie:** `firewatch-demo` (OIDC Authorization Code + PKCE S256), callback y URI post-logout; la API conserva autorización *server-side*.
@@ -41,3 +41,4 @@ Ruta por defecto: **inline**. El recorrido de navegador puede ejecutarse con el 
 ## Log
 
 - **L1 (2026-10-16)** — Creación del desglose por spec a partir de [`README.md`](README.md) §1 (frente 9). Documento de planificación; sin implementación.
+- **L2 (2026-10-20)** - Estado corregido a Parcial: recorrido browser/Keycloak y revisión móvil/accesibilidad medidos en L14/L23; faltan certificación WCAG y lector de pantalla (README §7).

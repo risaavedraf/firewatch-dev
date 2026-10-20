@@ -1,7 +1,9 @@
 # Frente 3 — Servicio `prevention` y ciclo de acciones preventivas
 
 - **Grupo de entrega:** G5 — Producto y cierre.
-- **Estado:** Pendiente — planificación. El backlog FWP03 está **propuesto**, no aprobado como alcance.
+- **Estado:** **Implementado (2026-10-18).** El servicio `prevention` quedó entregado y ejercitado en el recorrido HTTP/UI de la presentación (L13/L14): listar, crear, detalle, transición con nota e historial. **Falta:** separar la base de producción, que es una decisión de producción; el backlog FWP03 fue el origen y ya no está propuesto.
+
+> El cuerpo de este documento conserva la planificación del 2026-10-16. El estado vigente es esta línea y el `## Log`; las referencias al backlog «propuesto» describen su origen histórico.
 - **Riesgo (Task Size):** alto al implementar — ítem 3 (nuevo contrato/servicio que otros consumirán).
 - **Depende de:** FWP01–02 y del acuerdo de partes interesadas sobre vocabulario y ciclo.
 - **Seam / superficie:** límite futuro del servicio `prevention`; contrato/modelo de operación preventiva aún por validar; `backend/docs/architecture.md:34`.
@@ -43,3 +45,4 @@ Ruta por defecto: **inline**. T4 queda bloqueado hasta aprobación de alcance.
 ## Log
 
 - **L1 (2026-10-16)** — Creación del desglose por spec a partir de [`README.md`](README.md) §1 (frente 3). Documento de planificación; sin implementación.
+- **L2 (2026-10-20)** — Estado corregido a Implementado: servicio `prevention` entregado y ejercitado en L13/L14; el backlog FWP03 ya no está propuesto (README §1 y §7).
