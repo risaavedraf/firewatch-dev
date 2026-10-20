@@ -85,7 +85,7 @@ Las rutas siguientes son relativas a `backend/`. Los intervalos son inclusivos y
 | `services/jobs/cmd/server/migration_registration_test.go` | 1-100 | Parcial | Inventariado y con hash; no analizado en detalle por esta colección |
 | `services/jobs/internal/handler/security.go` | 1-62 | Explicado | [Jobs](02-jobs.md) |
 | `services/jobs/internal/handler/auth_negative_test.go` | 1-164 | Parcial | Inventariado y con hash; no analizado en detalle por esta colección |
-| `services/jobs/internal/handler/api_test.go` | 1-145 | Explicado | [Tests](08-tests-tools.md#jobs-fakes-preparación-y-catorce-casos) |
+| `services/jobs/internal/handler/api_test.go` | 1-145 | Explicado | [Tests](08-tests-tools.md#jobs-fakes-preparación-y-dieciséis-casos) |
 | `services/jobs/internal/messaging/broker.go` | 1-352 | Explicado | [Mensajería](04-messaging.md) |
 | `services/jobs/internal/handler/status.go` | 1-52 | Parcial | Tipos del estado operativo que sirve `/health/ready`; no analizados en detalle |
 | `services/jobs/internal/handler/synthetic_scenarios_test.go` | 1-154 | Parcial | Inventariado y con hash; no analizado en detalle por esta colección |
@@ -160,7 +160,7 @@ Las rutas siguientes son relativas a `backend/`. Los intervalos son inclusivos y
 | `services/risk/internal/handler/cycle_test.go` | 1-137 | Parcial | Inventariado y con hash; no analizado en detalle por esta colección |
 | `services/risk/internal/handler/models.go` | 1-56 | Parcial | Listado y activación de versiones de modelo; no analizado en detalle |
 | `services/risk/internal/handler/models_test.go` | 1-149 | Parcial | Inventariado y con hash; no analizado en detalle por esta colección |
-| `services/risk/internal/handler/api_test.go` | 1-279 | Explicado | [Tests](08-tests-tools.md#risk-seis-casos-no-matriz-criptográfica-completa) |
+| `services/risk/internal/handler/api_test.go` | 1-279 | Explicado | [Tests](08-tests-tools.md#risk-nueve-casos-no-matriz-criptográfica-completa) |
 | `services/risk/internal/messaging/broker.go` | 1-338 | Explicado | [Mensajería](04-messaging.md) |
 | `services/risk/internal/handler/sources.go` | 1-124 | Parcial | Estado e integridad de las fuentes de datos; no analizado en detalle |
 | `services/risk/internal/handler/sources_test.go` | 1-138 | Parcial | Inventariado y con hash; no analizado en detalle por esta colección |
