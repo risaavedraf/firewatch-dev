@@ -4,19 +4,33 @@ El backend implementa una **demostración sintética asíncrona**: un administra
 
 **Cierre documental:** los archivos seleccionados se explican estáticamente, mientras que el resto del árbol se clasifica como parcial, contextual o excluido. La verificación estructural reproducible con hashes cubre los archivos no excluidos y el verificador imprime, al ejecutarse, los conteos vigentes de cada estado y de los archivos con hash. Los límites de ejecución y dependencias siguen explícitos.
 
-> **Instantánea desactualizada — declarado el 2026-10-14.** El [verificador](verify_structure.py) termina en **exit 1** contra el árbol actual: hay rangos completos que ya no coinciden con el número de líneas del archivo, archivos fuente que no están en el inventario (por ejemplo `services/risk/internal/source/synthetic_scenarios.go` y `services/risk/migrations/007_synthetic_evaluation.sql`) y `source-snapshot.json` ya no reproduce los hashes del árbol. La tabla de inventario y las citas de las partes describen, por tanto, el árbol de su fecha de re-baseline, **no el actual**. **No se re-baseliniza en esta entrega:** exige autorización explícita y está declarado como deuda abierta en `odd/tasks/backend/firewatch-data-contract.md` y `odd/tasks/architecture/gateway-frontend-separation.md`. Regenerar el manifiesto con `--snapshot` sin releer las citas certificaría como vigentes rangos que no se volvieron a leer. Los conteos no se copian en prosa, por la razón que da la sección «Reconciliación»: los imprime el verificador.
+> **Instantánea desactualizada — declarado el 2026-10-14, resuelto el 2026-10-20.** Se conserva como registro del estado de esa fecha. El [verificador](verify_structure.py) terminaba entonces en **exit 1** contra el árbol actual: había rangos completos que ya no coincidían con el número de líneas del archivo, archivos fuente que no estaban en el inventario (por ejemplo `services/risk/internal/source/synthetic_scenarios.go` y `services/risk/migrations/007_synthetic_evaluation.sql`) y `source-snapshot.json` ya no reproducía los hashes del árbol. La tabla de inventario y las citas de las partes describían, por tanto, el árbol de su fecha de re-baseline, **no el actual**. **No se re-baselinizó en esa entrega:** exigía autorización explícita y quedó declarado como deuda abierta en `odd/tasks/backend/firewatch-data-contract.md` y `odd/tasks/architecture/gateway-frontend-separation.md`. Regenerar el manifiesto con `--snapshot` sin releer las citas certificaría como vigentes rangos que no se volvieron a leer. Los conteos no se copian en prosa, por la razón que da la sección «Reconciliación»: los imprime el verificador.
+>
+> **Resuelto el 2026-10-20.** La autorización llegó y la deuda se cerró con el método que esta misma nota exigía: cada documento se releyó contra el código y se reescribieron sus rangos uno por uno, en vez de regenerar el manifiesto sobre citas viejas. Ver [Re-derivación del 2026-10-20](#re-derivación-del-2026-10-20).
 >
 > Nota añadida por la entrega de preparación de publicación (`odd/tasks/publication/github-repo-prep.md`). No modifica los informes históricos ni sus observaciones fechadas. Las tres rutas se citan como texto y no como enlace porque `verify_structure.py` limita los enlaces de esta colección a `backend/`.
 >
 > **Deriva sustantiva — no solo rangos (2026-10-14).** Además de la deriva estructural (rangos, hashes, inventario), la revisión contrastó las afirmaciones con el código y encontró citas desactualizadas en el **contenido**. Ejemplos verificados, no exhaustivos:
-> - [Persistencia](06-database.md): describe un modelo de migración única (`Initial`, versión 1) en ambos servicios; el código embebe **3** migraciones en `jobs` y **7** en `risk`, con un runner multi-versión (`services/jobs/cmd/server/main.go:64-85`).
+> - [Persistencia](06-database.md): describe un modelo de migración única (`Initial`, versión 1) en ambos servicios; el código embebe **3** migraciones en `jobs` y **7** en `risk`, con un runner multi-versión (`services/jobs/cmd/server/main.go:64-85`). *Releído el 2026-10-20: hoy son **4** y **9**; el bullet se conserva como registro de la lectura del 2026-10-14.*
 > - [Configuración y despliegue](07-deployment.md): afirma que `/health/ready` responde `204` al tener éxito el ping; en `jobs`/`risk` el éxito es **`200`** y el fallo **`503`** (`live` es `204`; el `204` de readiness es del gateway).
 > - [Mensajería](04-messaging.md): lista una espera de `1,2,4,8,16` s «incluso tras quinto fallo»; el cronograma real es `{1,2,4,8}` s, cinco intentos y **sin** espera tras el quinto (`retryBackoff`, `broker.go:245-266`).
 > - [Jobs](02-jobs.md): la interfaz `Repository` añade `ZoneExists` y un `Create` variádico (`internal/handler/api.go:19-30`).
 > - [Risk](03-risk.md) y [Mensajería](04-messaging.md): el manejador del broker es `publisher.Publish`, no `store.Publish` (`risk/cmd/server/main.go:178`).
 > - [Gateway](01-gateway.md): falta la rama de preflight `OPTIONS` que responde `204` (`gateway.go:88-96`).
 >
-> Estas citas **no se corrigen aquí** sin re-baseline autorizado; se listan para que el lector no las tome por vigentes. Corregir solo los rangos sin releer el texto certificaría como válidas afirmaciones que siguen siendo falsas.
+> Estas citas **no se corrigieron en esa entrega** sin re-baseline autorizado; se listan para que el lector no las tome por vigentes. Corregir solo los rangos sin releer el texto habría certificado como válidas afirmaciones que seguían siendo falsas. La re-derivación del 2026-10-20 sí las releyó: cada una se reescribió contra el código o se declaró retirada.
+
+## Re-derivación del 2026-10-20
+
+La colección se releyó contra el código de `267a4bb`, documento por documento, y cada uno lleva bajo su título una línea con esa fecha y ese commit. Lo que cambió:
+
+- **Nueve documentos re-derivados** (`01-gateway`, `02-jobs`, `03-risk`, `04-messaging`, `05-contracts`, `06-database`, `07-deployment`, `08-tests-tools` y este índice). Cada rango de línea se comprobó leyendo el archivo citado; ninguno se obtuvo sumando o restando el desplazamiento del anterior.
+- **Afirmaciones falsas corregidas contra el código**, no solo sus anclas: las siete de la nota del 2026-10-14 (migraciones, readiness, reintentos, `Repository`, `publisher.Publish`, preflight `OPTIONS`, y el conteo de migraciones de esa misma nota), más las que aparecieron al releer: `/metrics` ya es público, `risk` sirve el registro de modelos y el disparo del ciclo, el consumidor de `jobs` persiste el fallo terminal, y hay cuatro servicios y cuatro `HorizontalPodAutoscaler`.
+- **Inventario completo:** entraron los **114** archivos del árbol que nadie había clasificado (51 tests, 31 de código, 7 migraciones, 25 otros). Cada uno tiene estado y razón; el inventario ya no deja archivos fuera.
+- **Enlaces dentro de `backend/`:** las tres rutas a `odd/` se citan como texto, porque el verificador limita los enlaces de esta colección a `backend/`.
+- **Manifiesto regenerado** con `--snapshot`, después de releer las citas y no antes.
+
+Lo que **no** cambió y no debe leerse como resuelto: nada de esto se ejecutó. No se corrió `go test`, ni un script, ni un contenedor, ni se aplicó un manifiesto a un clúster; los tests se leyeron, no se corrieron. Las dependencias externas (Keycloak, PostgreSQL/PostGIS, RabbitMQ, Prometheus, Grafana, Docker, Kubernetes) siguen siendo fronteras sin verificación. La colección explica el código leído; no acredita que funcione.
 
 ## Ruta de lectura
 
@@ -63,9 +77,9 @@ Las rutas siguientes son relativas a `backend/`. Los intervalos son inclusivos y
 | Archivo inventariado | Rango leído | Estado | Parte / motivo |
 | --- | --- | --- | --- |
 | `services/gateway/cmd/server/main.go` | 1-63 | Explicado | [Gateway](01-gateway.md) |
-| `services/gateway/internal/handler/gateway.go` | 1-121 | Explicado | [Gateway](01-gateway.md) |
+| `services/gateway/internal/handler/gateway.go` | 1-237 | Explicado | [Gateway](01-gateway.md) |
 | `services/gateway/internal/handler/contract_test.go` | 1-139 | Parcial | Inventariado y con hash; no analizado en detalle por esta colección |
-| `services/gateway/internal/handler/gateway_test.go` | 1-272 | Explicado | [Tests](08-tests-tools.md#gateway-todas-las-declaraciones-y-verificaciones) |
+| `services/gateway/internal/handler/gateway_test.go` | 1-1204 | Explicado | [Tests](08-tests-tools.md#gateway-todas-las-declaraciones-y-verificaciones) |
 | `services/gateway/Dockerfile` | 1-16 | Explicado | [Despliegue](07-deployment.md) |
 | `services/gateway/internal/handler/quota_description_test.go` | 1-28 | Parcial | Inventariado y con hash; no analizado en detalle por esta colección |
 | `services/gateway/internal/handler/recorder.go` | 1-29 | Parcial | Envoltura que retiene el código de estado para las métricas HTTP; no analizada en detalle |
@@ -76,21 +90,21 @@ Las rutas siguientes son relativas a `backend/`. Los intervalos son inclusivos y
 | `services/gateway/internal/metrics/http_test.go` | 1-70 | Parcial | Inventariado y con hash; no analizado en detalle por esta colección |
 | `services/gateway/internal/metrics/process.go` | 1-38 | Parcial | Texto Prometheus de señales del proceso; no analizado en detalle |
 | `services/gateway/internal/metrics/process_test.go` | 1-42 | Parcial | Inventariado y con hash; no analizado en detalle por esta colección |
-| `services/gateway/go.mod` | 1-10 | Explicado | [Despliegue](07-deployment.md) |
+| `services/gateway/go.mod` | 1-23 | Explicado | [Despliegue](07-deployment.md) |
 | `services/gateway/go.sum` | — | Excluido | Lock/checksums de dependencias; no verifica integridad esta lectura |
 | `services/gateway/.env.example` | — | Excluido | Política de no lectura de archivos `.env` y variantes |
-| `services/jobs/cmd/server/main.go` | 1-198 | Explicado | [Despliegue](07-deployment.md) y [Persistencia](06-database.md) |
-| `services/jobs/internal/handler/api.go` | 1-103 | Explicado | [Jobs](02-jobs.md) |
+| `services/jobs/cmd/server/main.go` | 1-341 | Explicado | [Despliegue](07-deployment.md) y [Persistencia](06-database.md) |
+| `services/jobs/internal/handler/api.go` | 1-237 | Explicado | [Jobs](02-jobs.md) |
 | `services/jobs/cmd/server/main_test.go` | 1-315 | Parcial | Inventariado y con hash; no analizado en detalle por esta colección |
 | `services/jobs/cmd/server/migration_registration_test.go` | 1-100 | Parcial | Inventariado y con hash; no analizado en detalle por esta colección |
 | `services/jobs/internal/handler/security.go` | 1-62 | Explicado | [Jobs](02-jobs.md) |
 | `services/jobs/internal/handler/auth_negative_test.go` | 1-164 | Parcial | Inventariado y con hash; no analizado en detalle por esta colección |
-| `services/jobs/internal/handler/api_test.go` | 1-145 | Explicado | [Tests](08-tests-tools.md#jobs-fakes-preparación-y-dieciséis-casos) |
-| `services/jobs/internal/messaging/broker.go` | 1-352 | Explicado | [Mensajería](04-messaging.md) |
+| `services/jobs/internal/handler/api_test.go` | 1-554 | Explicado | [Tests](08-tests-tools.md#jobs-fakes-preparación-y-dieciséis-casos) |
+| `services/jobs/internal/messaging/broker.go` | 1-620 | Explicado | [Mensajería](04-messaging.md) |
 | `services/jobs/internal/handler/status.go` | 1-52 | Parcial | Tipos del estado operativo que sirve `/health/ready`; no analizados en detalle |
 | `services/jobs/internal/handler/synthetic_scenarios_test.go` | 1-154 | Parcial | Inventariado y con hash; no analizado en detalle por esta colección |
-| `services/jobs/internal/messaging/broker_test.go` | 1-197 | Parcial | Inventariado y con hash; no analizado en detalle por esta colección |
-| `services/jobs/internal/repository/store.go` | 1-133 | Explicado | [Jobs](02-jobs.md) |
+| `services/jobs/internal/messaging/broker_test.go` | 1-665 | Parcial | Inventariado y con hash; no analizado en detalle por esta colección |
+| `services/jobs/internal/repository/store.go` | 1-315 | Explicado | [Jobs](02-jobs.md) |
 | `services/jobs/internal/messaging/recovery_boundary_test.go` | 1-116 | Parcial | Inventariado y con hash; no analizado en detalle por esta colección |
 | `services/jobs/internal/messaging/retry_schedule_regression_test.go` | 1-44 | Parcial | Inventariado y con hash; no analizado en detalle por esta colección |
 | `services/jobs/internal/metrics/http.go` | 1-139 | Parcial | Histograma de latencia y conteo por clase de estado; no analizado en detalle |
@@ -98,14 +112,14 @@ Las rutas siguientes son relativas a `backend/`. Los intervalos son inclusivos y
 | `services/jobs/internal/metrics/process.go` | 1-38 | Parcial | Texto Prometheus de señales del proceso; no analizado en detalle |
 | `services/jobs/internal/metrics/process_test.go` | 1-42 | Parcial | Inventariado y con hash; no analizado en detalle por esta colección |
 | `services/jobs/internal/repository/replay_gate_test.go` | 1-39 | Parcial | Inventariado y con hash; no analizado en detalle por esta colección |
-| `services/jobs/internal/repository/store_integration_test.go` | 1-115 | Explicado | [Tests](08-tests-tools.md#jobs-integración-secuencia-y-salidas-completas) |
+| `services/jobs/internal/repository/store_integration_test.go` | 1-419 | Explicado | [Tests](08-tests-tools.md#jobs-integración-secuencia-y-salidas-completas) |
 | `services/jobs/internal/repository/zones.go` | 1-141 | Parcial | Inventariado y con hash; no analizado en detalle por esta colección |
 | `services/jobs/internal/repository/synthetic_scenarios_test.go` | 1-77 | Parcial | Inventariado y con hash; no analizado en detalle por esta colección |
 | `services/jobs/internal/repository/zones_crossdatabase_integration_test.go` | 1-114 | Parcial | Inventariado y con hash; no analizado en detalle por esta colección |
 | `services/jobs/internal/repository/zones_test.go` | 1-235 | Parcial | Inventariado y con hash; no analizado en detalle por esta colección |
 | `services/jobs/migrations/001_initial.sql` | 1-30 | Explicado | [Persistencia](06-database.md) |
 | `services/jobs/migrations/002_zones.sql` | 1-50 | Parcial | Inventariado y con hash; no analizado en detalle por esta colección |
-| `services/jobs/migrations/embed.go` | 1-9 | Explicado | [Persistencia](06-database.md) |
+| `services/jobs/migrations/embed.go` | 1-23 | Explicado | [Persistencia](06-database.md) |
 | `services/jobs/migrations/003_synthetic_scenario.sql` | 1-23 | Parcial | Añade `scenario_id` y `evaluated_at` al job; no analizada en detalle |
 | `services/jobs/migrations/004_job_failure_state.sql` | 1-19 | Parcial | Añade `attempts`, `failure_reason`, `failed_at` y el estado `failed`; no analizada en detalle |
 | `services/jobs/Dockerfile` | 1-17 | Explicado | [Despliegue](07-deployment.md) |
@@ -113,7 +127,7 @@ Las rutas siguientes son relativas a `backend/`. Los intervalos son inclusivos y
 | `services/jobs/go.mod` | 1-23 | Explicado | [Despliegue](07-deployment.md) |
 | `services/jobs/go.sum` | — | Excluido | Lock/checksums de dependencias |
 | `services/jobs/.env.example` | — | Excluido | Política de no lectura de archivos `.env` y variantes |
-| `services/risk/cmd/server/main.go` | 1-250 | Explicado | [Despliegue](07-deployment.md) y [Persistencia](06-database.md) |
+| `services/risk/cmd/server/main.go` | 1-442 | Explicado | [Despliegue](07-deployment.md) y [Persistencia](06-database.md) |
 | `services/prevention/Dockerfile` | 1-18 | Parcial | Imagen de tres etapas del servicio; no analizada en detalle |
 | `services/prevention/cmd/server/main.go` | 1-256 | Parcial | Arranque de `prevention`: pool, migraciones, OIDC y HTTP en `:8084`; no analizado en detalle |
 | `services/prevention/cmd/server/main_test.go` | 1-126 | Parcial | Inventariado y con hash; no analizado en detalle por esta colección |
@@ -143,31 +157,31 @@ Las rutas siguientes son relativas a `backend/`. Los intervalos son inclusivos y
 | `services/risk/cmd/server/main_test.go` | 1-414 | Parcial | Inventariado y con hash; no analizado en detalle por esta colección |
 | `services/risk/internal/classify/academic_rule_test.go` | 1-404 | Parcial | Inventariado y con hash; no analizado en detalle por esta colección |
 | `services/risk/internal/classify/behavior_table_test.go` | 1-539 | Parcial | Inventariado y con hash; no analizado en detalle por esta colección |
-| `services/risk/internal/classify/classifier.go` | 1-361 | Parcial | Inventariado y con hash; no analizado en detalle por esta colección |
+| `services/risk/internal/classify/classifier.go` | 1-362 | Parcial | Inventariado y con hash; no analizado en detalle por esta colección |
 | `services/risk/internal/classify/classifier_test.go` | 1-264 | Parcial | Inventariado y con hash; no analizado en detalle por esta colección |
-| `services/risk/internal/classify/params.go` | 1-213 | Parcial | Inventariado y con hash; no analizado en detalle por esta colección |
+| `services/risk/internal/classify/params.go` | 1-254 | Parcial | Inventariado y con hash; no analizado en detalle por esta colección |
 | `services/risk/internal/classify/directional_metamorphic_test.go` | 1-289 | Parcial | Inventariado y con hash; no analizado en detalle por esta colección |
 | `services/risk/internal/classify/extreme_inputs_test.go` | 1-197 | Parcial | Inventariado y con hash; no analizado en detalle por esta colección |
 | `services/risk/internal/classify/firewatch_rule.go` | 1-153 | Parcial | Regla `firewatch-rule-v2` y sus parámetros; no analizada en detalle |
 | `services/risk/internal/classify/firewatch_rule_v2_test.go` | 1-130 | Parcial | Inventariado y con hash; no analizado en detalle por esta colección |
-| `services/risk/internal/classify/params_test.go` | 1-874 | Parcial | Inventariado y con hash; no analizado en detalle por esta colección |
-| `services/risk/internal/handler/api.go` | 1-187 | Explicado | [Risk](03-risk.md) |
+| `services/risk/internal/classify/params_test.go` | 1-883 | Parcial | Inventariado y con hash; no analizado en detalle por esta colección |
+| `services/risk/internal/handler/api.go` | 1-269 | Explicado | [Risk](03-risk.md) |
 | `services/risk/internal/cycle/runner.go` | 1-272 | Parcial | Ciclo automático de 15 minutos que publica un lote; no analizado en detalle |
 | `services/risk/internal/cycle/runner_test.go` | 1-243 | Parcial | Inventariado y con hash; no analizado en detalle por esta colección |
-| `services/risk/internal/handler/security.go` | 1-61 | Explicado | [Risk](03-risk.md) |
+| `services/risk/internal/handler/security.go` | 1-93 | Explicado | [Risk](03-risk.md) |
 | `services/risk/internal/handler/contract_test.go` | 1-236 | Parcial | Inventariado y con hash; no analizado en detalle por esta colección |
 | `services/risk/internal/handler/cycle.go` | 1-30 | Parcial | Ruta que dispara el ciclo a demanda; no analizada en detalle |
 | `services/risk/internal/handler/cycle_test.go` | 1-137 | Parcial | Inventariado y con hash; no analizado en detalle por esta colección |
 | `services/risk/internal/handler/models.go` | 1-56 | Parcial | Listado y activación de versiones de modelo; no analizado en detalle |
 | `services/risk/internal/handler/models_test.go` | 1-149 | Parcial | Inventariado y con hash; no analizado en detalle por esta colección |
-| `services/risk/internal/handler/api_test.go` | 1-279 | Explicado | [Tests](08-tests-tools.md#risk-nueve-casos-no-matriz-criptográfica-completa) |
-| `services/risk/internal/messaging/broker.go` | 1-338 | Explicado | [Mensajería](04-messaging.md) |
+| `services/risk/internal/handler/api_test.go` | 1-527 | Explicado | [Tests](08-tests-tools.md#risk-nueve-casos-no-matriz-criptográfica-completa) |
+| `services/risk/internal/messaging/broker.go` | 1-529 | Explicado | [Mensajería](04-messaging.md) |
 | `services/risk/internal/handler/sources.go` | 1-124 | Parcial | Estado e integridad de las fuentes de datos; no analizado en detalle |
 | `services/risk/internal/handler/sources_test.go` | 1-138 | Parcial | Inventariado y con hash; no analizado en detalle por esta colección |
 | `services/risk/internal/handler/status.go` | 1-52 | Parcial | Tipos del estado operativo que sirve `/health/ready`; no analizados en detalle |
 | `services/risk/internal/handler/synthetic_scenarios_test.go` | 1-78 | Parcial | Inventariado y con hash; no analizado en detalle por esta colección |
-| `services/risk/internal/messaging/broker_test.go` | 1-195 | Parcial | Inventariado y con hash; no analizado en detalle por esta colección |
-| `services/risk/internal/repository/store.go` | 1-299 | Explicado | [Risk](03-risk.md) |
+| `services/risk/internal/messaging/broker_test.go` | 1-547 | Parcial | Inventariado y con hash; no analizado en detalle por esta colección |
+| `services/risk/internal/repository/store.go` | 1-530 | Explicado | [Risk](03-risk.md) |
 | `services/risk/internal/metrics/http.go` | 1-128 | Parcial | Histograma de latencia y conteo por clase de estado; no analizado en detalle |
 | `services/risk/internal/metrics/http_test.go` | 1-121 | Parcial | Inventariado y con hash; no analizado en detalle por esta colección |
 | `services/risk/internal/metrics/metrics.go` | 1-62 | Parcial | Contadores de resultado de clasificación, incluido `high_risk_predictions_total`; no analizados en detalle |
@@ -176,23 +190,23 @@ Las rutas siguientes son relativas a `backend/`. Los intervalos son inclusivos y
 | `services/risk/internal/repository/models.go` | 1-188 | Parcial | Consultas de versiones de modelo y errores de activación; no analizado en detalle |
 | `services/risk/internal/repository/models_test.go` | 1-124 | Parcial | Inventariado y con hash; no analizado en detalle por esta colección |
 | `services/risk/internal/repository/redispatch_completion_test.go` | 1-59 | Parcial | Inventariado y con hash; no analizado en detalle por esta colección |
-| `services/risk/internal/repository/store_integration_test.go` | 1-278 | Explicado | [Tests](08-tests-tools.md#risk-integración-dos-capas-de-duplicación-y-orden) |
+| `services/risk/internal/repository/store_integration_test.go` | 1-502 | Explicado | [Tests](08-tests-tools.md#risk-integración-dos-capas-de-duplicación-y-orden) |
 | `services/risk/internal/service/demo.go` | 1-43 | Explicado | [Risk](03-risk.md) |
 | `services/risk/internal/repository/store_models_integration_test.go` | 1-184 | Parcial | Inventariado y con hash; no analizado en detalle por esta colección |
 | `services/risk/internal/repository/store_zone_batches_integration_test.go` | 1-192 | Parcial | Inventariado y con hash; no analizado en detalle por esta colección |
 | `services/risk/internal/repository/synthetic_scenarios_test.go` | 1-43 | Parcial | Inventariado y con hash; no analizado en detalle por esta colección |
 | `services/risk/internal/service/classifier_source.go` | 1-131 | Parcial | Fuente del clasificador activo y su activación explícita; no analizada en detalle |
 | `services/risk/internal/service/classifier_source_test.go` | 1-579 | Parcial | Inventariado y con hash; no analizado en detalle por esta colección |
-| `services/risk/internal/service/demo_test.go` | 1-44 | Explicado | [Tests](08-tests-tools.md#demo-mutaciones-independientes-y-guardas-ausentes) |
-| `services/risk/internal/service/publisher.go` | 1-247 | Parcial | Inventariado y con hash; no analizado en detalle por esta colección |
-| `services/risk/internal/service/publisher_integration_test.go` | 1-133 | Parcial | Inventariado y con hash; no analizado en detalle por esta colección |
-| `services/risk/internal/service/publisher_test.go` | 1-543 | Parcial | Inventariado y con hash; no analizado en detalle por esta colección |
+| `services/risk/internal/service/demo_test.go` | 1-69 | Explicado | [Tests](08-tests-tools.md#demo-mutaciones-independientes-y-guardas-ausentes) |
+| `services/risk/internal/service/publisher.go` | 1-504 | Parcial | Inventariado y con hash; no analizado en detalle por esta colección |
+| `services/risk/internal/service/publisher_integration_test.go` | 1-418 | Parcial | Inventariado y con hash; no analizado en detalle por esta colección |
+| `services/risk/internal/service/publisher_test.go` | 1-948 | Parcial | Inventariado y con hash; no analizado en detalle por esta colección |
 | `services/risk/internal/source/fixture.go` | 1-130 | Parcial | Inventariado y con hash; no analizado en detalle por esta colección |
 | `services/risk/internal/service/synthetic_scenarios_test.go` | 1-301 | Parcial | Inventariado y con hash; no analizado en detalle por esta colección |
-| `services/risk/internal/source/provider.go` | 1-315 | Parcial | Inventariado y con hash; no analizado en detalle por esta colección |
+| `services/risk/internal/source/provider.go` | 1-330 | Parcial | Inventariado y con hash; no analizado en detalle por esta colección |
 | `services/risk/internal/source/http_json.go` | 1-228 | Parcial | Proveedor HTTP JSON con límite de payload; no analizado en detalle |
 | `services/risk/internal/source/http_json_test.go` | 1-198 | Parcial | Inventariado y con hash; no analizado en detalle por esta colección |
-| `services/risk/internal/source/provider_test.go` | 1-365 | Parcial | Inventariado y con hash; no analizado en detalle por esta colección |
+| `services/risk/internal/source/provider_test.go` | 1-404 | Parcial | Inventariado y con hash; no analizado en detalle por esta colección |
 | `services/risk/internal/zones/seed.go` | 1-150 | Parcial | Inventariado y con hash; no analizado en detalle por esta colección |
 | `services/risk/internal/source/synthetic_scenarios.go` | 1-143 | Parcial | Proveedor de los seis perfiles sintéticos; no analizado en detalle |
 | `services/risk/internal/source/synthetic_scenarios_test.go` | 1-163 | Parcial | Inventariado y con hash; no analizado en detalle por esta colección |
@@ -206,17 +220,17 @@ Las rutas siguientes son relativas a `backend/`. Los intervalos son inclusivos y
 | `services/risk/migrations/004_zones.sql` | 1-46 | Parcial | Inventariado y con hash; no analizado en detalle por esta colección |
 | `services/risk/migrations/005_zone_reference.sql` | 1-26 | Parcial | Inventariado y con hash; no analizado en detalle por esta colección |
 | `services/risk/migrations/006_models_integrity.sql` | 1-34 | Parcial | Inventariado y con hash; no analizado en detalle por esta colección |
-| `services/risk/migrations/embed.go` | 1-53 | Explicado | [Persistencia](06-database.md) |
+| `services/risk/migrations/embed.go` | 1-65 | Explicado | [Persistencia](06-database.md) |
 | `services/risk/migrations/007_synthetic_evaluation.sql` | 1-25 | Parcial | Añade `scenario_id` y `evaluated_at` al lote; no analizada en detalle |
 | `services/risk/migrations/008_firewatch_rule_v2.sql` | 1-19 | Parcial | Registra la versión `firewatch-rule-v2` en `models`; no analizada en detalle |
 | `services/risk/migrations/010_models_activation_grant.sql` | 1-19 | Parcial | Otorga `UPDATE` sobre `models` a `risk_app`; no analizada en detalle |
-| `services/risk/migrations/migrations_test.go` | 1-205 | Parcial | Inventariado y con hash; no analizado en detalle por esta colección |
-| `services/risk/Dockerfile` | 1-17 | Explicado | [Despliegue](07-deployment.md) |
+| `services/risk/migrations/migrations_test.go` | 1-276 | Parcial | Inventariado y con hash; no analizado en detalle por esta colección |
+| `services/risk/Dockerfile` | 1-24 | Explicado | [Despliegue](07-deployment.md) |
 | `services/risk/migrations/models_activation_grant_test.go` | 1-81 | Parcial | Inventariado y con hash; no analizado en detalle por esta colección |
-| `services/risk/go.mod` | 1-23 | Explicado | [Despliegue](07-deployment.md) |
+| `services/risk/go.mod` | 1-34 | Explicado | [Despliegue](07-deployment.md) |
 | `services/risk/go.sum` | — | Excluido | Lock/checksums de dependencias |
 | `services/risk/.env.example` | — | Excluido | Política de no lectura de archivos `.env` y variantes |
-| `contracts/gen/events/v1/events.go` | 1-26 | Explicado | [Contratos](05-contracts.md); escrito a mano, no excluido por su carpeta |
+| `contracts/gen/events/v1/events.go` | 1-58 | Explicado | [Contratos](05-contracts.md); escrito a mano, no excluido por su carpeta |
 | `contracts/gen/geo/geo.go` | 1-25 | Parcial | Contrato generado inventariado y con hash; no analizado en detalle por esta colección |
 | `contracts/gen/events/v1/events_test.go` | 1-138 | Parcial | Inventariado y con hash; no analizado en detalle por esta colección |
 | `contracts/gen/geo/valparaiso-comunas.geojson` | 1-1 | Parcial | Activo geográfico inventariado y con hash; no analizado en detalle |
@@ -224,8 +238,8 @@ Las rutas siguientes son relativas a `backend/`. Los intervalos son inclusivos y
 | `contracts/gen/geo/valparaiso-comunas.provenance.json` | 1-25 | Parcial | Procedencia declarada de la capa de comunas; no verificada contra la fuente externa |
 | `contracts/gen/observations/v1/observations.go` | 1-176 | Parcial | Inventariado y con hash; no analizado en detalle por esta colección |
 | `contracts/gen/observations/v1/observations_test.go` | 1-118 | Parcial | Inventariado y con hash; no analizado en detalle por esta colección |
-| `contracts/events/v1/README.md` | 1-15 | Explicado | [Contratos](05-contracts.md), intención de transporte |
-| `contracts/openapi/firewatch-v1.yaml` | 1-568 | Explicado | [Contratos](05-contracts.md), declaraciones agrupadas |
+| `contracts/events/v1/README.md` | 1-26 | Explicado | [Contratos](05-contracts.md), intención de transporte |
+| `contracts/openapi/firewatch-v1.yaml` | 1-2125 | Explicado | [Contratos](05-contracts.md), declaraciones agrupadas |
 | `deploy/local/postgres-init.sh` | 1-31 | Explicado | [Persistencia](06-database.md) |
 | `deploy/k8s/base/autoscaling.yaml` | 1-105 | Parcial | Un `HorizontalPodAutoscaler` por servicio, cuatro en total; escrito, no observado en clúster |
 | `deploy/load/k6-risk.js` | 1-54 | Parcial | Guion de carga k6 del frente 6; no ejecutado |
@@ -233,19 +247,19 @@ Las rutas siguientes son relativas a `backend/`. Los intervalos son inclusivos y
 | `deploy/local/grafana/dashboards/firewatch-overview.json` | 1-432 | Parcial | Tablero versionado de ocho paneles; no revisado en una corrida |
 | `deploy/local/grafana/provisioning/dashboards/firewatch.yml` | 1-17 | Parcial | Aprovisiona el tablero desde archivo, sin edición por UI |
 | `deploy/local/grafana/provisioning/datasources/prometheus.yml` | 1-16 | Parcial | Aprovisiona la fuente de datos Prometheus del tablero |
-| `deploy/local/prometheus.yml` | 1-12 | Explicado | [Despliegue](07-deployment.md) |
+| `deploy/local/prometheus.yml` | 1-32 | Explicado | [Despliegue](07-deployment.md) |
 | `deploy/local/rabbitmq-plugins` | 1-1 | Explicado | [Despliegue](07-deployment.md) |
 | `deploy/local/firewatch-realm.json` | — | Excluido | Configuración de cuentas/credenciales de identidad; no se establecen sus clientes, roles ni TTL |
-| `deploy/k8s/base/config.yaml` | 1-17 | Explicado | [Despliegue](07-deployment.md) |
+| `deploy/k8s/base/config.yaml` | 1-19 | Explicado | [Despliegue](07-deployment.md) |
 | `deploy/k8s/base/ingress.yaml` | 1-22 | Explicado | [Despliegue](07-deployment.md) |
-| `deploy/k8s/base/kustomization.yaml` | 1-9 | Explicado | [Despliegue](07-deployment.md) |
+| `deploy/k8s/base/kustomization.yaml` | 1-10 | Explicado | [Despliegue](07-deployment.md) |
 | `deploy/k8s/base/namespace.yaml` | 1-6 | Explicado | [Despliegue](07-deployment.md) |
-| `deploy/k8s/base/network.yaml` | 1-69 | Explicado | [Despliegue](07-deployment.md) |
-| `deploy/k8s/base/workloads.yaml` | 1-174 | Explicado | [Despliegue](07-deployment.md) |
-| `deploy/k8s/README.md` | 1-29 | Contexto | Prerrequisitos declarados, no infraestructura provisionada |
+| `deploy/k8s/base/network.yaml` | 1-99 | Explicado | [Despliegue](07-deployment.md) |
+| `deploy/k8s/base/workloads.yaml` | 1-234 | Explicado | [Despliegue](07-deployment.md) |
+| `deploy/k8s/README.md` | 1-30 | Contexto | Prerrequisitos declarados, no infraestructura provisionada |
 | `scripts/fetch_comunas.py` | 1-391 | Parcial | Script inventariado y con hash; no analizado en detalle por esta colección |
 | `scripts/init_env.py` | 1-18 | Explicado | [Herramientas](08-tests-tools.md#init_envpy-creación-exclusiva-no-rotación); permisos efectivos no observados |
-| `scripts/smoke.py` | 1-159 | Explicado | [Herramientas](08-tests-tools.md#smoke-branches-y-excepciones-de-helpers) y [main](08-tests-tools.md#smoke-inventario-completo-de-main-y-callbacks); sin ejecución |
+| `scripts/smoke.py` | 1-168 | Explicado | [Herramientas](08-tests-tools.md#smoke-branches-y-excepciones-de-helpers) y [main](08-tests-tools.md#smoke-inventario-completo-de-main-y-callbacks); sin ejecución |
 | `scripts/test_fetch_comunas.py` | 1-228 | Parcial | Script de prueba inventariado y con hash; no analizado en detalle por esta colección |
 | `scripts/test_ci_migration.py` | 1-743 | Parcial | Pruebas de regresión del contrato de migración en CI; no analizadas en detalle |
 | `.dockerignore` | 1-8 | Explicado | [Despliegue](07-deployment.md) |
@@ -254,11 +268,11 @@ Las rutas siguientes son relativas a `backend/`. Los intervalos son inclusivos y
 | `scripts/verify_synthetic.py` | 1-1043 | Parcial | Arnés de verificación sintética en un compose desechable; no ejecutado |
 | `.env` | — | Excluido | Configuración sensible; no lectura ni reproducción |
 | `.env.example` | — | Excluido | Política de no lectura de archivos `.env` y variantes |
-| `docker-compose.yml` | 1-195 | Explicado | [Despliegue](07-deployment.md), referencias de variables, sin resolver valores |
-| `go.work` | 1-8 | Explicado | [Despliegue](07-deployment.md) |
+| `docker-compose.yml` | 1-273 | Explicado | [Despliegue](07-deployment.md), referencias de variables, sin resolver valores |
+| `go.work` | 1-9 | Explicado | [Despliegue](07-deployment.md) |
 | `go.work.sum` | — | Excluido | Lock/checksums del workspace; no se lee ni verifica integridad |
-| `Makefile` | 1-19 | Explicado | [Despliegue](07-deployment.md), comandos leídos, no ejecutados |
-| `README.md` | 1-91 | Contexto | Instrucciones existentes y futuros trabajos |
+| `Makefile` | 1-20 | Explicado | [Despliegue](07-deployment.md), comandos leídos, no ejecutados |
+| `README.md` | 1-126 | Contexto | Instrucciones existentes y futuros trabajos |
 | `docs/architecture.md` | 1-63 | Contexto | Decisiones existentes contrastadas con fuente |
 | `docs/keycloak-realm-setup.md` | 1-58 | Contexto | Configuración de cliente OIDC declarada; no verificada contra un Keycloak vivo |
 | `docs/checklist-evidence-u1.md` | 1-173 | Contexto | Registro de evidencia por ID de la unidad U1; no reemplaza el criterio de la fuente |
@@ -266,7 +280,7 @@ Las rutas siguientes son relativas a `backend/`. Los intervalos son inclusivos y
 | `docs/checklist-evidence-u4.md` | 1-153 | Contexto | Registro de evidencia por ID de la unidad U4; no reemplaza el criterio de la fuente |
 | `docs/checklist-evidence-u5.md` | 1-146 | Contexto | Registro de evidencia por ID de la unidad U5; no reemplaza el criterio de la fuente |
 | `docs/ci-migration-readiness.md` | 1-159 | Contexto | Contrato que sostiene el job de integración al migrar en CI |
-| `docs/verification.md` | 1-45 | Contexto | Resultados históricos declarados, no repetidos ni acreditados por esta tarea |
+| `docs/verification.md` | 1-74 | Contexto | Resultados históricos declarados, no repetidos ni acreditados por esta tarea |
 | `docs/model-activation.md` | 1-160 | Contexto | Contrato vigente de activación explícita del modelo; fuera de esta lectura |
 | `docs/operations.md` | 1-215 | Contexto | Acuerdo operativo de objetivos, alertas, carga y recuperación; no verificado en ejecución |
 | `docs/preventive-evidence.md` | 1-158 | Contexto | Contrato de evidencia preventiva y revisión humana |
