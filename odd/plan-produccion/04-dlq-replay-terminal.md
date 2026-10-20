@@ -9,7 +9,7 @@
 **Objetivo.** Hacer observables los fallos terminales y permitir recuperación/replay **idempotente** de trabajos fallidos sin duplicar efectos.
 
 **Documentación real (redirección).**
-- [`../../backend/docs/architecture.md:42-46`](../../backend/docs/architecture.md) — la DLQ conserva fallos; falta replay y propagación a estado terminal.
+- [`../../backend/docs/architecture.md:42-46`](../../backend/docs/architecture.md) — la DLQ conserva fallos; el estado terminal `failed` y el replay de operador están implementados (ver *Estado* arriba); falta el replay automático de los mensajes que ningún job puede reclamar.
 - [`../../backend/README.md:96-98`](../../backend/README.md) — estado operativo.
 - [`../tasks/security/backend-hardening/07-job-recovery.md:7-20`](../tasks/security/backend-hardening/07-job-recovery.md) — criterios de aceptación.
 
