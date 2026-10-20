@@ -33,7 +33,7 @@ Consequences:
 
 ## One-time manual steps on an existing realm
 
-Keycloak listens on `http://localhost:8081` (`KC_HOSTNAME`, `backend/docker-compose.yml:70`).
+Keycloak listens on `http://localhost:8081` (`KC_HOSTNAME`, `backend/docker-compose.yml:81`).
 
 1. Open `http://localhost:8081` and sign in to the Administration Console as `local-admin`. The password is the `KEYCLOAK_ADMIN_PASSWORD` you set in your local `.env`; the username comes from `KC_BOOTSTRAP_ADMIN_USERNAME`.
 2. Select the realm **firewatch**.
@@ -53,6 +53,6 @@ A programmatic check was **not executed** as part of this change: it needs a run
 
 ## Forward risk: HTTPS enforcement for client URIs
 
-Keycloak 26.6.0 introduces the `secure-client-uris` client policy executor, which requires HTTPS and makes **existing clients using `http` in "Post logout redirect URIs" fail validation when they are updated**. This repository pins `quay.io/keycloak/keycloak:26.5.2` (`backend/docker-compose.yml:61`), so the behavior does not apply today.
+Keycloak 26.6.0 introduces the `secure-client-uris` client policy executor, which requires HTTPS and makes **existing clients using `http` in "Post logout redirect URIs" fail validation when they are updated**. This repository pins `quay.io/keycloak/keycloak:26.5.2` (`backend/docker-compose.yml:72`), so the behavior does not apply today.
 
 Before bumping the Keycloak version above 26.6.0, expect local logout to break for the plain-`http` entries above, and plan for either keeping the executor disabled or moving local development to TLS.

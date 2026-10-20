@@ -1,8 +1,14 @@
 # FireWatch frontend — React migration plan
 
+> **Superseded — historical planning document, declared 2026-10-19.** The migration this document plans is **executed and shipped**: `frontend/` now contains a React 19 + TypeScript + Vite client that replaced the single-file, framework-free page inventoried below, and `.github/workflows/frontend.yml` gates it in CI. Everything from §0 onward is retained as the historical plan and as the pre-migration inventory; **it must not be read as the current state of the frontend.** Present-tense statements about "the current page", about the vanilla `frontend/proposal.js` sources, about a 40-test `node:test` harness, about a missing scenario selector, about a missing frontend CI workflow and about a never-executed browser login/logout round trip describe the baseline this plan was written against, not the tree as it stands. Lines whose claim has since become false carry an inline superseded note.
+>
+> Current state lives in [`frontend/README.md`](../README.md) (the shipped client), [`odd/urgent/rediseno-pagina/app-react-vite.md`](../../odd/urgent/rediseno-pagina/app-react-vite.md) (the parity obligations and the delivery evidence) and [`odd/tasks/frontend/react-frontend-plan.md`](../../odd/tasks/frontend/react-frontend-plan.md) (specs, tasks and evidence log). The real browser round trip is recorded in [`odd/tasks/presentation-client-ready.md`](../../odd/tasks/presentation-client-ready.md), entries L14 and L23.
+>
+> Note added after delivery. It does not alter the historical body, its evidence citations or its proposal tables.
+
 **Recommendation: React + TypeScript + Vite, using the available Node/npm toolchain; ship static assets without a Node or Bun production server.**
 
-**Status: planning documentation, execution started on branch `frontend/react-vite`.** The tooling decision in §2 and the architecture in §3 are now being implemented; the feature plan, tasks and evidence live in [`odd/urgent/rediseno-pagina/app-react-vite.md`](../../odd/urgent/rediseno-pagina/app-react-vite.md). The §2.5 serving questions this document left open were resolved as: hash routing kept, so the server still has **no SPA fallback**; `Cache-Control: no-store` kept unchanged; the CSP re-issued verbatim by the new server; the PWA proposal in §4 remains **not approved and not built**. Whatever this document calls "proposed" and is not listed as implemented in the feature plan is still unimplemented, and the capability matrix in §6 remains the parity checklist.
+**Status: historical plan — superseded; the migration was executed and shipped.** This document is no longer being implemented: the tooling decision in §2 and the architecture in §3 were carried into delivery as the React client described in [`frontend/README.md`](../README.md), and the feature plan, tasks and evidence live in [`odd/urgent/rediseno-pagina/app-react-vite.md`](../../odd/urgent/rediseno-pagina/app-react-vite.md). The §2.5 serving questions this document left open were resolved during delivery as follows: hash routing kept, so the server still has **no SPA fallback**; `Cache-Control: no-store` kept unchanged; the CSP re-issued verbatim by the new server; the PWA proposal in §4 remains **not approved and not built**. The capability matrix in §6 is the parity checklist this plan set, not a current status report.
 
 Companion tracking document: [`odd/tasks/frontend/react-frontend-plan.md`](../../odd/tasks/frontend/react-frontend-plan.md) (specs, tasks, evidence log, in Spanish).
 
@@ -79,7 +85,7 @@ Nine routes are consumed. Every `/v1/...` route is consumed as an absolute URL o
 
 Declared in the contract but **not consumed** by the page: `GET /v1/audit` (0 occurrences of `v1/audit` in `proposal.js`) and the optional `bbox` filter on zones. All contract paths require the global `bearerAuth` scheme (`backend/contracts/openapi/firewatch-v1.yaml:8-9,284`).
 
-**Contract update received after the baseline inventory:** OpenAPI now declares `GET /v1/risk/synthetic-scenarios` and optional `scenario_id` on `POST /v1/jobs`. The current page consumes neither. Backend implementation is still in progress; contract declaration is not evidence of a working API (see §9).
+**Contract update received after the baseline inventory (historical):** OpenAPI declared `GET /v1/risk/synthetic-scenarios` and optional `scenario_id` on `POST /v1/jobs`, and the page inventoried in this section consumed neither. **Superseded:** the backend implements that catalogue and the optional `scenario_id` (`backend/docs/synthetic-scenarios.md`), and the shipped React client consumes both — jobs panel at `frontend/src/views/JobsView.tsx:400`, reassessment panel at `frontend/src/views/ActionsView.tsx:1041-1044` (see §9).
 
 ### 1.4 Rendering and interaction capabilities
 
@@ -120,7 +126,7 @@ $ cd frontend && npm test
 
 Covered groups: job creation/correlation, polling deadlines and races (`:45-124`); map projection, catalogue count, click/keyboard selection, logout clearing (`:125-233`, `:320`, `:622-667`); risk validation, labels, history, synthetic warnings, validity timers (`:135-233`, `:328-413`); provenance integrity and pipeline freshness/dependency fail-closed behaviour (`:288-616`); absolute gateway URLs, issuer separation, gateway-only readiness (`:523-529`, `:668-683`).
 
-**Not covered — and this must survive the migration as an honest gap:** real browser Keycloak login and logout, visual correctness, formal accessibility conformance, and real network integration. The suite is a VM harness, not a browser. `odd/urgent/README.md:14-16` records the same gap independently.
+**Not covered — and this must survive the migration as an honest gap:** real browser Keycloak login and logout, visual correctness, formal accessibility conformance, and real network integration. The suite is a VM harness, not a browser. `odd/urgent/README.md:14-16` records the same gap independently. **Superseded in part:** the real browser login/logout round trip was executed with live Keycloak, admin and viewer PKCE, in Chrome (`odd/tasks/presentation-client-ready.md` L14 and L23); visual correctness, formal accessibility conformance and real network integration remain as stated here.
 
 ---
 
@@ -252,7 +258,7 @@ Mapping from the current single file, by responsibility rather than by line:
 
 1. **Port the 40 existing tests first, against the candidate.** A port that passes is parity evidence for the behaviours the suite pins. A port that fails is a real behavioural difference, not a test problem.
 2. Add component-level tests only where the current DOM harness cannot express the behaviour (real event wiring, focus).
-3. Add a browser-level suite for the gaps the VM harness cannot reach — above all the **real login/logout round trip**, which `frontend/README.md` and `odd/urgent/README.md:14-16` both record as never executed.
+3. Add a browser-level suite for the gaps the VM harness cannot reach — above all the **real login/logout round trip**, which `frontend/README.md` and `odd/urgent/README.md:14-16` recorded as never executed when this plan was written. **Superseded:** that round trip has since been executed against live Keycloak — admin and viewer PKCE login plus RP-initiated logout, in Chrome (`odd/tasks/presentation-client-ready.md` L14 and L23).
 4. Keep the existing Node checks runnable throughout, and keep the smoke check asserting CSP, methods, MIME types and traversal confinement for whichever server is actually serving.
 
 ---
@@ -288,7 +294,7 @@ Conditions before this becomes work: P4 parity is complete; the caching policy i
 
 | Phase | Goal | Exit evidence | Gate before starting |
 | --- | --- | --- | --- |
-| **P0 — baseline capture** | freeze what "parity" means before writing the candidate | capability inventory from §1 accepted; the 40 tests recorded green with the exact command; screenshots and keyboard notes captured at the two viewports | separate implementation authorization; baseline capture is the recommended first future step |
+| **P0 — baseline capture** | freeze what "parity" means before writing the candidate | capability inventory from §1 accepted; the 40 pre-migration tests recorded green with the exact command; screenshots and keyboard notes captured at the two viewports | separate implementation authorization; baseline capture is the recommended first future step |
 | **P1 — candidate skeleton** | React + TS + Vite mounting in an isolated candidate workspace | root mounts; local assets resolve; build and type check pass; the reference still runs unchanged | decision on §2.5 items and explicit implementation authorization |
 | **P2 — domain and transport parity** | port validity/freshness/provenance/readiness/jobs logic and the request layer | ported domain tests green; superseded-response and deadline behaviour demonstrated | P1 |
 | **P3 — UI parity** | shell, map, panels, states, accessibility | every row of §1.4 reachable; keyboard and focus journeys; reduced motion | P2 |
@@ -318,8 +324,8 @@ Because the repository has no commits and everything is untracked:
 
 | # | Capability | Current evidence | Parity evidence required | Status |
 | --- | --- | --- | --- | --- |
-| C1 | OIDC PKCE login and callback validation | code only (`proposal.js:559-621`); real browser round trip **never executed** | browser login against the running stack, state validated, query cleared, hash kept | **partial — gap** |
-| C2 | Logout with `id_token_hint` | code only (`:1260-1281`); real logout never executed | browser logout returns to `http://localhost:4173/`, panels cleared | **partial — gap** |
+| C1 | OIDC PKCE login and callback validation | at plan time: code only (`proposal.js:559-621`), real browser round trip **never executed**; since executed — admin and viewer PKCE login in Chrome (`odd/tasks/presentation-client-ready.md` L14) | browser login against the running stack, state validated, query cleared, hash kept | gap at plan time — round trip executed after this plan |
+| C2 | Logout with `id_token_hint` | at plan time: code only (`:1260-1281`), real logout never executed; since executed — logout against live Keycloak in Chrome, private session cleared (`odd/tasks/presentation-client-ready.md` L14 and L23) | browser logout returns to `http://localhost:4173/`, panels cleared | gap at plan time — logout executed after this plan |
 | C3 | Tokens in memory only; PKCE transaction in `sessionStorage`, removed | code (`:567`, `:592-593`, `:1267`) | no token in any storage; transaction absent after callback and logout | implemented in reference; parity pending |
 | C4 | Absolute gateway URLs; issuer separation | test (`:523-529`, `:668-683`) | ported test green | implemented |
 | C5 | Zones catalogue load, count, sorted selector | test (`:125-233`) | ported test green | implemented |
@@ -386,7 +392,7 @@ The frontend cannot close any of these alone. Nothing below is claimed as satisf
 - It does not claim any checklist requirement is satisfied.
 - It does not claim the page was verified in a browser, that login works end to end, that the layout is visually correct, or that it is accessible to any conformance level.
 - It does not claim Vite, React or Bun is installed, approved, version-pinned, or faster. No install, build or benchmark was run.
-- It distinguishes the newly declared scenario contract from runtime availability: jobs/risk integration remains in progress and no live scenario flow was verified.
+- It distinguishes the newly declared scenario contract from runtime availability: at plan time jobs/risk integration was in progress and no live scenario flow had been verified. **Superseded:** the backend implements the scenario catalogue and the optional `scenario_id` (`backend/docs/synthetic-scenarios.md`), and the shipped client exposes the selector (`frontend/src/views/JobsView.tsx:400`, `frontend/src/views/ActionsView.tsx:1041-1044`).
 - It does not claim the backend is reachable: the Docker Linux engine is unavailable, so no live stack was exercised.
 - It does not claim the current README is accurate on test count (37 vs 40 observed) or on `sessionStorage`.
 
@@ -399,7 +405,7 @@ The frontend cannot close any of these alone. Nothing below is claimed as satisf
 | D3 | Keep `Cache-Control: no-store`, or move to hashed long-lived caching (§2.5) | a real caching-policy change | team |
 | D4 | PWA: proceed, defer, or drop (§4) | installability and offline policy are product decisions with a safety dimension | product |
 | D5 | Where the candidate lives and when it may be promoted | no Git baseline exists; promotion needs an explicit snapshot | team |
-| D6 | Backend readiness for the coordinated scenario contract | payload is now declared; jobs/risk runtime integration and end-to-end evidence remain pending | backend session + team |
+| D6 | Backend readiness for the coordinated scenario contract | resolved after this plan: the catalogue and the optional `scenario_id` are implemented and exercised by the backend authenticated harness (`backend/docs/synthetic-scenarios.md`); at plan time the payload was only declared | backend session + team |
 | D7 | Whether a frontend CI workflow is added | there is none today; affects `CT-*` evidence | team |
 | D8 | Scope of the real login/logout acceptance check and who runs it | needs a running stack | team |
 
@@ -408,7 +414,7 @@ The frontend cannot close any of these alone. Nothing below is claimed as satisf
 | Risk | Severity | Mitigation in this plan |
 | --- | --- | --- |
 | **No Git baseline** — everything untracked; a bad edit is unrecoverable | high | additive candidate workspace; never move or delete the reference; explicit snapshot before any promotion |
-| Behaviour silently lost during the rewrite (fail-closed semantics, race handling, timers) | high | capability parity matrix (§6) with required evidence per row; port the 40 tests **before** rewriting |
+| Behaviour silently lost during the rewrite (fail-closed semantics, race handling, timers) | high | capability parity matrix (§6) with required evidence per row; port the 40 pre-migration tests **before** rewriting (delivered: the current suite is 358 tests across 36 files, all passing) |
 | Security regression from serving changes (CSP, fallback, caching, origin) | high | §2.5 decisions are explicit and gated; the serving smoke check is re-asserted for the real server |
 | Bundled secrets via `VITE_*` | high | stated rule: public configuration only; no secret in the bundle |
 | Trusting the stale superseded plan | medium | §1.5 and the header record the supersession and the dead evidence links |
@@ -426,7 +432,7 @@ The following table preserves the earlier proposal snapshot, superseded by the l
 
 | # | Proposal | Frontend implication if accepted | Status |
 | --- | --- | --- | --- |
-| P1 | Optional `scenario_id` on job creation | a selector appears in the jobs panel; the value must be sent only when one is chosen | PROPOSED — needs agreement |
+| P1 | Optional `scenario_id` on job creation | a selector appears in the jobs panel; the value must be sent only when one is chosen | PROPOSED at plan time — since implemented in the shipped client (`frontend/src/views/JobsView.tsx:400`, `frontend/src/views/ActionsView.tsx:1041`) |
 | P2 | Server-assigned `evaluated_at`, persisted once with the job | the UI displays a server-assigned instant instead of a client-side guess | PROPOSED |
 | P3 | Nullable scenario metadata on jobs, batches, risk and audit records, without backfill | new null fields must render as "not applicable", never as an error | PROPOSED |
 | P4 | `GET /v1/risk/synthetic-scenarios`, viewer/admin, array of `{id, description}` | fetch catalogue instead of hardcoding profiles; validate response | Declared in OpenAPI; runtime integration not verified |
@@ -448,7 +454,7 @@ Frontend implementation is not authorized by this documentation. A future select
 
 ## 10. Verification policy and evidence log
 
-This is passive planning documentation: meaningful behavioral RED/GREEN does not apply. The existing frontend suite was run once to resolve the test-count discrepancy: exit 0, 40 passing, no failures or skips. No React build was run because no candidate or dependencies exist. Verification instead means:
+This is passive planning documentation: meaningful behavioral RED/GREEN does not apply. The suite this document could run was the pre-migration `node:test` harness, executed once to resolve the test-count discrepancy: exit 0, 40 passing, no failures or skips. No React build was run because no candidate and no dependencies existed then. **Superseded:** the shipped suite is `npm test` (Vitest) — 358 tests across 36 files, all passing — and `.github/workflows/frontend.yml` runs it in CI. Verification of this document instead means:
 
 1. Re-reading this document against the current `frontend/` sources — the code it cites — checking that every `path:line` reference still resolves to what the text says.
 2. Confirming the three documented corrections (§1.2, §1.5, §2.2) are stated as observations with the command that produced them, not as assumptions.

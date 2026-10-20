@@ -59,7 +59,7 @@ action, so an alert is never a bare number (`ALR-V3`).
 | `FireWatchStuckJobs` | `queued_job_age_seconds > 1200` for 5 min | check the consumer and both DLQs; re-drive or replay; never force terminal |
 | `FireWatchBrokerUnavailable` | `broker_ready == 0` for 5 min | check RabbitMQ; degraded, not down |
 | `FireWatchDatabasePoolSaturated` | pool acquired ≥ max for 5 min | find the slow query before raising the limit |
-| `FireWatchTargetDown` | `up == 0` for 2 min | check the pod and its readiness |
+| `FireWatchTargetDown` | `up == 0` for 2 min | check the pod and its readiness; covers `gateway`, `jobs`, `risk` and `prevention` |
 
 An Alertmanager is not configured; firing alerts are visible in the Prometheus UI
 and as the `ALERTS` series. Routing them is a later integration step.
@@ -98,7 +98,8 @@ rate that §1 currently lacks. **Not executed yet.**
 ## 6. Autoscaling and recovery (`S3`, `S4`)
 
 - **Autoscaling policy:** `deploy/k8s/base/autoscaling.yaml` adds one
-  `HorizontalPodAutoscaler` per service, 2→6 replicas, scaling on CPU utilisation
+  `HorizontalPodAutoscaler` per service — `gateway`, `jobs`, `risk` and
+  `prevention` — 2→6 replicas, scaling on CPU utilisation
   (70 % of the request). Scale-up stabilises for 60 s, scale-down for 300 s so a
   lull does not shrink the pool the next 15-minute cycle needs.
 - **Recovery (RTO ≤ 15 min):** the 2-replica deployments, the `PodDisruptionBudget`
