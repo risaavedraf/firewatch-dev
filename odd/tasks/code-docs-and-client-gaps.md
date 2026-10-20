@@ -25,19 +25,22 @@
 
 | ID | Spec | Ruta | Descripción | Estado | Commit |
 |---|---|---|---|---|---|
-| T1 | S2, S3 | `odd/estado-requerimientos-cliente.md`, `odd/urgent/README.md` | Corte consolidado de brechas y refresco de la tabla obsoleta | pendiente | — |
-| T2 | S1 | `backend/docs/code-explanation/01..08*.md` | Seis afirmaciones de contenido corregidas contra el código | pendiente | — |
-| T3 | S1, S4 | `backend/docs/code-explanation/README.md` | Inventario extendido (114) y estados ajustados (47) con su razón | pendiente | — |
+| T1 | S2, S3 | `odd/estado-requerimientos-cliente.md`, `odd/urgent/README.md` | Corte consolidado de brechas y refresco de la tabla obsoleta | hecha | `159a4e1` |
+| T2 | S1 | `backend/docs/code-explanation/01..08*.md` | Seis afirmaciones de contenido corregidas contra el código | absorbida por T5–T11 | — |
+| T3a | S1, S4 | `backend/docs/code-explanation/README.md` | Inventario extendido: 114 filas nuevas con estado veraz | hecha | `4a2fd15` |
+| T3b | S1, S4 | `backend/docs/code-explanation/README.md` | 47 intervalos a las líneas de hoy y estado decidido por archivo | pendiente | — |
 | T4 | S1, S4 | `backend/docs/code-explanation/source-snapshot.json` | Snapshot regenerado y verificador en exit 0, con evidencia registrada | pendiente | — |
-| T5 | S1, S6 | `backend/docs/code-explanation/01-gateway.md` | Re-derivación completa (13 citas; preflight `OPTIONS` ausente) | pendiente | — |
-| T6 | S1, S6 | `backend/docs/code-explanation/02-jobs.md` | Re-derivación completa (7 citas; interfaz `Repository`) | pendiente | — |
-| T7 | S1, S6 | `backend/docs/code-explanation/03-risk.md` | Re-derivación completa (`publisher.Publish`) | pendiente | — |
+| T5 | S1, S6 | `backend/docs/code-explanation/01-gateway.md` | Re-derivación completa (13 citas; preflight `OPTIONS` ausente) | hecha | `24ea2b9` |
+| T6 | S1, S6 | `backend/docs/code-explanation/02-jobs.md` | Re-derivación completa (7 citas; interfaz `Repository`) | hecha | `58a2e8b` |
+| T7 | S1, S6 | `backend/docs/code-explanation/03-risk.md` | Re-derivación completa (`publisher.Publish`) | hecha | `b59153f` |
 | T8 | S1, S6 | `backend/docs/code-explanation/04-messaging.md` | Re-derivación completa (45 citas; cronograma de reintentos) | pendiente | — |
 | T9 | S1, S6 | `backend/docs/code-explanation/06-database.md` | Re-derivación completa (4 y 9 migraciones, no 1) | pendiente | — |
 | T10 | S1, S6 | `backend/docs/code-explanation/07-deployment.md` | Re-derivación completa (readiness `200`/`503`) | pendiente | — |
 | T11 | S1, S6 | `backend/docs/code-explanation/05-contracts.md`, `08-tests-tools.md` | Re-derivación completa de las dos partes restantes | pendiente | — |
 
 ## Log
+
+- **L7 (2026-10-20)** — **Frontera de entrega, decidida al cruzar el guardrail de 400 líneas.** La rama acumula **791 líneas autoradas en 14 commits desde `main`**: los 9 de la reconciliación previa y 5 de este frente. Estrategia: PRs encadenados, no uno solo. Primer eslabón: `2c6ea95..267a4bb` (reconciliación, 137+/52−). Segundo eslabón: `159a4e1..` (este frente). El commit de despliegue `2c6ea95` (`Risk: item 5`) queda aislado en el primer eslabón para que la revisión nativa lo tome solo, como exige su línea de riesgo.
 
 - **L1 (2026-10-20)** — Petición original, verbatim: «ok, entonces arreglemos las cosas de la documentaci» y, al pedir profundidad: «Quiero que la documentación esté acorde con lo que tenemos en codigo, y marcar especificamente que es lo que nos falta que nos pidió el cliente».
 - **L2 (2026-10-20)** — **Estado de partida medido.** Rama base `docs/reconcile-docs-odd-code` en `267a4bb`, árbol limpio, 9 commits sin publicar. `verify_structure.py`: 165 errores — desglose 114/47/3/1. `check_md_links.py`: 105 archivos, `BROKEN: 0`. `npm test` (frontend): 36 archivos, 358/358. `kubectl kustomize backend/deploy/k8s/base`: 4 `HorizontalPodAutoscaler`. Entorno: `promtool`, `kind`, `minikube`, `helm` y `k6` no instalados; daemon de Docker detenido.
