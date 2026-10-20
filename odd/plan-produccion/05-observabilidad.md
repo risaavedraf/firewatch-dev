@@ -1,7 +1,7 @@
 # Frente 5 — Observabilidad productiva y métricas de modelo
 
 - **Grupo de entrega:** G4 — Operación.
-- **Estado:** Parcial — S5 y S1 implementados, S2 implementado en el servicio `risk`, S3/S4 documentados con reglas de alerta. La medición (RPS/p95/memoria/errores/distribución) sigue pendiente de entorno.
+- **Estado:** Parcial — S5 y S1 implementados, S2 implementado en los cuatro servicios (`internal/metrics/http.go` y `process.go` en gateway, jobs, risk y prevention), S3/S4 documentados con reglas de alerta. La medición (RPS/p95/memoria/errores/distribución) sigue pendiente de entorno.
 - **Riesgo (Task Size):** alto al implementar — ítem 5 (operación/observabilidad) e ítem 6 (señales sin *ground truth*).
 - **Depende de:** *ground truth* para evaluar calidad; umbrales y herramientas acordados.
 - **Seam / superficie:** `/metrics`; logging de inputs/outputs/ground truth; Prometheus → Grafana; `backend/docs/architecture.md:55-56`.

@@ -74,7 +74,7 @@ and as the `ALERTS` series. Routing them is a later integration step.
 - **Frequency:** per batch, and at least daily. Before ground truth exists the
   reevaluation is over input distribution only.
 - **Never retrain on a distribution change alone.** Retraining requires evidence
-  of quality loss against ground truth (`urgent/04-operacion-monitoreo.md:21`).
+  of quality loss against ground truth (`odd/urgent/04-operacion-monitoreo.md:21`).
 
 The inputs and outputs needed to compute drift are logged by the publication path
 (`risk_assessed`, see §7). Ground truth is not logged yet: the real observations
@@ -133,7 +133,7 @@ vCPU) is an **objective** to be validated with load, not a measured result. The
 validation is: run the k6 benchmark at 4 RPS and a peak above it, watch
 `firewatch_process_*` and `firewatch_db_pool_*`, and confirm the objective in §1
 holds with the stated replicas. Per-size justification follows the observed load
-(`urgent/04-operacion-monitoreo.md:28`).
+(`odd/urgent/04-operacion-monitoreo.md:28`).
 
 ## 9. Operator runbook: exhausted retries, dead letters and stuck jobs
 

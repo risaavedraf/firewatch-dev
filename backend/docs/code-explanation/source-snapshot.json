@@ -943,8 +943,8 @@
       "lines": 58
     },
     "docs/checklist-evidence-u1.md": {
-      "sha256": "ae7159a1bac8d3d3f98567f449f755fa7a9afa769e868527402dd528f006075a",
-      "bytes": 26067,
+      "sha256": "036dadc5f6734b075625be284e931a0d63f498d0c3521e80ad91fbf2c79585bf",
+      "bytes": 26099,
       "lines": 173
     },
     "docs/checklist-evidence-u2-u3.md": {
@@ -953,13 +953,13 @@
       "lines": 110
     },
     "docs/checklist-evidence-u4.md": {
-      "sha256": "fd96cbaa43e616cf1aad266b492a50fc62e16389919f3b7ef453c5005287811c",
-      "bytes": 18079,
+      "sha256": "4b961ac6146e2e1ee9427e26ff38d807f63b4a20150c15b24273370277531931",
+      "bytes": 18123,
       "lines": 153
     },
     "docs/checklist-evidence-u5.md": {
-      "sha256": "a213da3b9a4be5ca186781d1f46461262581cb9c9a325ce7a8020091651b21b9",
-      "bytes": 17861,
+      "sha256": "c1df39b3524e8ac0fa08a7c34a66b3f7ad4e6b9e531c472c36f6bb78465e2fa0",
+      "bytes": 17858,
       "lines": 146
     },
     "docs/ci-migration-readiness.md": {
@@ -978,8 +978,8 @@
       "lines": 160
     },
     "docs/operations.md": {
-      "sha256": "75bead31a5d03defa4d3194e4b7d00ea4014986b3b837588096825cbe3032ee1",
-      "bytes": 13006,
+      "sha256": "f93a3568bd83973f557df55331b50efd3c28623fdb72467f2bfa9a6b37d1a917",
+      "bytes": 13014,
       "lines": 215
     },
     "docs/preventive-evidence.md": {
