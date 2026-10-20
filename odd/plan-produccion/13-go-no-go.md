@@ -1,7 +1,7 @@
 # Frente 13 — Go/No-Go y firma de aprobación de producción
 
 - **Grupo de entrega:** No cierra esta semana — **bloqueado por los dos pendientes permitidos** (datos reales + modelo).
-- **Estado:** Bloqueado — planificación.
+- **Estado:** **Bloqueado para acreditar** — planificación. El historial, la matriz y los criterios pueden prepararse; la decisión y la firma no.
 - **Riesgo (Task Size):** alto — ítem 6 (no se declara aprobación sin evidencia reproducible).
 - **Depende de:** evidencia de datos y modelo, reportes de infraestructura y criterios acordados.
 - **Seam / superficie:** matriz Go/No-Go, reportes enlazados y registro de versiones.
@@ -30,6 +30,8 @@
 
 Ruta por defecto: **bloqueada**. No iniciar hasta reunir la evidencia requerida.
 
+Preparación permitida sin datos: historial de versiones, matriz de pruebas y criterios de decisión. La decisión y la firma quedan bloqueadas.
+
 ## Dependencias y bloqueos humanos
 
 - **Bloqueo doble:** datos reales y modelo aprobado (los dos pendientes permitidos).
@@ -42,3 +44,4 @@ Ruta por defecto: **bloqueada**. No iniciar hasta reunir la evidencia requerida.
 ## Log
 
 - **L1 (2026-10-16)** — Creación del desglose por spec a partir de [`README.md`](README.md) §1 (frente 13). Documento de planificación; sin implementación.
+- **L2 (2026-10-20)** — Estado precisado a «bloqueado para acreditar»: historial, matriz y criterios se preparan sin datos; la firma sigue bloqueada (README §5.1).

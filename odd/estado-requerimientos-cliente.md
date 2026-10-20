@@ -27,6 +27,14 @@ grep -hoE '^\| `[A-Z]+-[A-Z]+[0-9]+` \| [A-Za-z]+' backend/docs/checklist-eviden
   | awk '{print $NF}' | sort | uniq -c
 ```
 
+Equivalente en PowerShell, para reproducirlo en Windows:
+
+```powershell
+Select-String -Path backend/docs/checklist-evidence-u*.md -Pattern '^\| `[A-Z]+-[A-Z]+[0-9]+`' |
+  ForEach-Object { ($_.Line -split '\|')[2].Trim() } |
+  Group-Object | Sort-Object Count -Descending | Format-Table Count,Name
+```
+
 Salida observada: `66 Blocked`, `60 Partial`, `5 Pending`, `1 Proposed`. Las 132 filas son 132 IDs distintos: el mismo patrón aplicado a [la fuente](../Referencias/tareas_verificacion_implementacion_IA.md) con `grep -ohE '\b[A-Z]{2,3}-[IV][0-9]+\b' … | sort -u | wc -l` devuelve `132`, y el mismo filtro por `-I` y por `-V` devuelve `72` y `60`. No hay ID de la fuente sin fila ni fila sin ID de la fuente.
 
 **Total por estado**
@@ -76,14 +84,14 @@ El agrupamiento sigue la estructura de la fuente: Parte A (secciones 1–3, segu
 
 | Artefacto que falta | IDs que dependen | Dónde está la razón |
 |---|---|---|
-| Inventario de fuentes de observación **de producción** y el nombre de quién lo mantiene: el servido hoy es un fixture sintético más un activo geográfico real | `DAT-I1` | [u2-u3:35](../backend/docs/checklist-evidence-u2-u3.md) |
+| Inventario de fuentes de observación **de producción** y el nombre de quién lo mantiene: el adaptador HTTP/JSON existe y se configura con `FIREWATCH_SOURCE_URL`, pero el servido hoy por defecto es un fixture sintético más un activo geográfico real | `DAT-I1` | [u2-u3:35](../backend/docs/checklist-evidence-u2-u3.md) |
 | Reglas de validación y rangos físicamente válidos acordados para entradas reales, y el reporte que las contrasta con el dataset real | `DAT-I2`, `DAT-V1`, `DAT-V2`, `DAT-V4` | [u2-u3:36](../backend/docs/checklist-evidence-u2-u3.md), [:38](../backend/docs/checklist-evidence-u2-u3.md), [:39](../backend/docs/checklist-evidence-u2-u3.md), [:41](../backend/docs/checklist-evidence-u2-u3.md) |
 | Política de nulos de las fuentes reales y la lista de campos críticos no anulables | `DAT-V3` | [u2-u3:40](../backend/docs/checklist-evidence-u2-u3.md) |
 | Ruta de ingesta real y, con ella, la acción acordada por clase de fallo (rechazar, alertar o imputar) y a quién se alerta | `DAT-I3`, `DAT-V5` | [u2-u3:37](../backend/docs/checklist-evidence-u2-u3.md), [:42](../backend/docs/checklist-evidence-u2-u3.md) |
 | Grupos a proteger o vigilar, métrica de paridad y su umbral acordado, estrategia de mitigación, reporte de cobertura por zona y por clase, y la aceptación del N/A de fairness | `SES-I1`, `SES-I2`, `SES-I3`, `SES-V1`, `SES-V2`, `SES-V3` | [u2-u3:48-53](../backend/docs/checklist-evidence-u2-u3.md) |
 | Dataset etiquetado con separación temporal o geográfica justificada, inventario completo de variables *giveaway* y auditoría de fuga sobre una corrida de entrenamiento | `LEA-I1`, `LEA-I2`, `LEA-V1`, `LEA-V2` | [u2-u3:59-62](../backend/docs/checklist-evidence-u2-u3.md) |
 
-### 3. Modelo (secciones 2.3 y 5 · 11 IDs · [registro U3](../backend/docs/checklist-evidence-u2-u3.md))
+### 3. Modelo (sección 5 · 11 IDs · [registro U3](../backend/docs/checklist-evidence-u2-u3.md))
 
 | Artefacto que falta | IDs que dependen | Dónde está la razón |
 |---|---|---|

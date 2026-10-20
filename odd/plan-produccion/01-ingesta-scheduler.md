@@ -1,7 +1,7 @@
 # Frente 1 — Ingesta de fuentes reales y ciclo/scheduler de 15 min
 
 - **Grupo de entrega:** G2 — Núcleo de datos y modelo (solo el *seam*).
-- **Estado:** Pendiente — planificación. No acredita implementación ni evidencia.
+- **Estado:** Parcial — el contrato `Provider`/`ObservationSet`/`Provenance` y el fixture determinista quedaron entregados en la presentación (2026-10-18). La ingesta de fuentes reales y el ciclo de 15 min con datos reales siguen pendientes (pendiente permitido).
 - **Riesgo (Task Size):** alto al implementar — ítem 1 (datos/procedencia persistidos) e ítem 3 (contrato `Provider` que otros consumen).
 - **Depende de:** acceso y periodicidad real de las fuentes (decisión humana); frente 2 (misma frontera de observaciones).
 - **Seam / superficie:** `backend/services/risk/internal/source/` (`provider.go`, `fixture.go`); interfaz `Provider`; `contracts/gen/observations/v1` (`Observation`, `ObservationSet`, `Provenance`); migración `007_synthetic_evaluation.sql`.
@@ -31,6 +31,7 @@
 | T3 | S1 | inline | Registrar procedencia/linaje por observación (`Provenance`). | — |
 | T4 | S2 | inline | Scheduler de 15 min que dispare el ciclo completo, con seam de sustitución de fuente. | — |
 | T5 | S3 | inline | Rechazar lotes incompletos/inválidos y exponer estado/frescura. | — |
+| T6 | S4 | inline | Prueba de sustitución: cambiar el proveedor por configuración y demostrar que ningún archivo fuera de `backend/services/risk/internal/source/` cambia. | — |
 
 Ruta por defecto: **inline** (seam + fixtures). Delegar escritura solo por disparador (paralelismo/contexto).
 
@@ -42,8 +43,11 @@ Ruta por defecto: **inline** (seam + fixtures). Delegar escritura solo por dispa
 ## Criterios de cierre
 
 - Requisito de ciclo y frescura: `../../Referencias/EP1_Equipo3_Armijo_Calderon_Saavedra2_produccion.md:88,104`.
+- La prueba de sustitución (T6) pasa sin cambios fuera de `backend/services/risk/internal/source/`, y el fixture es determinista con semilla.
 - `../../backend/docs/verification.md:65` declara que scheduler y datos reales **no están establecidos**: no marcar cierre sin evidencia reproducible y umbrales acordados.
 
 ## Log
 
 - **L1 (2026-10-16)** — Creación del desglose por spec a partir de [`README.md`](README.md) §1 (frente 1). Documento de planificación; sin implementación.
+- **L2 (2026-10-20)** — Estado corregido a Parcial: seam y fixture entregados en la presentación; la fuente real sigue pendiente por decisión (README §1 y §7).
+- **L3 (2026-10-20)** — Se agrega T6 (prueba de sustitución) y su criterio de cierre; el frente puede completarse sin fuente real según README §5.1.

@@ -85,6 +85,20 @@ Dos decisiones de la sesión A2 no aparecen arriba porque no son políticas de p
 
 Para cada frente, «terminado» exige el criterio de cierre de sus IDs: evidencia reproducible, umbrales acordados, responsable y, cuando aplique, datos reales. Una prueba en PASS no marca una casilla del checklist (ver [`odd/urgent/README.md:27-34`](../urgent/README.md)). Registrar el estado en [`odd/tasks/README.md`](../tasks/README.md) con **qué está entregado** y **qué falta** explícitos.
 
+### 5.1 Terminado en modo sintético
+
+Un frente puede darse por terminado sin datos reales ni modelo entrenado cuando cumple:
+
+- Contrato congelado: `ObservationSet`, `Provenance`, `Provider` y `Classifier`.
+- Fixture determinista con semilla: la misma entrada produce la misma salida.
+- **Prueba de sustitución:** cambiar el proveedor o el clasificador por configuración y demostrar que ningún archivo fuera del adaptador cambia.
+- Front con estados vacío, carga, error y dato vencido, y procedencia visible.
+- Lotes definidos y probados: tamaño, cadencia, idempotencia, deduplicación y retención.
+- HPA, alertas y dashboards escritos y etiquetados como objetivo, no como medición.
+- Suites, `go vet` y contract tests en verde.
+
+Eso habilita «listo para conectar». No habilita marcar IDs del checklist ni declarar mediciones.
+
 ## 6. Fuentes autoritativas
 
 - **Requisitos funcionales/no funcionales de producción:** [`Referencias/EP1_Equipo3_Armijo_Calderon_Saavedra2_produccion.md:16-104`](../../Referencias/EP1_Equipo3_Armijo_Calderon_Saavedra2_produccion.md).
@@ -122,7 +136,7 @@ Cada frente tiene su propio documento con el contrato ODD (**Specs → Tasks →
 - **Sesión C (decisión):** frente 14 (decisión de motor) y frente 7 (registry/claves): son decisiones humanas que habilitan al resto.
 - **Sesión D:** frente 9 (frontend/browser) y frente 15 (DIFROL): el frente 9 se ejecutó (L14/L23); DIFROL sigue pendiente.
 - **Sesión E (gobierno):** frente 8 (U1) — requiere responsables.
-- **Detenidas hasta aprobación/datos:** frentes 12 y 13 (modelo entrenado y evaluación); los frentes 1–3 quedaron implementados en la entrega de presentación, con la fuente/modelo real como pendientes permitidos.
+- **Detenidas hasta aprobación/datos:** frentes 12 y 13 (modelo entrenado y evaluación); el frente 3 quedó entregado y los frentes 1–2 dejaron su seam y su implementación por defecto, con la fuente y el modelo reales como pendientes permitidos.
 
 ## 8. Registro de avance — Sesión B (2026-10-16)
 
@@ -289,4 +303,69 @@ La entrega de esta semana tiene su propio plan, con specs, tareas y reparto por 
 **Estado al 2026-10-18:** la entrega quedó en `main` con `f509666` (PR #31, issue #30) en su momento; la ola de monitoreo siguió en los PRs #33–#35 y el baseline actual es `ef686c0`. S2 y S1 se cerraron con la corrida en frío (L22) y el monitoreo S7 con T25–T27 (L27). Sigue fuera de alcance lo que exige modelo entrenado, fuente real, carga/RTO, firma/registry/rollout, gobierno, DIFROL y monitoreo en manifiestos de Kubernetes.
 
 Sigue en pie lo que este documento ya declara fuera: frentes 6, 7, 8, 12, 13, 14, 15 y las unidades BH que exigen entorno.
+
+## 12. Plan de cierre de la semana (2026-10-20)
+
+**Criterio de orden:** dependencias, no urgencia percibida. Cuatro de los seis frentes parciales no necesitan código nuevo: necesitan un entorno o una firma.
+
+### 12.1 Fase 0 — Decisiones, día 1
+
+| # | Decisión | Desbloquea | Quién decide |
+| --- | --- | --- | --- |
+| D1 | Motor de datos productivo, backups y SLA | Frente 14 y parte del 6 | Arquitectura + cliente |
+| D2 | Registry, llaves de firma y acceso al clúster | Frente 7 y la ejecución del 6 | Infraestructura |
+| D3 | Responsables de gobierno y aprobación de controles U1 | Frente 8 — **41 de los 132 IDs** | Cliente / jefe de proyecto |
+| D4 | Qué subconjunto de los 132 es requisito real | Todo el marcado de IDs | Cliente |
+| D5 | Alcance de accesibilidad: ¿WCAG AA? ¿lector de pantalla? | Cierre del frente 9 | Producto |
+
+Salida de la fase: acta con nombre, fecha y criterio por decisión. D3 y D4 son las de mayor retorno: 41 IDs dependen de la primera y, sin la segunda, ningún cierre es defendible.
+
+### 12.2 Fase 1 — Cerrar lo que ya está escrito, días 2–3
+
+| Frente | Qué falta exactamente | Evidencia de cierre |
+| --- | --- | --- |
+| 5 Observabilidad | Medir RPS, p95, memoria y errores en entorno aislado | Medición registrada; OTel y *ground truth* quedan fuera del frente |
+| 6 Autoscaling | Correr k6, aplicar HPA, comparar p95 contra <500 ms y medir RTO | Benchmark reproducible con pasa/falla |
+| 11 Hardening | BH-02 (inventario + scan de imágenes con daemon Docker) y BH-04/05/06/10/11 según entorno | Scan y suites por unidad |
+| 4 DLQ/replay | E2E: interrumpir PostgreSQL, agotar reintentos, restaurar, reiniciar consumidores; `-race` | Corrida registrada |
+| 9 Login/a11y | Certificación WCAG y prueba con lector, si D5 lo incluye | Informe de medición |
+| 1 y 2 | `T6` de cada frente: prueba de sustitución y fixture adversarial | Sustitución sin cambios fuera del adaptador (README §5.1) |
+| 3, 4, 10 | Ya cerrados | No reabrir |
+
+Cinco IDs pueden cerrarse sin datos porque son documentales: `GOB-I1`, `AME-I1`, `AME-I2`, `RED-I3` y `GNG-I1`. Ninguno está cerrado: faltan la decisión y la firma.
+
+Nota transversal: §5.1 exige procedencia visible en el front. La procedencia ya se muestra en la vista General, incluida la marca de demostración (`frontend/src/views/OverviewView.tsx:171`, `:439`; `frontend/src/domain/provenance.ts:39`); lo que falta con una fuente real es que esa procedencia sea real, y el fixture adversarial sigue siendo trabajo de este frente, no del modelo.
+
+### 12.3 Fase 2 — Bloqueado para acreditar, días 4–5
+
+Solo preparación, sin ejecutar:
+
+- **12 Evaluación científica:** congelar protocolo, métricas y umbrales. No se ejecuta sin *ground truth*.
+- **13 Go/No-Go:** dejar el acta con criterios y firmas listas. No se firma.
+- **15 DIFROL:** radicar la solicitud de validación y documentar la procedencia de la cartografía.
+- **1 y 2:** mantener el contrato y el fixture; ninguna sustitución real.
+
+### 12.4 Fase 3 — Sincronizar el estado
+
+1. Marcar en `backend/docs/checklist-evidence-u*.md` solo IDs con evidencia reproducible.
+2. Actualizar el §10 de este documento y [`../tasks/README.md`](../tasks/README.md).
+3. Regenerar [`../presentacion-mandante.md`](../presentacion-mandante.md) con el corte final.
+4. `python -B odd/tools/check_md_links.py` → debe dar `BROKEN: 0`.
+
+### 12.5 Camino crítico
+
+```text
+D3 (gobierno) ──────────────► frente 8 ──► 41 IDs
+D1 (motor) ──► frente 14 ──► frente 6 ──► frente 13 (acta)
+D2 (registry) ──► frente 7 ──┘
+D4 (alcance) ──────────────► marcado de cualquier ID
+```
+
+Si D1 y D2 no se resuelven el día 1, los frentes 6, 7, 13 y 14 no arrancan y la semana se consume en los parciales de la Fase 1. Ese es el único riesgo real del plan.
+
+### 12.6 Lo que este plan no hace
+
+- No cierra los 132: eso exige D4 más evidencia por ID, y varios IDs requieren datos reales que están explícitamente fuera.
+- No convierte una suite en verde en una casilla marcada.
+- No incluye OTel, firma de imágenes ni modelo entrenado: están fuera del alcance permitido y decirlo evita prometer lo que no se entrega.
 

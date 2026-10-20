@@ -1,7 +1,7 @@
 # Frente 2 — Servicio real de inferencia y modelo aprobado
 
 - **Grupo de entrega:** G2 — Núcleo de datos y modelo (solo el *seam*).
-- **Estado:** Pendiente — planificación. No acredita implementación ni evidencia.
+- **Estado:** Parcial — el clasificador por defecto `academic-rule-v1` quedó entregado en la presentación (modelo v2). El servicio de inferencia con modelo entrenado y aprobado sigue pendiente (pendiente permitido).
 - **Riesgo (Task Size):** alto al implementar — ítem 1 (versión/procedencia persistida) e ítem 3 (contratos `Classifier`/`Provider`).
 - **Depende de:** frente 1 (observaciones); disponibilidad de modelo y política de aprobación (decisión humana).
 - **Seam / superficie:** `backend/services/risk/internal/classify/` (`classifier.go`, `academic_rule.go`); interfaces `Classifier`/`Provider`; persistencia `models` y publicación de lotes.
@@ -30,6 +30,7 @@
 | T3 | S2 | inline | Persistir cada resultado con zona, período, fecha, versión de modelo y procedencia. | — |
 | T4 | S3 | inline | Definir y documentar el procedimiento de aprobación/reversión de versiones. | — |
 | T5 | S1,S4 | inline | *Seam* de sustitución del modelo real sin tocar el resto del sistema. | — |
+| T6 | S4 | inline | Prueba de sustitución: cambiar el clasificador por configuración y demostrar que ningún archivo fuera de `backend/services/risk/internal/classify/` cambia. | — |
 
 Ruta por defecto: **inline** (seam + fixtures). La sustitución real del modelo queda **fuera** de este frente.
 
@@ -41,8 +42,11 @@ Ruta por defecto: **inline** (seam + fixtures). La sustitución real del modelo 
 ## Criterios de cierre
 
 - Metadatos y aprobación: `../../Referencias/EP1_Equipo3_Armijo_Calderon_Saavedra2_produccion.md:54-56`.
+- La prueba de sustitución (T6) pasa sin cambios fuera de `backend/services/risk/internal/classify/`, y `academic-rule-v1` sigue siendo determinista.
 - `../../backend/docs/verification.md:65` declara que precisión/calibración y publicación por ruta productiva **no están establecidas**.
 
 ## Log
 
 - **L1 (2026-10-16)** — Creación del desglose por spec a partir de [`README.md`](README.md) §1 (frente 2). Documento de planificación; sin implementación.
+- **L2 (2026-10-20)** — Estado corregido a Parcial: `academic-rule-v1` entregado (modelo v2); el modelo entrenado sigue pendiente por decisión (README §1 y §7).
+- **L3 (2026-10-20)** — Se agrega T6 (prueba de sustitución) y su criterio de cierre; el frente puede completarse sin modelo real según README §5.1.

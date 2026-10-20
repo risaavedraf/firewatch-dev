@@ -1,5 +1,7 @@
 # Urgente — preparación MVP FireWatch
 
+**Estado:** foto de planificación del **2026-10-14**, corregida el 2026-10-20. **No es el estado vigente.** El corte actual es [`../estado-requerimientos-cliente.md`](../estado-requerimientos-cliente.md) y el trabajo por frente vive en [`../plan-produccion/README.md`](../plan-produccion/README.md).
+
 **Propósito:** carpeta temporal para preparar la reunión con el jefe de proyecto y organizar el trabajo derivado del checklist IA. Es una cola de planificación, no una declaración de que sus tareas ya estén implementadas.
 
 ## Lectura rápida para mañana

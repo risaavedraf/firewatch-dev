@@ -1,7 +1,7 @@
 # Frente 12 — Evaluación científica (sesgo, leakage, robustez, Champion/Challenger, drift)
 
 - **Grupo de entrega:** No cierra esta semana — **bloqueado por los dos pendientes permitidos** (datos reales + modelo).
-- **Estado:** Bloqueado — planificación. La evidencia sintética no cierra los IDs.
+- **Estado:** **Bloqueado para acreditar** — planificación. La evidencia sintética no cierra los IDs; el protocolo, las métricas y los criterios pueden prepararse sin datos reales.
 - **Riesgo (Task Size):** alto al implementar — ítem 1 (datos/partición) e ítem 6 (resultados sin *ground truth* no son válidos).
 - **Depende de:** datos reales representativos; artefacto de modelo evaluable/*ground truth*; grupos, métricas y umbrales acordados.
 - **Seam / superficie:** fuentes/esquema y partición de datos; artefacto/versionado del modelo; logging de inputs, outputs y *ground truth*.
@@ -33,6 +33,8 @@
 
 Ruta por defecto: **bloqueada**. No iniciar hasta que datos y modelo reales estén disponibles y aprobados.
 
+Preparación permitida sin datos: protocolo, métricas, tolerancias y criterios de evaluación. La ejecución y la acreditación quedan bloqueadas.
+
 ## Dependencias y bloqueos humanos
 
 - **Bloqueo doble:** datos reales y modelo aprobado (los dos pendientes permitidos).
@@ -45,3 +47,4 @@ Ruta por defecto: **bloqueada**. No iniciar hasta que datos y modelo reales est�
 ## Log
 
 - **L1 (2026-10-16)** — Creación del desglose por spec a partir de [`README.md`](README.md) §1 (frente 12). Documento de planificación; sin implementación.
+- **L2 (2026-10-20)** — Estado precisado a «bloqueado para acreditar»: protocolo y criterios se preparan sin datos; la ejecución sigue bloqueada (README §5.1).
