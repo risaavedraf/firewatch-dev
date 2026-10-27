@@ -47,18 +47,18 @@ Citas: `services/gateway/cmd/server/main.go:29-51`; `services/jobs/cmd/server/ma
 
 | Archivo / rango | Declaraciones y efecto |
 | --- | --- |
-| [go.work](../../go.work):1-9 | Go 1.27.2 y cinco módulos: contratos, gateway, jobs, prevention y risk. No módulo raíz ejecutable |
-| [gateway/go.mod](../../services/gateway/go.mod):1-23 | firewatch.local/gateway, Go1.27.2, OIDC3.17.0 y kin-openapi0.133.0; jose4.1.4 y once indirectos de soporte |
-| [jobs/go.mod](../../services/jobs/go.mod):1-23; [risk/go.mod](../../services/risk/go.mod):1-34 | Módulos propios; contracts0.0.0, OIDC3.17.0, jose4.1.4, uuid1.6.0, pgx5.9.2, amqp1.13.0; risk añade kin-openapi0.133.0; replace local ../../contracts/gen |
-| [prevention/go.mod](../../services/prevention/go.mod):1-19 | firewatch.local/prevention, Go1.27.2, OIDC3.17.0, jose4.1.4, uuid1.6.0, pgx5.9.2; sin amqp ni contratos |
-| [contracts/gen/go.mod](../../contracts/gen/go.mod):1-3 | firewatch.local/contracts y Go1.27.2, sin dependencias declaradas |
+| [go.work](../../go.work):1-9 | Go 1.27.3 y cinco módulos: contratos, gateway, jobs, prevention y risk. No módulo raíz ejecutable |
+| [gateway/go.mod](../../services/gateway/go.mod):1-23 | firewatch.local/gateway, Go1.27.3, OIDC3.17.0 y kin-openapi0.133.0; jose4.1.6 y once indirectos de soporte |
+| [jobs/go.mod](../../services/jobs/go.mod):1-23; [risk/go.mod](../../services/risk/go.mod):1-34 | Módulos propios; contracts0.0.0, OIDC3.17.0, jose4.1.6, uuid1.6.0, pgx5.9.2, amqp1.14.0; risk añade kin-openapi0.133.0; replace local ../../contracts/gen |
+| [prevention/go.mod](../../services/prevention/go.mod):1-19 | firewatch.local/prevention, Go1.27.3, OIDC3.17.0, jose4.1.6, uuid1.6.0, pgx5.9.2; sin amqp ni contratos |
+| [contracts/gen/go.mod](../../contracts/gen/go.mod):1-3 | firewatch.local/contracts y Go1.27.3, sin dependencias declaradas |
 | [.dockerignore](../../.dockerignore):1-8 | Excluye .env, anidados, bin, coverage.out, go.work*, .git, deploy y docs del contexto; no es escáner universal de secretos ni excluye todo archivo llamado .env.example |
 
 Los go.sum inventariados no se analizaron: no se acredita integridad ni disponibilidad de módulos. La selección automática de toolchain está fuera de la ejecución autorizada.
 
 Los [Dockerfile gateway](../../services/gateway/Dockerfile):1-16, [jobs](../../services/jobs/Dockerfile):1-17, [risk](../../services/risk/Dockerfile):1-24 y [prevention](../../services/prevention/Dockerfile):1-18 usan el mismo patrón:
 
-1. Build desde Go1.27.2-bookworm con digest; WORKDIR de módulo; `GOWORK=off`, `CGO_ENABLED=0` (en los cuatro:1-3).
+1. Build desde Go1.27.3-bookworm con digest; WORKDIR de módulo; `GOWORK=off`, `CGO_ENABLED=0` (en los cuatro:1-3).
 2. Jobs/risk copian contracts/gen antes de go.mod/go.sum para resolver replace (jobs:4-6; risk:4-6). Gateway y prevention copian solo su módulo (gateway:4-5; prevention:4-5). `go mod download && go mod verify` es instrucción de build leída, no ejecutada aquí.
 3. Copian código y compilan `/server` con trimpath y `-s -w` (gateway:6-7; jobs:7-8; risk:7-8; prevention:6-7).
 4. Target `test` hereda build y usa ENTRYPOINT `go test -count=1 ./...` (gateway:9-10; jobs:10-11; risk:10-18; prevention:9-10). Risk añade la copia de `contracts/openapi/` porque sus tests la leen por ruta relativa (risk:11-17). No implica tests en la imagen runtime ni ejecución automática al leer Dockerfile.

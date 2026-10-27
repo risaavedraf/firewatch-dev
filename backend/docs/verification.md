@@ -45,6 +45,27 @@ Candidate changes, verified locally on 2026-10-14 and not yet pushed:
 
 Local environment notes: `go test -race` needs a Linux toolchain, so the checks above ran inside the pinned builder image rather than on the Windows host, which has no C compiler. Two local artefacts were ruled out instead of being fixed here: a transient checksum-database error while downloading the scanner, and the `*.geojson` line-ending conversion that `.gitattributes` does not cover (with `core.autocrlf=true` a Windows checkout rewrites `backend/contracts/gen/geo/valparaiso-comunas.geojson`, whose `derived_sha256` the risk service validates at runtime; the committed blob is LF, so CI is unaffected). Re-observed on 2026-10-14 in a fresh `git worktree`: the checkout wrote 2,137,629 bytes (CRLF) against the committed 2,137,628-byte LF blob, and `GOWORK=off go test ./... -count=1` under `backend/services/risk` failed three handler tests — `TestSourcesActualFixtureDescriptor`, `TestSourcesActiveProviderAndAuthorization`, `TestSourcesIndependentOfWorkingDirectory` — with `503 geography_integrity_unavailable`. Normalizing the worktree file to LF restores 293 PASS / 9 SKIP / 0 FAIL, and `git diff` for that path stays empty either way, so no content change is involved. The observation is first-hand from the worktree created for this report, whose `valparaiso-comunas.geojson` is now LF and byte-identical to the committed blob; whether a given Windows checkout writes CRLF depends on that clone's `core.autocrlf` and on the extension not being marked in `.gitattributes`, which is where a durable fix belongs and which is outside this report.
 
+## Toolchain refresh — 2026-10-27
+
+The workspace was already pinned to Go 1.27.2 (2026-10-08), which carries that month's `net/http` batch. Go 1.27.3 (2026-10-19) closes one further item: `crypto/x509` stops trusting eight eMudhra intermediate CAs whose private keys were generated with insufficient entropy, so a client built before that release can be served forged certificates for any host. Two module advisories were closed at the same time.
+
+| Change | Scope |
+|---|---|
+| Go 1.27.3 | `.github/workflows/_go-service.yml` and the four builder image digests; `golang:1.27.3-bookworm@sha256:972b4110ba0f...` was read from the registry tag, the same source as the 1.27.2 pin it replaces |
+| `go 1.27.3` | `go.work` and the five module files |
+| `github.com/go-jose/go-jose/v4` 4.1.4 -> 4.1.6 | gateway, jobs, prevention and risk (GHSA-mgcc-cww5-fp2q: unbounded RSA validation while parsing a crafted JWK) |
+| `github.com/rabbitmq/amqp091-go` 1.13.0 -> 1.14.0 | jobs and risk (GHSA-w6r9-248c-frg8: pre-negotiation frame limit not enforced) |
+
+| Check (Go 1.27.3, Windows host, `GOWORK=off`) | Result |
+|---|---|
+| `test -z "$(gofmt -l .)"`, `go mod verify`, `go vet ./...` | Passed for gateway, jobs, prevention and risk |
+| `go test -count=1 ./...` | Passed: 3, 6, 7 and 11 packages, 0 failures |
+| `govulncheck@v1.9.0` | No vulnerabilities found, in all four modules |
+
+How far the go-jose bump reaches: `govulncheck@v1.9.0` reports no vulnerabilities for the gateway with either 4.1.4 or 4.1.6, because the vulnerable JWK path is not reachable from this call graph, while OSV module matching does list GHSA-mgcc-cww5-fp2q for 4.1.4. The upgrade removes a listed advisory, not a demonstrated path.
+
+Not covered by this refresh: `go test -race`, the Docker image builds and the Trivy scan. This host has no C compiler and the Docker daemon was not running, so those checks remain the ones recorded in the 2026-10-14 section. `kin-openapi` 0.133.0 keeps its advisories and is imported by the contract tests only; `golang.org/x/mod` 0.38.0 is build tooling. Neither is changed here.
+
 ## Reproduce the meaningful runtime checks
 
 From `backend/`, with the local `.env` already initialized:

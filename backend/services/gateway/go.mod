@@ -1,6 +1,6 @@
 module firewatch.local/gateway
 
-go 1.27.2
+go 1.27.3
 
 require (
 	github.com/coreos/go-oidc/v3 v3.17.0
@@ -8,7 +8,7 @@ require (
 )
 
 require (
-	github.com/go-jose/go-jose/v4 v4.1.4 // indirect
+	github.com/go-jose/go-jose/v4 v4.1.6 // indirect
 	github.com/go-openapi/jsonpointer v0.21.0 // indirect
 	github.com/go-openapi/swag v0.23.0 // indirect
 	github.com/josharian/intern v1.0.0 // indirect
