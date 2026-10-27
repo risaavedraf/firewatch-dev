@@ -66,6 +66,21 @@ How far the go-jose bump reaches: `govulncheck@v1.9.0` reports no vulnerabilitie
 
 Not covered by this refresh: `go test -race`, the Docker image builds and the Trivy scan. This host has no C compiler and the Docker daemon was not running, so those checks remain the ones recorded in the 2026-10-14 section. `kin-openapi` 0.133.0 keeps its advisories and is imported by the contract tests only; `golang.org/x/mod` 0.38.0 is build tooling. Neither is changed here.
 
+## Image refresh — 2026-10-27
+
+`quay.io/keycloak/keycloak:26.5.2` -> `26.5.7`. The 26.5 patch line carries the fixes that matter in this stack: CVE-2026-1486 (authorization-grant bypass, 26.5.3), CVE-2026-0707 and CVE-2026-1190 (26.5.4), CVE-2026-3009 and CVE-2026-3047 (a disabled identity provider still authenticating, 26.5.5), CVE-2026-1180 and CVE-2026-1035 (26.5.6), CVE-2025-14083 (Admin REST API information disclosure, 26.5.7). Staying inside 26.5 avoids the `secure-client-uris` change that 26.6.0 introduces, which `keycloak-realm-setup.md` already flags as breaking for the local `http` logout URIs.
+
+Four pinned images were examined and deliberately not moved:
+
+| Image | Why it stays |
+|---|---|
+| `grafana/grafana:11.5.2` | The critical advisories of 2026-03-25 (CVE-2026-27876, CVSS 9.1; CVE-2026-27880) affect 11.6.0 and later, so this tag is not exposed to them. The service sits behind the opt-in `observability` profile, bound to 127.0.0.1, and requires an admin password. |
+| `rabbitmq:4.1.8-management` | 4.1.8 is the last release of its line, so staying is not a fix; moving to 4.3.x crosses broker deprecations and needs a booted stack. |
+| `prom/prometheus:v3.2.1` | Observability profile only, bound to 127.0.0.1, and no advisory for this tag was identified in these checks. |
+| `postgis/postgis:17-3.5` | 3.6 exists, but this is the data store: changing the spatial library is its own work unit (Risk: item 1) and needs the database integration tests, not a tag edit. |
+
+Not verified: no image was pulled, built or scanned here. The Docker daemon was not running, so `docker compose config --quiet` is the only check that ran; the Trivy scan of runtime images stays in CI.
+
 ## Reproduce the meaningful runtime checks
 
 From `backend/`, with the local `.env` already initialized:

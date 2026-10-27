@@ -53,6 +53,6 @@ A programmatic check was **not executed** as part of this change: it needs a run
 
 ## Forward risk: HTTPS enforcement for client URIs
 
-Keycloak 26.6.0 introduces the `secure-client-uris` client policy executor, which requires HTTPS and makes **existing clients using `http` in "Post logout redirect URIs" fail validation when they are updated**. This repository pins `quay.io/keycloak/keycloak:26.5.2` (`backend/docker-compose.yml:72`), so the behavior does not apply today.
+Keycloak 26.6.0 introduces the `secure-client-uris` client policy executor, which requires HTTPS and makes **existing clients using `http` in "Post logout redirect URIs" fail validation when they are updated**. This repository pins `quay.io/keycloak/keycloak:26.5.7` (`backend/docker-compose.yml:72`), so the behavior does not apply today.
 
 Before bumping the Keycloak version above 26.6.0, expect local logout to break for the plain-`http` entries above, and plan for either keeping the executor disabled or moving local development to TLS.

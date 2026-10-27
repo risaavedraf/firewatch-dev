@@ -23,7 +23,7 @@ scientific or real-observation claim.
   otherwise, so the run does not depend on a registry pull for them:
   - `postgis/postgis:17-3.5`
   - `rabbitmq:4.1.8-management`
-  - `quay.io/keycloak/keycloak:26.5.2`
+  - `quay.io/keycloak/keycloak:26.5.7`
 - Python 3.11+ (standard library only; nothing to install).
 - The repository's `backend` build context, whose `.dockerignore` excludes
   `.env`. The harness verifies that exclusion and **refuses to build** if the
