@@ -42,6 +42,25 @@ Estado: en curso · abierto 2026-11-06 · documento fuente: [`Referencias/FireWa
 | T10 | S1 | EC2, dominio, security group y rol IAM para S3 | bloqueado | — |
 | T11 | S1 | `deploy.yml`: build/test, push, pull & up, smoke contra la URL pública | pendiente | — |
 
+## Pipeline de entrenamiento
+
+Estado de cada paso. «Existe» significa implementado y probado; «diseñado» significa que el contrato lo contempla pero no hay código; «falta» significa que no hay nada.
+
+| Paso | Datos entregados | Ruta pública (fase 2) |
+| --- | --- | --- |
+| Cosecha con procedencia y caché | Existe: `fetch_sample.py` | Existe: `meteo.py`, dos fuentes sin credencial |
+| Limpieza de llaves y fechas | Existe: CUT, dos formatos, nulos contados | Existe: centroides y ventanas de temporada |
+| Unión de fuentes | No aplica: un solo archivo | Falta: panel comuna-temporada |
+| Análisis exploratorio | Existe: `ANALYSIS-delivered-data.md`, generado y determinista | Falta para el panel |
+| Partición temporal | Existe: julio-agosto entrena, septiembre evalúa | Falta: por temporada |
+| Normalización | Existe: ajustada solo con entrenamiento | Falta, reutiliza el mismo código |
+| Balanceo | Existe: `class_weight` balanceado | Falta |
+| Modelo y comparación | Existe: logística contra bosque | Falta |
+| Métricas y línea base | Existe: dos climatologías; ningún modelo las supera | Falta |
+| Exportación del artefacto | Existe: artefacto de ensayo, marcado no servible | Falta el de temporada |
+
+---
+
 ## Log
 
 **L1 — solicitud original.** «que onda bro está el @"Referencias/FireWatch — Plan de implementación del modelo en AWS.pdf" que no puedes leer pero está el .md en la misma carpeta referencias por si necestias el texto y también están las imagenes del pdf real en @.pi-scratch/pdf para que lo puedas leer tal y como se hizo / me gustaría que analicemos el plan y podamos tomar decisiones a raiz de lo que dice y lo que tenemos porfa»
@@ -106,3 +125,15 @@ Sin ejecutar: `ruff` no está instalado en este host, así que el paso de lint d
 Dos deudas menores de este slice: el README de `services/inference` sigue diciendo «Not wired yet», y `INFERENCE_URL`/`INFERENCE_TIMEOUT` no están en `backend/docs`. La migración 011 nunca se ejecutó contra Postgres real: no hay daemon ni `TEST_DATABASE_URL` en este host, así que las 11 pruebas de base quedaron en skip.
 
 Pendiente conocido de este slice: el servicio **no** está en `backend/docker-compose.yml`, ni en `SERVICES` del Makefile, ni en los despliegues. Es trabajo posterior y se dejó fuera a propósito para no romper el arranque local mientras no exista un artefacto real.
+
+**L12 — fase «datos entregados» cerrada.** `faa925a` (ensayo de entrenamiento) y `c5776ab` (análisis). El resultado central: sobre septiembre, con julio y agosto para entrenar, **ningún modelo le gana a ninguna de las dos climatologías**. Logística 0,1801 PR-AUC y 0,1754 Brier contra 0,1766 y 0,0952 de la climatología; el bosque recuerda 0,000. La ventaja de 0,0035 en PR-AUC es ruido con 42 positivos, y perder 0,080 de Brier no lo compensa.
+
+Tres garantías por construcción, no por esperanza: la etiqueta es el avance diario recortado del acumulado y las tres revisiones a la baja se cuentan; ninguna columna derivada del acumulado alcanza la matriz de features, y un test mide cuánto vale ese guard (0,0826 limpio → ~0,31 con el acumulado → 1,00 con su diferencia diaria); la normalización no puede ver septiembre porque la función recibe una sola matriz.
+
+**Correcciones al registro anterior.** (1) Las correlaciones que reporté como 0,94 y 0,93 salen solo de Valparaíso; sobre el panel son 0,888 y 0,653/0,612, y el 0,94 aparece recién en el agregado nacional diario con 90 puntos. (2) La presión de 593 hPa es correcta: estación 145, Lago Chungará, unos 4.295 m. Fue un falso positivo mío. (3) `ema_c_codigo` tiene 425 valores no vacíos pero solo 184 distintos: no es llave de estación, así que la alineación con la red DMC que describí como «un test de una hora» no existe por esa vía.
+
+**Hallazgos que se vuelven requisitos.** 39 grupos duplicados de `rtdata` traen valores en conflicto, así que deduplicar exige la fila de mayor `rtd_dt_versiondt`. El máximo de `radiation_sol` del artefacto (1758) es exactamente el dato imposible: el contrato adoptó como cota el valor corrupto. 23 filas de `emas` tienen un CUT que contradice su etiqueta de región, artefacto de numeración previa a 2018. Y 86 estaciones con primera lectura en 2010-01-01 00:00 más 78 vacías: es un piso de migración, no el inicio de la red.
+
+**Estado de la rama.** 13 commits sobre `f3f1d02`, unas 25.000 líneas autoradas. Python en 306 pruebas verdes; los paquetes Go de `risk` (12) e `inference` (5) en verde.
+
+**Sigue sin verificarse.** `ruff` no está instalado en este host; las 17 pruebas de Go que necesitan Postgres; `-race` y `govulncheck`, que corren en CI; y el Caddyfile, que nunca se ejecutó por falta de daemon.
