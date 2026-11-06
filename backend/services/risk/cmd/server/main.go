@@ -140,7 +140,7 @@ func run() error {
 	// registered when INFERENCE_URL is configured, and a MODEL_ID naming it
 	// without that address aborts startup here rather than at the first
 	// prediction. See classifierRegistry.
-	classifiers, activeModel, active, err := classifierRegistry(os.Getenv)
+	classifiers, activeModel, active, err := classifierRegistry(ctx, os.Getenv)
 	if err != nil {
 		return err
 	}
@@ -311,7 +311,13 @@ func parseInferenceTimeout(raw string) (time.Duration, error) {
 //
 // It returns the selected version identifier as well as the classifier, because
 // the startup check that follows reads the models registry row for that version.
-func classifierRegistry(getenv func(string) string) (*classify.Registry, string, classify.Classifier, error) {
+//
+// Registering the model path reads the inference service's model document
+// (GET /v1/model, once) because the artifact's declared feature list is what the
+// classifier sends. A service that is down, or that answers something which is not
+// a coherent model document, therefore fails startup here by name instead of at the
+// first prediction; ctx bounds that read.
+func classifierRegistry(ctx context.Context, getenv func(string) string) (*classify.Registry, string, classify.Classifier, error) {
 	classifiers := classify.NewRegistry()
 	if err := classifiers.Register(classify.NewAcademicRuleV1()); err != nil {
 		return nil, "", nil, fmt.Errorf("register classifier: %w", err)
@@ -340,9 +346,9 @@ func classifierRegistry(getenv func(string) string) (*classify.Registry, string,
 		if err != nil {
 			return nil, "", nil, err
 		}
-		fixture, err := classify.NewMLFixtureV1(baseURL, timeout)
+		fixture, err := classify.NewMLFixtureV1(ctx, baseURL, timeout)
 		if err != nil {
-			return nil, "", nil, fmt.Errorf("configure the inference classifier (check %s): %w", inferenceURLEnv, err)
+			return nil, "", nil, fmt.Errorf("configure the inference classifier (check %s and that the inference service is up with its model document): %w", inferenceURLEnv, err)
 		}
 		if err := classifiers.Register(fixture); err != nil {
 			return nil, "", nil, fmt.Errorf("register classifier: %w", err)

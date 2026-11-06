@@ -972,12 +972,20 @@ func TestPublishFailsClosedWhenTheModelPathCannotAnswer(t *testing.T) {
 		t.Fatalf("the control publication persisted nothing: %+v", ruleWriter.assessment)
 	}
 
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Construction reads the artifact's declared feature list once, so the
+		// stand-in has to answer GET /v1/model before it can be the service that
+		// fails every prediction.
+		if r.URL.Path == "/v1/model" {
+			w.Header().Set("Content-Type", "application/json")
+			io.WriteString(w, `{"features":[{"name":"humidity_rel","unit":"%","min":0,"max":100}]}`)
+			return
+		}
 		w.WriteHeader(http.StatusInternalServerError)
 		io.WriteString(w, `{"code":"scoring_failed","request_id":"req-9","detail":"model produced no probability"}`)
 	}))
 	defer server.Close()
-	model, err := classify.NewMLFixtureV1(server.URL, time.Second)
+	model, err := classify.NewMLFixtureV1(context.Background(), server.URL, time.Second)
 	if err != nil {
 		t.Fatalf("configure the model-path classifier: %v", err)
 	}

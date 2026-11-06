@@ -100,9 +100,9 @@ type Features struct {
 	// every value in it carries the reason it is what it is, which is what a
 	// persisted factor has to keep once the value is null (see Measured).
 	//
-	// Zero value: every feature is absent. The model path then declares all seven
-	// as null, which is the documented "declared but unobserved" state the
-	// artifact imputes, never a fabricated zero.
+	// Zero value: every feature is absent. The model path then declares every
+	// feature the artifact asks for as null, which is the documented "declared but
+	// unobserved" state the artifact imputes, never a fabricated zero.
 	Model ModelInput
 }
 

@@ -9,7 +9,7 @@
     { "name": "humidity_rel", "unit": "%", "min": 0, "max": 100 },
     { "name": "wind_speed", "unit": "m/s", "min": 0, "max": 40 },
     { "name": "wind_dir", "unit": "deg", "min": 0, "max": 360 },
-    { "name": "precip_sum", "unit": "mm/day", "min": 0, "max": 200 },
+    { "name": "precip_sum", "unit": "mm", "min": 0, "max": 200 },
     { "name": "radiation_sol", "unit": "W/m2", "min": 0, "max": 1758 }
   ],
   "impute": [24.0, 12.0, 62.0, 3.5, 210.0, 0.0, 420.0],
