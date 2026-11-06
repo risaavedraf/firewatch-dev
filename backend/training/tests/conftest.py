@@ -30,6 +30,13 @@ SYNTHETIC_FIXTURE = FIXTURES / "synthetic-edge-cases.csv"
 #: those five regions are the ones that keep all three downward revisions in the trim.
 DASHBOARD_FIXTURE = FIXTURES / "dashboard-conaf-sample.csv"
 
+#: The analysis fixtures: trims of the same three delivered files, used by
+#: tests/test_analyze_delivered.py. See fixtures/delivered/PROVENANCE.md.
+DELIVERED_FIXTURES = FIXTURES / "delivered"
+DASHBOARD_ANALYSIS_FIXTURE = DELIVERED_FIXTURES / "dashboard-conaf-analysis-sample.csv"
+EMAS_FIXTURE = DELIVERED_FIXTURES / "emas-sample.csv"
+RTDATA_FIXTURE = DELIVERED_FIXTURES / "rtdata-sample.csv"
+
 
 class _NoNetworkSocket(socket.socket):
     """A socket that refuses to connect, so no test can reach the network."""

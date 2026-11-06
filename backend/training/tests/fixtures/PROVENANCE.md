@@ -117,3 +117,12 @@ It is not a training set and it is not a model. It is 450 rows of one region-day
 for one 90-day window. Its only job is to let the label, the split, the leak guard, the
 train-only fit and the artifact export be tested offline against bytes somebody can
 point at.
+
+## `delivered/` -- the analysis fixtures
+
+The subdirectory holds a second, narrower trim of the same three delivered files, for
+`analyze_delivered.py` and `tests/test_analyze_delivered.py`: the dashboard export, the
+station catalogue and the realtime snapshot. Its own `delivered/PROVENANCE.md` records
+the exact selection rule, the checksums and what each trim is chosen to cover. Nothing
+in it overlaps by accident with the file above: this one keeps five regions for the
+model comparison, that one keeps three regions and adds the two non-dashboard files.
