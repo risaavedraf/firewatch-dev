@@ -6,13 +6,20 @@ aggregation windows that `risk` sends to the inference service. Python, because
 training is the one place the project allows it; the rest of the backend stays Go, and
 nothing here is imported by a Go service.
 
-**This package does not train a model and the sample it ships is not a training set.**
-The project's training label is the access-gated CONAF product (DOI `10.71578/UXAUN5`,
-19 seasons, `"restricted": true` on every file). What is downloadable today is the
-FONDEF repository's open sample -- **one season of one region**, Maule 2018-2019, 951
-events -- and it is used for exactly what it can support: the schema, the name-to-CUT
-join, the event-to-day aggregation and the window machinery. Say that wherever a reader
-might mistake a panel for a model's training data.
+**The panel half of this package does not train a model and the sample it ships is not a
+  training set.** The project's training label is the access-gated CONAF product (DOI
+`10.71578/UXAUN5`, 19 seasons, `"restricted": true` on every file). What is downloadable
+today is the FONDEF repository's open sample -- **one season of one region**, Maule
+2018-2019, 951 events -- and it is used for exactly what it can support: the schema, the
+name-to-CUT join, the event-to-day aggregation and the window machinery. Say that
+wherever a reader might mistake a panel for a model's training data.
+
+The exception is `train_delivered.py`, and it is a small, deliberate one: it trains two
+models on the 90-day regional dashboard export the owner delivered, to **measure what that
+data can and cannot support** and to prove the artifact exporter against the Go reader.
+Its most likely honest outcome is that no model beats climatology, and that outcome is
+the deliverable -- see [A rehearsal on the delivered data](#a-rehearsal-on-the-delivered-data-traindeliveredpy).
+Nothing it writes may ever be registered in `models` or activated.
 
 ## Commands
 
@@ -43,6 +50,14 @@ python seasons.py --source open-meteo --first 2015 --last 2015 --comunas 05101 \
 # The whole range is 38 comunas x 39 seasons = 1 482 cached requests per source.
 python seasons.py --source open-meteo --out out/seasons
 
+# The rehearsal on the data the team was given: label, split, two models, two
+# baselines, the artifact and the report. Run from the repository root.
+python backend/training/train_delivered.py
+# Offline, against the committed fixture (450 rows); this is what the tests use.
+python backend/training/train_delivered.py \
+    --source backend/training/tests/fixtures/dashboard-conaf-sample.csv \
+    --out backend/training/out/fixture
+
 # Tests and lint (the CI job runs exactly these, offline).
 python -m pytest -q
 python -m ruff check .
@@ -51,7 +66,9 @@ python -m ruff check .
 Outputs are `panel.csv` (one row per comuna-day, then the seven feature columns in the
 artifact's order) and `manifest.json` (counts, dropped rows, date range, feature status
 and the reasons). `seasons.py` writes `seasons.csv` (one row per comuna-season) and its
-own `manifest.json`. All of them are products: rebuild them, never hand-edit them.
+own `manifest.json`. `train_delivered.py` writes `region-days.csv`, `artifact.json`,
+`manifest.json` and `REPORT-delivered-data.md`. All of them are products: rebuild them,
+never hand-edit them.
 
 ## The feature list is not written here
 
@@ -216,6 +233,72 @@ centroid is a point between islands, which is why each entry records its part co
 Nothing fetches a coordinate at runtime. `tests/test_centroids.py` recomputes the entries
 from the geometry and the checksum from the file, so an entry edited by hand fails.
 
+## A rehearsal on the delivered data (`train_delivered.py`)
+
+The owner asked for a model trained with what the team was actually given, plus a written
+account of what is missing. The delivered export is a 90-day regional CONAF dashboard,
+1 440 rows (16 regions x 90 days, 2026-07-01 .. 2026-09-28), and it is the only labelled
+fire data in the repository. This module trains on it and measures the result; it does
+not pretend the result is a product model.
+
+**The finding, measured and committed in `REPORT-delivered-data.md`: neither trained
+model beats either baseline.** On the real run, September test set, threshold selected on
+July + August only:
+
+| Scorer | PR-AUC | Recall at its threshold | Brier |
+| --- | --- | --- | --- |
+| logistic | 0.1801 | 0.3810 | 0.1754 |
+| forest | 0.1246 | 0.0000 | 0.0928 |
+| climatology (`nro_inc_prom_quint` daily rate) | 0.1766 | 0.2143 | 0.0952 |
+| region frequency (train split) | 0.1261 | 0.1905 | 0.0882 |
+
+Logistic edges climatology on PR-AUC (0.1801 against 0.1766) and loses 0.08 on Brier;
+against the region-frequency baseline it leads PR-AUC by 0.054 and still loses on Brier.
+Beating a baseline requires **both**, because a higher PR-AUC at a worse Brier is a trade,
+not a win. That is the honest reading of 90 days of a cumulative counter: the model has
+learned to rank September about as well as a five-season average does, and it has learned
+to be badly calibrated while doing it.
+
+What the module enforces, and why:
+
+* **The label is the counter's daily advance, clamped and counted.** `nro_inc_act` is
+  season-cumulative, so `fire_today = 1` when it grew; `sup_afec_act` is cumulative too
+  and was revised **downward** on 3 rows, so its difference is clamped at zero *and the
+  clamp is counted*. A silently dropped negative is burned hectares leaving the record.
+* **Leakage is a refusal, not a good score.** `FORBIDDEN_FEATURE_COLUMNS` (`nro_inc_act`,
+  `sup_afec_act`, `fecha_creacion` and everything derived from them) is checked before a
+  matrix is built. The guard is not ceremony, and the amount is measured by
+  `tests/test_train_delivered.py`: on the fixture's September test split the legal features
+  reach PR-AUC 0.0826, adding `nro_inc_act` lifts that to about 0.31, and adding its daily
+  difference -- which is the label by construction -- reproduces the label exactly (1.0000).
+* **The split is temporal and asserted.** July + August train, September test, then
+  disjointness, ordering and the months are all checked before anything is fitted. A
+  random split fails the assertion.
+* **`center`/`scale`/`impute` are fitted on the training split only**, and the signature
+  is the guard: `fit_preprocessing` takes the training matrix and nothing else, so there
+  is no argument through which September could reach the parameters.
+* **The thresholds are selected on train**, maximum F1 on a 0.001 grid, ties to the lower
+  threshold -- the same rule for both models and both baselines.
+
+**The artifact is a rehearsal and cannot be served.** Its feature set includes a one-hot
+of region and `risk` has no region identity, so the vector `risk` can build can never
+supply it. The document says so in its own bytes -- `version` is
+`delivered-data-rehearsal-v1`, and `metrics` carries `rehearsal`, `servable_by_risk`,
+`not_servable_reason` and `must_not_be_registered`. It must never be registered in
+`models` and never activated; it exists so the exporter is proven against the Go reader.
+A top-level `rehearsal` key is impossible: the Go loader decodes with
+`DisallowUnknownFields`, and an unreadable artifact is worse than a marked one.
+
+`model_contract.py` is the transcription of `artifact.Validate` that makes that proof
+mean something. The writer validates before it writes, so a document the Go service would
+refuse can never reach the disk, and `tests/test_model_contract.py` checks the checker:
+every rule the Go reader enforces has a test that mutates a valid document into a refused
+one.
+
+**Expect `python -m pytest` to need numpy and scikit-learn.** The panel modules stay
+standard-library-only; the two model libraries are pinned in `requirements-dev.txt` and
+the CI workflow already installs that file, so the job needs no change.
+
 ## Files
 
 | Path | What |
@@ -226,9 +309,13 @@ from the geometry and the checksum from the file, so an entry edited by hand fai
 | `meteo.py` | the two keyless meteorology sources, their units, the on-disk cache and its provenance |
 | `seasons.py` | the season window, the six season-to-date aggregates, the absence rule and the season manifest |
 | `centroids.py` | derives the region-05 centroids from the tracked DPA geometry and reads the committed file |
+| `train_delivered.py` | the rehearsal: label, features, temporal split, two models, two baselines, the artifact and the report |
+| `model_contract.py` | the `firewatch-model/v1` rules, transcribed from the Go reader, so the exporter cannot certify itself |
+| `REPORT-delivered-data.md` | the committed measurement of the delivered export: counts, the clamp, the metrics table, the verdict and what is missing |
 | `data/comunas-maule-cut.json` | the committed name -> CUT mapping for region 07 (data, not code; read offline) |
 | `data/comunas-valparaiso-centroids.json` | the committed centroids for the 38 comunas of region 05, with provenance |
 | `data/raw/` | git-ignored: the downloaded CONAF sample and the cached meteorology responses |
-| `tests/fixtures/PROVENANCE.md` | the URL, licence, retrieval date and exact selection rule of both CONAF fixtures |
+| `tests/fixtures/PROVENANCE.md` | the URL, licence, retrieval date and exact selection rule of both CONAF fixtures, and the trim rule of the delivered dashboard export |
+| `tests/fixtures/dashboard-conaf-sample.csv` | 450 real rows of the delivered export (5 regions x 90 days), chosen to keep all three downward revisions |
 | `tests/fixtures/meteo/PROVENANCE.md` | the same, for the four recorded meteorology responses (two sources, two coordinates) |
 | `tests/` | pytest, offline: sockets are blocked by an autouse fixture that a test proves bites |

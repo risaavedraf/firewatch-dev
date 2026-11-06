@@ -25,14 +25,19 @@ SAMPLE_FIXTURE = FIXTURES / "conaf-maule-sample.csv"
 #: a burned area of zero. Clearly labelled as such in PROVENANCE.md.
 SYNTHETIC_FIXTURE = FIXTURES / "synthetic-edge-cases.csv"
 
+#: The trimmed, real dashboard export: 450 rows, five regions over all 90 days
+#: (2026-07-01..2026-09-28). See fixtures/PROVENANCE.md for the selection rule and why
+#: those five regions are the ones that keep all three downward revisions in the trim.
+DASHBOARD_FIXTURE = FIXTURES / "dashboard-conaf-sample.csv"
+
 
 class _NoNetworkSocket(socket.socket):
     """A socket that refuses to connect, so no test can reach the network."""
 
-    def connect(self, *args, **kwargs):  # noqa: ANN002, ANN003
+    def connect(self, *args, **kwargs):
         raise RuntimeError("the training test suite must not open a network connection")
 
-    def connect_ex(self, *args, **kwargs):  # noqa: ANN002, ANN003
+    def connect_ex(self, *args, **kwargs):
         raise RuntimeError("the training test suite must not open a network connection")
 
 
@@ -40,7 +45,7 @@ class _NoNetworkSocket(socket.socket):
 def no_network(monkeypatch):
     """Block outbound connections for every test in this directory."""
 
-    def refuse(*args, **kwargs):  # noqa: ANN002, ANN003
+    def refuse(*args, **kwargs):
         raise RuntimeError("the training test suite must not open a network connection")
 
     monkeypatch.setattr(socket, "socket", _NoNetworkSocket)

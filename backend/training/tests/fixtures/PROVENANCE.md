@@ -71,3 +71,49 @@ The file is 2 018 bytes, sha256 `edde38296d85425624580a08b08cab3caadef89607ed7b9
 They must never be joined with the real sample. They exist so the exclusion path and
 the zero-area label path are covered by a committed file instead of by an in-test
 literal nobody can point at later.
+
+## `dashboard-conaf-sample.csv` -- real, trimmed
+
+The third file here, and the one `train_delivered.py` reads. It is a trim of the
+delivered regional dashboard export.
+
+| | |
+| --- | --- |
+| Source file | `dashboard_conaf_202609281623 (1).csv`, delivered to the repository root as `data/dashboard_conaf_202609281623 (1).csv` |
+| URL | none -- the file was handed over directly, not downloaded |
+| Licence / citation | **not stated by the source.** The file carries no licence, citation or metadata row; its columns are CONAF dashboard fields and its name carries the export instant (2026-09-28 16:23). Recorded as delivered, and the absence is recorded too rather than filled in |
+| Whole file | 87 435 bytes, sha256 `586bfbb568c4487a16186a993a5c60a0cdb13a4175cc6d55050fc093e0a890c7`, 1 440 rows, 10 columns, 16 regions x 90 days, 2026-07-01 .. 2026-09-28 |
+| Trimmed file | 27 208 bytes, 450 rows, sha256 `b9fbc6334ba0876e329f29c58c3f1ad03060d318e8aff25222fe9d25c05a1ac8` |
+| Encoding | UTF-8, no BOM, comma separated, CRLF line endings as the source writes them, header quoted exactly as the source writes it |
+
+### Selection rule
+
+Exactly, and only, this:
+
+> Every source row whose `region` is one of `Biobío`, `O'Higgins`, `Tarapacá`,
+> `Valparaíso`, `Ñuble` -- every date present for those regions, which is all 90 -- in
+> the source's own column order, sorted by (`fecha`, `id`).
+
+450 of the 1 440 rows match. Nothing was dropped afterwards, no column was removed, no
+value was edited, and the header is byte-for-byte the source's.
+
+### What the selection is chosen to cover
+
+| Case | Where in the fixture |
+| --- | --- |
+| All three downward revisions of `sup_afec_act` | Valparaíso 2026-07-03 -> 07-04 (2.2 -> 1.9), Tarapacá 2026-07-31 -> 08-01 (2.5 -> 1.23), O'Higgins 2026-09-19 -> 09-20 (3.9 -> 3.6). Two land in the training months and one in September, so both sides of the split see a clamp |
+| Positive days on both sides of the temporal split | 11 in July + August, 16 in September; every positive in the whole file comes from a day the cumulative counter advanced |
+| Regions that never advanced the counter, and one that advanced a lot | `Biobío` 7, `Valparaíso` 9, `O'Higgins` 5, `Tarapacá` 5, `Ñuble` 1 |
+| Every month the split names | July, August, September are all present, so `TRAIN_MONTHS`/`TEST_MONTHS` are all exercised |
+| An accented name, an apostrophe and a tilde | `Valparaíso`, `O'Higgins`, `Ñuble` -- three different folds to an ASCII feature name |
+
+The five regions were chosen for the three revisions, not to make the numbers look
+better. They do not: the fixture reproduces the real file's finding (no model beats
+either baseline) and that is the point of using it.
+
+### What this fixture is not
+
+It is not a training set and it is not a model. It is 450 rows of one region-day grid
+for one 90-day window. Its only job is to let the label, the split, the leak guard, the
+train-only fit and the artifact export be tested offline against bytes somebody can
+point at.
