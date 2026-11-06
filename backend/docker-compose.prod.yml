@@ -1,0 +1,361 @@
+# Production stack for the demo VM (S4: Compose on one VM; Kubernetes stays a
+# documented target, not this file).
+#
+# This is a standalone overlay of `docker-compose.yml`, not a fragment to be
+# merged with it: it is started with `-f docker-compose.prod.yml` alone, so
+# every service, image pin, healthcheck, migration ordering and network of the
+# development file is repeated here and only what production requires is
+# different. The differences are exactly these:
+#
+#   1. `caddy` is the single public edge. It publishes 80 (ACME HTTP-01 and the
+#      HTTPS redirect) and 443, and nothing else is published: every other
+#      service is reachable only on the internal `backend` network.
+#   2. Every value that differs between environments comes from a variable. The
+#      ones without a safe local default use `:?`, so a missing password or
+#      hostname fails the parse loudly instead of starting a stack with a
+#      development credential or a `localhost` origin.
+#   3. Identity runs `start` (production mode) instead of `start-dev`, and every
+#      service authenticates over HTTPS, which the gateway requires outside
+#      `APP_ENV=development`.
+#
+# Not here yet: the inference service. It joins this file when its slice lands.
+#
+# The project name is distinct from the development stack so that running this
+# file on a development machine cannot reshape (or delete) the local volumes.
+name: firewatch-prod
+
+# The issuer and the JWKS fetch URL are the same public HTTPS URL. Production
+# cannot use the internal `http://identity:8080` JWKS address the development
+# file uses: the gateway, jobs, risk and prevention refuse a non-HTTPS identity
+# URL outside `APP_ENV=development`. `caddy` is given that hostname as a network
+# alias on `backend` (see below), so the containers resolve the public name to
+# the proxy in the same network and the certificate is the real one; nothing
+# depends on the VM reaching its own public address.
+x-oidc: &oidc
+  APP_ENV: production
+  OIDC_ISSUER: https://${FIREWATCH_AUTH_DOMAIN:?required}/realms/firewatch
+  OIDC_JWKS_URL: https://${FIREWATCH_AUTH_DOMAIN:?required}/realms/firewatch/protocol/openid-connect/certs
+  OIDC_AUDIENCE: firewatch-api
+
+x-hardened: &hardened
+  read_only: true
+  cap_drop: [ALL]
+  security_opt: [no-new-privileges:true]
+  user: '65532:65532'
+  init: true
+  pids_limit: 100
+  mem_limit: 256m
+  cpus: 1.0
+  networks: [backend]
+  restart: unless-stopped
+
+services:
+  postgres:
+    image: postgis/postgis:17-3.5
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?required}
+      JOBS_DB_PASSWORD: ${JOBS_DB_PASSWORD:?required}
+      RISK_DB_PASSWORD: ${RISK_DB_PASSWORD:?required}
+      KEYCLOAK_DB_PASSWORD: ${KEYCLOAK_DB_PASSWORD:?required}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./deploy/local/postgres-init.sh:/docker-entrypoint-initdb.d/10-firewatch.sh:ro
+    networks: [backend]
+    healthcheck:
+      # pg_isready without -h probes the local Unix socket. The entrypoint runs
+      # docker-entrypoint-initdb.d against a temporary server started with
+      # listen_addresses='' that answers on that same socket, so a socket-only
+      # probe can report the container healthy while the real server is not yet
+      # listening on TCP and the databases do not exist. The *-migrate services
+      # would then dial and exit with `migration connection failed`.
+      # -h 127.0.0.1 makes the probe a real TCP connection, which succeeds only
+      # once the init script has finished and the real server is listening.
+      test:
+        - CMD-SHELL
+        - pg_isready -h 127.0.0.1 -p 5432 -U postgres -d postgres
+      interval: 5s
+      timeout: 3s
+      retries: 30
+    restart: unless-stopped
+
+  rabbitmq:
+    image: rabbitmq:4.1.8-management
+    hostname: rabbitmq
+    environment:
+      RABBITMQ_DEFAULT_USER: firewatch
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:?required}
+      RABBITMQ_DEFAULT_VHOST: firewatch
+    volumes:
+      - rabbitmq-data:/var/lib/rabbitmq
+      - ./deploy/local/rabbitmq-plugins:/etc/rabbitmq/enabled_plugins:ro
+    # The management UI stays on the internal network: it is reached through an
+    # SSH tunnel (see deploy/prod/README.md), never published.
+    networks: [backend]
+    healthcheck:
+      test: [CMD, rabbitmq-diagnostics, -q, ping]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+    restart: unless-stopped
+
+  identity:
+    image: quay.io/keycloak/keycloak:26.5.7
+    # `start` is production mode: it refuses a development hostname and requires
+    # the database. `--import-realm` imports the development realm below only on
+    # first boot; its client redirect URIs must be moved to the public origin
+    # afterwards, which deploy/prod/README.md spells out.
+    command: [start, --import-realm]
+    environment:
+      KC_DB: postgres
+      KC_DB_URL: jdbc:postgresql://postgres:5432/identity
+      KC_DB_USERNAME: identity_app
+      KC_DB_PASSWORD: ${KEYCLOAK_DB_PASSWORD:?required}
+      KC_BOOTSTRAP_ADMIN_USERNAME: ${KC_ADMIN_USERNAME:?required}
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:?required}
+      # The identity provider's browser origin. It must be the HTTPS name the
+      # browser opens, and it must match the issuer the services verify.
+      KC_HOSTNAME: https://${FIREWATCH_AUTH_DOMAIN:?required}
+      # Caddy terminates TLS and forwards X-Forwarded-*; without this Keycloak
+      # builds redirect URLs from the internal http address.
+      KC_PROXY_HEADERS: xforwarded
+      KC_HTTP_ENABLED: 'true'
+      KC_HEALTH_ENABLED: 'true'
+      DEMO_ADMIN_PASSWORD: ${DEMO_ADMIN_PASSWORD:?required}
+      DEMO_VIEWER_PASSWORD: ${DEMO_VIEWER_PASSWORD:?required}
+    volumes:
+      - ./deploy/local/firewatch-realm.json:/opt/keycloak/data/import/firewatch-realm.json:ro
+    networks: [backend]
+    depends_on:
+      postgres: {condition: service_healthy}
+    restart: unless-stopped
+
+  jobs-migrate:
+    <<: *hardened
+    build: {context: ., dockerfile: services/jobs/Dockerfile}
+    command: [migrate]
+    restart: 'no'
+    environment:
+      DATABASE_URL: postgres://postgres:${POSTGRES_PASSWORD:?required}@postgres:5432/jobs?sslmode=disable
+    depends_on:
+      postgres: {condition: service_healthy}
+
+  risk-migrate:
+    <<: *hardened
+    build: {context: ., dockerfile: services/risk/Dockerfile}
+    command: [migrate]
+    restart: 'no'
+    environment:
+      DATABASE_URL: postgres://postgres:${POSTGRES_PASSWORD:?required}@postgres:5432/risk?sslmode=disable
+    depends_on:
+      postgres: {condition: service_healthy}
+
+  prevention-migrate:
+    <<: *hardened
+    build: {context: ., dockerfile: services/prevention/Dockerfile}
+    command: [migrate]
+    restart: 'no'
+    environment:
+      DATABASE_URL: postgres://postgres:${POSTGRES_PASSWORD:?required}@postgres:5432/risk?sslmode=disable
+    depends_on:
+      postgres: {condition: service_healthy}
+
+  jobs:
+    <<: *hardened
+    build: {context: ., dockerfile: services/jobs/Dockerfile}
+    environment:
+      <<: *oidc
+      DATABASE_URL: postgres://jobs_app:${JOBS_DB_PASSWORD:?required}@postgres:5432/jobs?sslmode=disable
+      AMQP_URL: amqp://firewatch:${RABBITMQ_PASSWORD:?required}@rabbitmq:5672/firewatch
+    depends_on:
+      jobs-migrate: {condition: service_completed_successfully}
+      rabbitmq: {condition: service_healthy}
+
+  risk:
+    <<: *hardened
+    build: {context: ., dockerfile: services/risk/Dockerfile}
+    environment:
+      <<: *oidc
+      DATABASE_URL: postgres://risk_app:${RISK_DB_PASSWORD:?required}@postgres:5432/risk?sslmode=disable
+      AMQP_URL: amqp://firewatch:${RABBITMQ_PASSWORD:?required}@rabbitmq:5672/firewatch
+      # No default here: production names the version it runs instead of
+      # inheriting the development demo's choice.
+      MODEL_ID: ${MODEL_ID:?required}
+    depends_on:
+      risk-migrate: {condition: service_completed_successfully}
+      rabbitmq: {condition: service_healthy}
+
+  prevention:
+    <<: *hardened
+    build: {context: ., dockerfile: services/prevention/Dockerfile}
+    environment:
+      <<: *oidc
+      # Owns the `prevention` schema of this database, not the whole database.
+      DATABASE_URL: postgres://risk_app:${RISK_DB_PASSWORD:?required}@postgres:5432/risk?sslmode=disable
+    depends_on:
+      prevention-migrate: {condition: service_completed_successfully}
+
+  gateway:
+    <<: *hardened
+    build: {context: ., dockerfile: services/gateway/Dockerfile}
+    environment:
+      <<: *oidc
+      JOBS_URL: http://jobs:8080
+      RISK_URL: http://risk:8080
+      PREVENTION_URL: http://prevention:8084
+      # The page origin exactly as the browser spells it. It must equal the
+      # identity provider's registered web origin and the frontend's
+      # `VITE_REDIRECT_URI`, scheme included.
+      WEB_ORIGIN: https://${FIREWATCH_DOMAIN:?required}
+    depends_on: [jobs, risk, prevention, identity]
+
+  # The single public edge. It terminates TLS with a certificate Caddy obtains
+  # and renews itself (no wildcard: one certificate per configured name), serves
+  # the built browser application, and forwards the API paths to the gateway.
+  caddy:
+    image: caddy:2-alpine@sha256:78bd35025c7ba85961dd149ae670315129954e77abe2383ac47c89106b35ade9
+    environment:
+      FIREWATCH_DOMAIN: ${FIREWATCH_DOMAIN:?required}
+      FIREWATCH_AUTH_DOMAIN: ${FIREWATCH_AUTH_DOMAIN:?required}
+      ACME_EMAIL: ${ACME_EMAIL:?required}
+    ports:
+      - '80:80'
+      - '443:443'
+    volumes:
+      - ./deploy/prod/Caddyfile:/etc/caddy/Caddyfile:ro
+      # The built page (`npm run build` in frontend/). Read-only: Caddy serves
+      # it and never writes to it; a missing directory answers 404 rather than
+      # serving another origin's application.
+      - ../frontend/dist:/srv/frontend:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    # Two networks and one alias, each for a reason: `edge` is the only network
+    # with egress, which ACME needs; `backend` reaches the gateway and identity;
+    # the alias makes the public identity hostname resolve to this proxy inside
+    # the internal network, so the HTTPS issuer and JWKS URLs the services
+    # verify never depend on the VM reaching its own public address.
+    networks:
+      edge:
+      backend:
+        aliases:
+          - ${FIREWATCH_AUTH_DOMAIN:?required}
+    read_only: true
+    cap_drop: [ALL]
+    # Ports 80 and 443 are privileged inside the container; with every other
+    # capability dropped this is the only one it needs.
+    cap_add: [NET_BIND_SERVICE]
+    security_opt: [no-new-privileges:true]
+    init: true
+    pids_limit: 200
+    mem_limit: 256m
+    cpus: 1.0
+    depends_on: [gateway, identity]
+    restart: unless-stopped
+
+  # Prometheus and Grafana stay internal: no published port, reached through an
+  # SSH tunnel. They keep the `observability` profile so the API can run without
+  # them, and the local scrape and alerting files, which are the only ones this
+  # repository has.
+  prometheus:
+    image: prom/prometheus:v3.2.1
+    profiles: [observability]
+    volumes:
+      - ./deploy/local/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./deploy/local/alerts.yml:/etc/prometheus/alerts.yml:ro
+      - prometheus-data:/prometheus
+    networks: [backend]
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:11.5.2
+    profiles: [observability]
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:?required}
+      GF_AUTH_ANONYMOUS_ENABLED: 'false'
+      GF_USERS_ALLOW_SIGN_UP: 'false'
+    volumes:
+      - ./deploy/local/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./deploy/local/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana-data:/var/lib/grafana
+    networks: [backend]
+    depends_on: [prometheus]
+    restart: unless-stopped
+
+  # The integration suites stay available, still behind the `test` profile, so a
+  # production host can run the same tests the development stack runs.
+  jobs-test:
+    profiles: [test]
+    build: {context: ., dockerfile: services/jobs/Dockerfile, target: test}
+    environment:
+      TEST_DATABASE_URL: postgres://jobs_app:${JOBS_DB_PASSWORD:?required}@postgres:5432/jobs_test?sslmode=disable
+      TEST_ZONES_REFERENCE_DATABASE_URL: postgres://risk_app:${RISK_DB_PASSWORD:?required}@postgres:5432/risk_test?sslmode=disable
+    depends_on:
+      jobs-test-migrate: {condition: service_completed_successfully}
+      risk-test-migrate: {condition: service_completed_successfully}
+    networks: [backend]
+
+  risk-test:
+    profiles: [test]
+    build: {context: ., dockerfile: services/risk/Dockerfile, target: test}
+    environment:
+      TEST_DATABASE_URL: postgres://risk_app:${RISK_DB_PASSWORD:?required}@postgres:5432/risk_test?sslmode=disable
+    depends_on:
+      risk-test-migrate: {condition: service_completed_successfully}
+    networks: [backend]
+
+  prevention-test:
+    profiles: [test]
+    build: {context: ., dockerfile: services/prevention/Dockerfile, target: test}
+    environment:
+      TEST_DATABASE_URL: postgres://risk_app:${RISK_DB_PASSWORD:?required}@postgres:5432/risk_test?sslmode=disable
+    depends_on:
+      prevention-test-migrate: {condition: service_completed_successfully}
+    networks: [backend]
+
+  jobs-test-migrate:
+    <<: *hardened
+    profiles: [test]
+    build: {context: ., dockerfile: services/jobs/Dockerfile}
+    command: [migrate]
+    restart: 'no'
+    environment:
+      DATABASE_URL: postgres://postgres:${POSTGRES_PASSWORD:?required}@postgres:5432/jobs_test?sslmode=disable
+    depends_on:
+      postgres: {condition: service_healthy}
+
+  risk-test-migrate:
+    <<: *hardened
+    profiles: [test]
+    build: {context: ., dockerfile: services/risk/Dockerfile}
+    command: [migrate]
+    restart: 'no'
+    environment:
+      DATABASE_URL: postgres://postgres:${POSTGRES_PASSWORD:?required}@postgres:5432/risk_test?sslmode=disable
+    depends_on:
+      postgres: {condition: service_healthy}
+
+  prevention-test-migrate:
+    <<: *hardened
+    profiles: [test]
+    build: {context: ., dockerfile: services/prevention/Dockerfile}
+    command: [migrate]
+    restart: 'no'
+    environment:
+      DATABASE_URL: postgres://postgres:${POSTGRES_PASSWORD:?required}@postgres:5432/risk_test?sslmode=disable
+    depends_on:
+      postgres: {condition: service_healthy}
+
+networks:
+  # Egress only: the proxy's ACME traffic, and the kernel's DNAT for the two
+  # published ports. No service is published here.
+  edge:
+  backend:
+    internal: true
+
+volumes:
+  postgres-data:
+  rabbitmq-data:
+  prometheus-data:
+  grafana-data:
+  caddy-data:
+  caddy-config:
