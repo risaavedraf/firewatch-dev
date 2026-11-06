@@ -1,0 +1,17 @@
+# Local-only artefacts of the training panel.
+#
+# data/raw/ holds the downloaded CONAF sample. It is regenerable from the URL and the
+# sha256 recorded in fetch_sample.py, and the repository deliberately carries a trimmed
+# fixture instead of the whole 616 KB file, so nothing here is source. The committed
+# mapping next door (data/comunas-maule-cut.json) is NOT ignored: it is data the
+# assembler reads and a reader must be able to audit.
+data/raw/
+
+# Default output of assemble.py: a panel and its manifest are products, rebuilt from
+# the source plus the artifact, never edited by hand.
+out/
+
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/

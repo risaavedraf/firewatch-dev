@@ -1,0 +1,7 @@
+# Pinned, and installed by .github/workflows/training.yml only. The package itself
+# needs nothing beyond the standard library; pytest runs the tests, ruff is the lint
+# gate, and tzdata makes the zone the panel cuts every day in available on hosts
+# without a system zone database (Windows, slim images) instead of letting it fail.
+pytest==9.1.0
+ruff==0.17.4
+tzdata==2025.3

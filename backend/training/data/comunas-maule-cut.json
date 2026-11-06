@@ -1,0 +1,177 @@
+{
+  "_comment": [
+    "Comuna name -> Chilean CUT for region 07 (Maule). This is DATA, not source code:",
+    "the assembler reads it, never fetches it, so the panel is reproducible offline.",
+    "The names are the official DPA spellings; the source CSV writes them without",
+    "accents (Vichuquen, Curico, Colbun ...), so resolution folds accents and case",
+    "(see backend/training/comunas.py) instead of adding 8 hand-written aliases.",
+    "A name that does not resolve is NOT guessed: it keeps cut='' and the source name",
+    "in the panel's comuna_unresolved column, and the manifest lists it."
+  ],
+  "region": {
+    "cut": "07",
+    "name": "Maule"
+  },
+  "entries": [
+    {
+      "cut": "07101",
+      "name": "Talca",
+      "provincia": "Talca"
+    },
+    {
+      "cut": "07102",
+      "name": "Constitución",
+      "provincia": "Talca"
+    },
+    {
+      "cut": "07103",
+      "name": "Curepto",
+      "provincia": "Talca"
+    },
+    {
+      "cut": "07104",
+      "name": "Empedrado",
+      "provincia": "Talca"
+    },
+    {
+      "cut": "07105",
+      "name": "Maule",
+      "provincia": "Talca"
+    },
+    {
+      "cut": "07106",
+      "name": "Pelarco",
+      "provincia": "Talca"
+    },
+    {
+      "cut": "07107",
+      "name": "Pencahue",
+      "provincia": "Talca"
+    },
+    {
+      "cut": "07108",
+      "name": "Río Claro",
+      "provincia": "Talca"
+    },
+    {
+      "cut": "07109",
+      "name": "San Clemente",
+      "provincia": "Talca"
+    },
+    {
+      "cut": "07110",
+      "name": "San Rafael",
+      "provincia": "Talca"
+    },
+    {
+      "cut": "07201",
+      "name": "Cauquenes",
+      "provincia": "Cauquenes"
+    },
+    {
+      "cut": "07202",
+      "name": "Chanco",
+      "provincia": "Cauquenes"
+    },
+    {
+      "cut": "07203",
+      "name": "Pelluhue",
+      "provincia": "Cauquenes"
+    },
+    {
+      "cut": "07301",
+      "name": "Curicó",
+      "provincia": "Curicó"
+    },
+    {
+      "cut": "07302",
+      "name": "Hualañé",
+      "provincia": "Curicó"
+    },
+    {
+      "cut": "07303",
+      "name": "Licantén",
+      "provincia": "Curicó"
+    },
+    {
+      "cut": "07304",
+      "name": "Molina",
+      "provincia": "Curicó"
+    },
+    {
+      "cut": "07305",
+      "name": "Rauco",
+      "provincia": "Curicó"
+    },
+    {
+      "cut": "07306",
+      "name": "Romeral",
+      "provincia": "Curicó"
+    },
+    {
+      "cut": "07307",
+      "name": "Sagrada Familia",
+      "provincia": "Curicó"
+    },
+    {
+      "cut": "07308",
+      "name": "Teno",
+      "provincia": "Curicó"
+    },
+    {
+      "cut": "07309",
+      "name": "Vichuquén",
+      "provincia": "Curicó"
+    },
+    {
+      "cut": "07401",
+      "name": "Linares",
+      "provincia": "Linares"
+    },
+    {
+      "cut": "07402",
+      "name": "Colbún",
+      "provincia": "Linares"
+    },
+    {
+      "cut": "07403",
+      "name": "Longaví",
+      "provincia": "Linares"
+    },
+    {
+      "cut": "07404",
+      "name": "Parral",
+      "provincia": "Linares"
+    },
+    {
+      "cut": "07405",
+      "name": "Retiro",
+      "provincia": "Linares"
+    },
+    {
+      "cut": "07406",
+      "name": "San Javier",
+      "provincia": "Linares"
+    },
+    {
+      "cut": "07407",
+      "name": "Villa Alegre",
+      "provincia": "Linares"
+    },
+    {
+      "cut": "07408",
+      "name": "Yerbas Buenas",
+      "provincia": "Linares"
+    }
+  ],
+  "provenance": {
+    "authority": "Official DPA (Division Politico Administrativa) layer of IDE Chile, the same layer backend/scripts/fetch_comunas.py reads for region 05.",
+    "url": "https://rest-sit.mop.gob.cl/arcgis/rest/services/INTEROP/SERVICIO_DPA/MapServer/1/query",
+    "query": "where=CUT_REG='07'&outFields=CUT_COM,COMUNA,PROVINCIA,CUT_PROV&returnGeometry=false&f=json",
+    "response_encoding": "latin-1 (the service does not answer UTF-8)",
+    "retrieved_at": "2026-11-06",
+    "record_count": 30,
+    "entries_sha256": "5a93ecc7d0879222a9733e551e25fcc36578d8f1f7afb78e554e66610b7e3ae2",
+    "entries_sha256_rule": "sha256 of json.dumps(entries, ensure_ascii=False, sort_keys=True, separators=(',', ':')). Recompute it with tests/test_comunas.py; it is what makes this file auditable without the HTTP response."
+  }
+}
