@@ -158,3 +158,26 @@ version is still `404 model_not_found`.
 
 The database-backed proofs skip without `TEST_DATABASE_URL`; run them with
 `make integration`.
+
+## The model-path classifier
+
+A version whose kind is a model path is not scored inside `risk`: the classifier
+posts the feature map to the inference service and maps the served probability and
+level into the same `Assessment` contract the rule classifiers return. Two
+variables apply only in that mode:
+
+| Variable | Meaning |
+| --- | --- |
+| `INFERENCE_URL` | Base URL of the inference service on the internal network. Required whenever the selected version is a model path: startup fails naming it, rather than failing on the first prediction. A rule deployment needs no new configuration. |
+| `INFERENCE_TIMEOUT` | Per-call timeout in Go duration syntax. Defaults to `5s`. |
+
+A model-path failure — timeout, transport, 5xx, a refused sample, an unreadable
+body — records the reason and persists nothing for that unit. It never falls back
+to a rule classifier: a silent fallback would publish an assessment whose
+`model_version` no longer describes how it was produced.
+
+`ml-fixture-v1` exists so the local stack can exercise that path before a trained
+model exists. It is seeded inactive and its parameters hash describes the fixture
+artifact, not a training run. A trained `ml-v1` stays unregistered until a real
+artifact and its parameters description exist; selecting it before then fails at
+startup with an unknown classifier rather than serving something invented.

@@ -182,10 +182,18 @@ python3 tools/reference_scorer.py testdata/logistic.json testdata/equivalence/ex
 python3 tools/reference_scorer.py testdata/logistic.json testdata/equivalence/expected.csv --check
 ```
 
-## Not wired yet
+## Wired into the stack
 
-This slice delivers the service, its contract and its fixture. Adding it to
-`backend/docker-compose.yml`, `backend/Makefile`'s `SERVICES` list and the
-deployment manifest belongs to the deployment slice (T5), and the `risk` client
-that calls `/predict` with a timeout is T8. Until then the service builds, tests
-and runs standalone.
+`backend/docker-compose.yml` runs this service on the internal network with the
+fixture artifact mounted at `/models/logistic.json`. It publishes no host port and
+the gateway has no route to it, so a browser cannot reach it and the model surface
+is not exposable from the public edge.
+
+`risk` reaches it through `INFERENCE_URL` with `INFERENCE_TIMEOUT`. A timeout,
+transport failure, 5xx, refused sample or unreadable body fails that unit closed:
+nothing is persisted and no rule classifier is consulted, because falling back
+silently would break the traceability the published batch guarantees. The
+variables are documented in [`../docs/model-activation.md`](../docs/model-activation.md).
+
+The production Compose stack and the Kubernetes manifests do not know this service
+yet; that belongs to the deployment slice, together with the deploy workflow.
