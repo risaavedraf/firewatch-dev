@@ -11,6 +11,9 @@ package service
 import (
 	"context"
 	"errors"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
@@ -944,5 +947,70 @@ func TestPublisherDoesNotReportAnOutcomeWhenPersistenceFails(t *testing.T) {
 	}
 	if len(observer.levels) != 0 {
 		t.Fatalf("the observer recorded %v for a failed publication", observer.levels)
+	}
+}
+
+// TestPublishFailsClosedWhenTheModelPathCannotAnswer is the anti-fallback guard at
+// the publication path, which is where a fallback would actually have to happen.
+//
+// It is written as a pair on purpose. The first publication proves the same unit,
+// from the same provider, is classifiable and gets persisted under a rule; the
+// second proves that when the model path cannot answer, the unit fails with the
+// model's reason, persists nothing, and records no outcome. If a fallback to a
+// rule existed anywhere below Publish, the second half would persist the level the
+// first half proves is available, and this test would fail.
+func TestPublishFailsClosedWhenTheModelPathCannotAnswer(t *testing.T) {
+	ruleWriter := &stubWriter{}
+	if err := (Publisher{
+		Provider:   source.NewFixtureProvider(),
+		Classifier: classify.NewAcademicRuleV1(),
+		Store:      ruleWriter,
+	}).Publish(context.Background(), sampleRequest()); err != nil {
+		t.Fatalf("the control publication under a rule failed: %v", err)
+	}
+	if ruleWriter.calls != 1 || ruleWriter.assessment.RiskLevel == "" {
+		t.Fatalf("the control publication persisted nothing: %+v", ruleWriter.assessment)
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+		io.WriteString(w, `{"code":"scoring_failed","request_id":"req-9","detail":"model produced no probability"}`)
+	}))
+	defer server.Close()
+	model, err := classify.NewMLFixtureV1(server.URL, time.Second)
+	if err != nil {
+		t.Fatalf("configure the model-path classifier: %v", err)
+	}
+	writer := &stubWriter{}
+	observer := &stubObserver{}
+	publishErr := (Publisher{
+		Provider:   source.NewFixtureProvider(),
+		Classifier: model,
+		Store:      writer,
+		Outcomes:   observer,
+	}).Publish(context.Background(), sampleRequest())
+	if publishErr == nil {
+		t.Fatal("a publication whose model could not answer was reported as successful")
+	}
+	if writer.calls != 0 || writer.scheduled != 0 {
+		t.Fatalf("the failed publication persisted %d completion and %d scheduled batches, want none", writer.calls, writer.scheduled)
+	}
+	if len(observer.levels) != 0 {
+		t.Fatalf("the failed publication recorded the outcomes %v", observer.levels)
+	}
+	// The failure is attributable: it names the classifier version that could not
+	// answer, carries the model's own reason and stays classified as the model
+	// being unavailable rather than as a bad sample.
+	if !errors.Is(publishErr, classify.ErrModelUnavailable) {
+		t.Fatalf("the publication error is not classified as the model being unavailable: %v", publishErr)
+	}
+	if errors.Is(publishErr, classify.ErrModelRefused) {
+		t.Fatalf("a 500 was classified as the model refusing the sample: %v", publishErr)
+	}
+	if !strings.Contains(publishErr.Error(), classify.MLFixtureV1ID) {
+		t.Fatalf("the failure does not name the version that failed: %v", publishErr)
+	}
+	if !strings.Contains(publishErr.Error(), "scoring_failed") || !strings.Contains(publishErr.Error(), "500") {
+		t.Fatalf("the failure does not record why the model did not answer: %v", publishErr)
 	}
 }

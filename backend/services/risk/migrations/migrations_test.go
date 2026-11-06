@@ -274,3 +274,48 @@ func TestModelsIntegrityMigrationIsGuardedAndIdempotent(t *testing.T) {
 		}
 	}
 }
+
+// TestMLFixtureV1MigrationRecordsTheFrozenParamsHash protects T8's registry row:
+// the fixture-backed model version exists before MODEL_ID can select it, it stays
+// inactive so it replaces nothing, its kind says it is a fixture rather than a
+// rule or a placeholder, and its params_hash is the fingerprint of the artifact
+// description in classify.MLFixtureV1Params - pinned here rather than trusted, so
+// describing a different artifact breaks the build instead of silently
+// redefining what a stored level came from.
+func TestMLFixtureV1MigrationRecordsTheFrozenParamsHash(t *testing.T) {
+	migration := migrationFor(t, 11)
+	if migration.Name != "ml_fixture_v1" {
+		t.Errorf("migration 11 is named %q, want %q", migration.Name, "ml_fixture_v1")
+	}
+	sql := migration.SQL
+	for _, fragment := range []string{
+		"'" + classify.MLFixtureV1ID + "'",
+		"'fixture'",
+		"ON CONFLICT (version) DO NOTHING",
+		`"trained": false`,
+		"NULL::timestamptz",
+		"false)",
+	} {
+		if !strings.Contains(sql, fragment) {
+			t.Errorf("011_ml_fixture_v1.sql does not contain %q", fragment)
+		}
+	}
+	// The trained version must not be seeded: it can only reach the registry
+	// together with the artifact that produced it, and only an explicit
+	// activation may put it in front of the publication path.
+	if strings.Contains(sql, "'ml-v1'") {
+		t.Error("011_ml_fixture_v1.sql seeds ml-v1; the trained version may only be registered with its trained artifact")
+	}
+	recorded := quotedSHA256.FindAllStringSubmatch(sql, -1)
+	if len(recorded) != 1 {
+		t.Fatalf("011_ml_fixture_v1.sql records %d quoted sha256 literals, want exactly 1", len(recorded))
+	}
+	if got := recorded[0][1]; got != classify.MLFixtureV1ParamsHash {
+		t.Errorf("011_ml_fixture_v1.sql records params hash %q, want the frozen %q", got, classify.MLFixtureV1ParamsHash)
+	}
+	for _, forbidden := range []string{"DROP TABLE", "TRUNCATE", "DELETE FROM", "UPDATE "} {
+		if strings.Contains(sql, forbidden) {
+			t.Errorf("011_ml_fixture_v1.sql contains %q; schema migrations here never destroy data", forbidden)
+		}
+	}
+}

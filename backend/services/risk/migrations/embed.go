@@ -35,6 +35,9 @@ var firewatchRuleV2 string
 //go:embed 010_models_activation_grant.sql
 var modelsActivationGrant string
 
+//go:embed 011_ml_fixture_v1.sql
+var mlFixtureV1 string
+
 // Migration is one forward-only schema migration.
 //
 // Name exists so a failure can be attributed without reading the SQL.
@@ -61,5 +64,6 @@ func All() []Migration {
 		{Version: 7, Name: "synthetic_evaluation", SQL: syntheticEvaluation},
 		{Version: 8, Name: "firewatch_rule_v2", SQL: firewatchRuleV2},
 		{Version: 10, Name: "models_activation_grant", SQL: modelsActivationGrant},
+		{Version: 11, Name: "ml_fixture_v1", SQL: mlFixtureV1},
 	}
 }

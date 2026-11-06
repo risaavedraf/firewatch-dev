@@ -147,6 +147,145 @@ func TestDLQConfiguration(t *testing.T) {
 	}
 }
 
+// classifierEnvironment reads configuration from a map instead of the process,
+// so startup selection is exercised without touching the environment of the test
+// binary or of a parallel test.
+func classifierEnvironment(values map[string]string) func(string) string {
+	return func(key string) string { return values[key] }
+}
+
+// TestClassifierRegistrySelection pins startup selection by MODEL_ID.
+//
+// It covers the states that matter: the unreconfigured default, the second rule
+// version, the model path selected with the inference service configured, and the
+// model path selected without an address. The last one is the failure this exists
+// for: a model deployment that starts healthy and only discovers it has nowhere
+// to call at the first prediction is worse than one that refuses to start, so a
+// missing INFERENCE_URL aborts startup by name.
+func TestClassifierRegistrySelection(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		env      map[string]string
+		want     string
+		wantKind classify.Kind
+		wantErr  string
+	}{
+		{name: "default", want: classify.AcademicRuleV1ID, wantKind: classify.KindRule},
+		{
+			name:     "second rule",
+			env:      map[string]string{"MODEL_ID": classify.FirewatchRuleV2ID},
+			want:     classify.FirewatchRuleV2ID,
+			wantKind: classify.KindRule,
+		},
+		{
+			name: "model path",
+			env: map[string]string{
+				"MODEL_ID":          classify.MLFixtureV1ID,
+				inferenceURLEnv:     "http://inference:8080",
+				"INFERENCE_TIMEOUT": "2s",
+			},
+			want:     classify.MLFixtureV1ID,
+			wantKind: classify.KindTrained,
+		},
+		{
+			name:    "model path without an address",
+			env:     map[string]string{"MODEL_ID": classify.MLFixtureV1ID},
+			wantErr: inferenceURLEnv,
+		},
+		{
+			name: "model path with an invalid timeout",
+			env: map[string]string{
+				"MODEL_ID":          classify.MLFixtureV1ID,
+				inferenceURLEnv:     "http://inference:8080",
+				"INFERENCE_TIMEOUT": "soon",
+			},
+			wantErr: "INFERENCE_TIMEOUT",
+		},
+		{
+			name: "model path with a relative address",
+			env: map[string]string{
+				"MODEL_ID":      classify.MLFixtureV1ID,
+				inferenceURLEnv: "inference:8080",
+			},
+			wantErr: inferenceURLEnv,
+		},
+		{
+			// The trained version does not exist yet, so selecting it must fail loudly
+			// instead of starting on a version nobody registered.
+			name: "version this binary does not execute",
+			env: map[string]string{
+				"MODEL_ID":      "ml-v1",
+				inferenceURLEnv: "http://inference:8080",
+			},
+			wantErr: "unknown classifier",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			classifiers, selected, active, err := classifierRegistry(classifierEnvironment(tc.env))
+			if tc.wantErr != "" {
+				if err == nil {
+					t.Fatalf("the configuration was accepted and selected %q", selected)
+				}
+				if !strings.Contains(err.Error(), tc.wantErr) {
+					t.Fatalf("the startup error does not name %q: %v", tc.wantErr, err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("classifier selection failed: %v", err)
+			}
+			if selected != tc.want || active.ID() != tc.want || active.Kind() != tc.wantKind {
+				t.Fatalf("selected %q (kind %q), want %q (kind %q)", active.ID(), active.Kind(), tc.want, tc.wantKind)
+			}
+			// Registering the model path never replaces a rule version: the registry
+			// lists every version this binary can execute, so an activation can move
+			// between them in either direction.
+			ids := classifiers.IDs()
+			for _, required := range []string{classify.AcademicRuleV1ID, classify.FirewatchRuleV2ID} {
+				found := false
+				for _, id := range ids {
+					found = found || id == required
+				}
+				if !found {
+					t.Fatalf("the registry does not carry %q: %v", required, ids)
+				}
+			}
+			if _, configured := tc.env[inferenceURLEnv]; configured {
+				if _, err := classifiers.Select(classify.MLFixtureV1ID); err != nil {
+					t.Fatalf("the registry does not carry the fixture model path: %v", err)
+				}
+			} else if _, err := classifiers.Select(classify.MLFixtureV1ID); err == nil {
+				t.Fatal("the model path was registered without an inference address")
+			}
+		})
+	}
+}
+
+// TestInferenceTimeoutConfiguration pins the prediction bound: unset uses the
+// documented default, a positive duration is accepted, and anything else is a
+// configuration error rather than a silent fallback.
+func TestInferenceTimeoutConfiguration(t *testing.T) {
+	for _, tc := range []struct {
+		raw     string
+		want    time.Duration
+		invalid bool
+	}{
+		{"", defaultInferenceTimeout, false},
+		{"2s", 2 * time.Second, false},
+		{"750ms", 750 * time.Millisecond, false},
+		{"garbage", 0, true},
+		{"0s", 0, true},
+		{"-1s", 0, true},
+	} {
+		t.Run("timeout="+tc.raw, func(t *testing.T) {
+			got, err := parseInferenceTimeout(tc.raw)
+			if (err != nil) != tc.invalid || got != tc.want {
+				t.Fatalf("parseInferenceTimeout(%q) = %v, %v; want %v, invalid=%v", tc.raw, got, err, tc.want, tc.invalid)
+			}
+		})
+	}
+}
+
 // decodeStatus decodes the status body a readiness or status route returned.
 func decodeStatus(t *testing.T, body []byte) handler.Status {
 	t.Helper()

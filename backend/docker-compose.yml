@@ -131,6 +131,35 @@ services:
       jobs-migrate: {condition: service_completed_successfully}
       rabbitmq: {condition: service_healthy}
 
+  # The model service. It publishes no host port on purpose (S3): it is
+  # reachable only on the internal `backend` network, `risk` is its only caller,
+  # and the gateway does not route to it. Publishing /predict would let any
+  # caller generate load against the model and probe its behaviour, and no
+  # client needs it - the frontend reads published batches from Postgres.
+  #
+  # The artifact is mounted rather than baked into the image, so the model a
+  # container serves is a file in this repository and a trained artifact
+  # replaces it without rebuilding anything.
+  inference:
+    <<: *hardened
+    build: {context: ., dockerfile: services/inference/Dockerfile}
+    environment:
+      FIREWATCH_MODEL_PATH: /models/logistic.json
+    volumes:
+      - ./services/inference/testdata/logistic.json:/models/logistic.json:ro
+    healthcheck:
+      # The image is distroless: no shell and no HTTP client, so the probe is
+      # the service's own deploy-time gate. `/server -validate` loads and
+      # validates the configured artifact through the same code path startup
+      # uses and exits non-zero when it would refuse to serve, which is what a
+      # broken or missing mount looks like from outside. It cannot prove the
+      # listener is bound; what covers that is `risk` failing the unit closed
+      # instead of assuming an answer.
+      test: [CMD, /server, -validate]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
   risk:
     <<: *hardened
     build: {context: ., dockerfile: services/risk/Dockerfile}
@@ -142,9 +171,18 @@ services:
       # `active` row. The local stack selects v2 so the demo classifies with it;
       # set MODEL_ID in .env to run another registered version instead.
       MODEL_ID: ${MODEL_ID:-firewatch-rule-v2}
+      # The internal address of the model service. It is set here rather than
+      # defaulted in the service, because a hardcoded default would silently
+      # point a deployment somewhere nobody configured. With it set,
+      # `MODEL_ID=ml-fixture-v1` exercises the whole route - risk, inference,
+      # POST /predict, one stored level - without editing this file, and the
+      # rule deployments that are the default never call it.
+      INFERENCE_URL: http://inference:8080
+      INFERENCE_TIMEOUT: ${INFERENCE_TIMEOUT:-5s}
     depends_on:
       risk-migrate: {condition: service_completed_successfully}
       rabbitmq: {condition: service_healthy}
+      inference: {condition: service_healthy}
 
   prevention:
     <<: *hardened
