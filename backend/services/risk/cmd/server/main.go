@@ -18,6 +18,7 @@ import (
 
 	"firewatch.local/risk/internal/classify"
 	"firewatch.local/risk/internal/cycle"
+	"firewatch.local/risk/internal/features"
 	"firewatch.local/risk/internal/handler"
 	"firewatch.local/risk/internal/messaging"
 	"firewatch.local/risk/internal/metrics"
@@ -175,6 +176,19 @@ func run() error {
 	if err != nil {
 		return fmt.Errorf("configure source provider: %w", err)
 	}
+	// The trained model's seven-value input vector is built from the readings
+	// history this component also records on every publication. It is wired even
+	// when a rule classifier is serving, because the history has to accumulate from
+	// the first cycle for the aggregates to have a chance of covering their window
+	// by the time the model is selected; a rule deployment that skipped it would
+	// hand the model seven nulls on day one of its activation. New returns an error
+	// rather than falling back to UTC when the civil time zone cannot be loaded, so
+	// a host without tzdata stops here instead of publishing plausible aggregates
+	// cut in the wrong day.
+	featureSource, err := features.New(store)
+	if err != nil {
+		return err
+	}
 	// The model-outcome counters are shared between the publication path, which
 	// writes them, and /metrics, which reads them: one value, two surfaces.
 	outcomes := &metrics.RiskOutcomes{}
@@ -185,7 +199,7 @@ func run() error {
 	// MODEL_ID selection above is the bootstrap. A version this binary cannot
 	// execute, or a frozen fingerprint mismatch, fails the publication closed.
 	classifierSource := service.RegistryClassifierSource{Models: store, Registry: classifiers, Bootstrap: active}
-	publisher := service.Publisher{Provider: provider, Classifiers: classifierSource, Store: store, Outcomes: outcomes}
+	publisher := service.Publisher{Provider: provider, Classifiers: classifierSource, Store: store, Outcomes: outcomes, Model: featureSource}
 	// Validate both bounds before starting any broker worker.
 	dlqReadyMaxDepth, err := parseDLQReadyMaxDepth(os.Getenv("DLQ_READY_MAX_DEPTH"))
 	if err != nil {

@@ -365,8 +365,17 @@ func TestFixtureProviderIsRegistrableAndDeterministic(t *testing.T) {
 	if first.Provenance.NormalizedSHA256 == "" {
 		t.Fatal("fixture retrieval carries no normalized hash")
 	}
-	if len(first.Records) != len(observations.VariableNames()) {
-		t.Fatalf("fixture returned %d records, want one per canonical variable", len(first.Records))
+	if len(first.Records) != len(ReadingVariableNames()) {
+		t.Fatalf("fixture returned %d records, want one per variable the readings history stores (%d)", len(first.Records), len(ReadingVariableNames()))
+	}
+	// Every record must declare the unit its variable is stored in: the fixture is
+	// the only provider before real data exists, so it has to satisfy the same unit
+	// rule a real one does.
+	for _, record := range first.Records {
+		if !UnitMatches(record.Variable, record.Unit) {
+			expected, _ := ExpectedUnit(record.Variable)
+			t.Fatalf("fixture record %s declares unit %q, want %q", record.Variable, record.Unit, expected)
+		}
 	}
 }
 

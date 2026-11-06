@@ -478,17 +478,91 @@ func summarise(document []byte) string {
 	return text
 }
 
+// Measured is one value of the trained model's input vector, together with the
+// reason it is what it is.
+//
+// It exists because "null" is not one fact. A feature can be absent because the
+// retrieval did not carry the variable, because the readings history does not
+// cover the window the aggregate is defined over, or because the stored value
+// arrived in a unit that contradicts the variable's own. All of those send a JSON
+// null, and all of them must record a different, operator-readable reason: without
+// it a persisted factor would say "unknown" and nothing about which window was
+// short or why. That is the difference between "we cannot know" and "we forgot".
+type Measured struct {
+	// Value is the reading, present or absent. An absent reading is Unknown(),
+	// never Known(0): a zero precipitation sum computed from a missing window is a
+	// lie that changes the prediction, and absence is the only honest encoding of
+	// "the history cannot answer this".
+	Value Feature
+	// Reason backs Value: how it was computed when present, or which window was
+	// short when absent. It is appended to the persisted factor's note, so the
+	// reason survives in the audit trail instead of only in a log line.
+	Reason string
+	// Coverage reports how much of the feature's window the readings history
+	// covers. It is the zero Coverage for an instantaneous reading, which has no
+	// window to cover.
+	Coverage Coverage
+}
+
+// Coverage records how much of the window a windowed feature is defined over the
+// readings history actually covers.
+//
+// It is carried separately from the prose reason so a caller can assert the count
+// instead of parsing a sentence: "0 of 7 days" is a fact about the data, and the
+// number that proves a null was justified has to be checkable.
+type Coverage struct {
+	// Covered is how many units of the window hold at least one reading.
+	Covered int
+	// Required is how many units a complete window needs.
+	Required int
+	// Unit names what is counted, for example "días locales".
+	Unit string
+}
+
+// Complete reports whether the window is fully covered. A zero Coverage - an
+// instantaneous reading, or one that was never windowed - is not complete, and no
+// caller treats it as if it were.
+func (c Coverage) Complete() bool { return c.Required > 0 && c.Covered >= c.Required }
+
+// String renders the coverage for a recorded reason, for example
+// "0 de 7 días locales".
+func (c Coverage) String() string { return fmt.Sprintf("%d de %d %s", c.Covered, c.Required, c.Unit) }
+
+// ModelInput is the seven-value input vector the trained artifact declares, in the
+// canonical units this service stores: temperature in degrees Celsius, relative
+// humidity in percent, wind speed in km/h, wind direction in degrees, precipitation
+// in millimetres, radiation in W/m2.
+//
+// The unit the ARTIFACT declares is the inferenceInput table's business, not this
+// type's: the table converts what it must (wind km/h to m/s) in one place, so a
+// conversion can never be applied twice or silently omitted.
+type ModelInput struct {
+	// TempMaxC and TempMinC are the extremes of the current civil day, computed
+	// over the readings history in the aggregate's named time zone.
+	TempMaxC Measured
+	TempMinC Measured
+	// HumidityRelPct, WindSpeedKmh, WindDirectionDeg and RadiationWPerM2 are
+	// instantaneous readings of the current retrieval.
+	HumidityRelPct   Measured
+	WindSpeedKmh     Measured
+	WindDirectionDeg Measured
+	RadiationWPerM2  Measured
+	// PrecipitationMM is the accumulated precipitation over the last seven civil
+	// days of the readings history.
+	PrecipitationMM Measured
+}
+
 // inferenceInput is one feature of the artifact's input vector, expressed in the
 // canonical vocabulary of this service.
 //
 // The table is the whole cross-contract decision, so it is stated rather than
-// derived: a feature with no Read is declared null ("declared but unobserved")
-// and the artifact imputes it, and a feature with a Read carries the unit
-// conversion that reaches the unit the artifact declares. What is deliberately
-// absent: `temperatura` is not sent as temp_max. The canonical variable is an
-// instantaneous reading with no qualifier, and claiming it is a daily maximum
-// would hand the model a value it was never trained to interpret - the same
-// class of error as re-labelling another commune's data as this one.
+// derived: a feature whose Measured is absent is declared null ("declared but
+// unobserved") and the artifact imputes it, and a feature with a value carries the
+// unit conversion that reaches the unit the artifact declares. What is
+// deliberately absent: the instantaneous `temperatura` of the rules is not sent as
+// temp_max. The daily maximum comes from the readings history, through
+// internal/features, and claiming an instantaneous reading is a daily maximum would
+// hand the model a value it was never trained to interpret.
 type inferenceInput struct {
 	// Feature is the artifact's feature name, as firewatch-model/v1 declares it.
 	Feature string
@@ -499,9 +573,8 @@ type inferenceInput struct {
 	// Scale converts the canonical reading into the artifact's unit. unchangedUnit
 	// means the units already agree.
 	Scale float64
-	// Read extracts the canonical reading. It is nil when this service publishes
-	// no reading that the artifact's feature could honestly be built from.
-	Read func(Features) Feature
+	// Read extracts the measured value from the model input vector.
+	Read func(ModelInput) Measured
 	// Note explains, for the persisted factor, what was sent and why.
 	Note string
 }
@@ -510,25 +583,33 @@ type inferenceInput struct {
 // declared order. The order is documentation rather than protocol - the request
 // is key-addressed - but it keeps this table readable against
 // services/inference/testdata/logistic.json, which is what it describes.
+//
+// Every one of the seven is built by internal/features at publication time; a null
+// here therefore means "the history or the retrieval could not answer this", and
+// the Measured reason says which, with its window coverage.
 var inferenceInputs = []inferenceInput{
 	{
 		Feature: "temp_max",
 		Factor:  "temperatura_maxima_diaria",
 		Unit:    "degC",
-		Note:    "el artefacto pide la temperatura máxima diaria y este servicio no publica esa variable",
+		Scale:   unchangedUnit,
+		Read:    func(m ModelInput) Measured { return m.TempMaxC },
+		Note:    "máximo del día civil en curso en la zona horaria de los agregados",
 	},
 	{
 		Feature: "temp_min",
 		Factor:  "temperatura_minima_diaria",
 		Unit:    "degC",
-		Note:    "el artefacto pide la temperatura mínima diaria y este servicio no publica esa variable",
+		Scale:   unchangedUnit,
+		Read:    func(m ModelInput) Measured { return m.TempMinC },
+		Note:    "mínimo del día civil en curso en la zona horaria de los agregados",
 	},
 	{
 		Feature: "humidity_rel",
 		Factor:  "humedad_relativa",
 		Unit:    "%",
 		Scale:   unchangedUnit,
-		Read:    func(f Features) Feature { return f.RelativeHumidityPct },
+		Read:    func(m ModelInput) Measured { return m.HumidityRelPct },
 		Note:    "misma variable y misma unidad que humedad_relativa",
 	},
 	{
@@ -536,56 +617,72 @@ var inferenceInputs = []inferenceInput{
 		Factor:  "viento",
 		Unit:    "m/s",
 		Scale:   metresPerSecondPerKmh,
-		Read:    func(f Features) Feature { return f.WindSpeedKmh },
+		Read:    func(m ModelInput) Measured { return m.WindSpeedKmh },
 		Note:    "viento convertido de km/h a m/s (÷3.6), la unidad que declara el artefacto",
 	},
 	{
 		Feature: "wind_dir",
 		Factor:  "direccion_viento",
 		Unit:    "deg",
-		Note:    "el artefacto pide la dirección del viento y este servicio no publica esa variable",
+		Scale:   unchangedUnit,
+		Read:    func(m ModelInput) Measured { return m.WindDirectionDeg },
+		Note:    "lectura instantánea de la dirección del viento (grados, desde donde sopla)",
 	},
 	{
 		Feature: "precip_sum",
 		Factor:  "precipitacion_acumulada",
 		Unit:    "mm/day",
-		Note:    "el artefacto pide la precipitación acumulada y este servicio no publica esa variable",
+		Scale:   unchangedUnit,
+		Read:    func(m ModelInput) Measured { return m.PrecipitationMM },
+		// The artifact declares mm/day for this feature while its own name asks for
+		// an accumulation. This service sends the seven day SUM in mm, because that
+		// is what a sum is; the declared unit and the accumulation disagree, and the
+		// discrepancy belongs in the persisted factor until the training contract
+		// settles which one precip_sum means.
+		Note: "acumulado de siete días locales del historial, en mm; el artefacto declara esta característica en mm/day y la discrepancia sigue abierta en el contrato de entrenamiento",
 	},
 	{
 		Feature: "radiation_sol",
 		Factor:  "radiacion_solar",
 		Unit:    "W/m2",
-		Note:    "el artefacto pide la radiación solar y este servicio no publica esa variable",
+		Scale:   unchangedUnit,
+		Read:    func(m ModelInput) Measured { return m.RadiationWPerM2 },
+		Note:    "lectura instantánea en W/m2, tal como la publica la fuente; no se convierte a integral diaria",
 	},
 }
 
 // inferenceSample builds the request body and the factors that describe it.
 //
-// A reading this service does not have is sent as an explicit null, which the
+// A feature the vector does not carry is sent as an explicit null, which the
 // contract defines as "declared but unobserved" and the artifact imputes.
 // Omitting the key instead would make the service refuse the sample as missing,
-// which is the correct answer for a client bug and the wrong one for a feature
-// the model asks for and this deployment cannot supply. Absence is never
-// reported as a zero reading, for the same reason the rules abstain instead of
-// interpreting a missing humidity as 0%.
+// which is the correct answer for a client bug and the wrong one for a feature the
+// model asks for and this deployment cannot supply. Absence is never reported as a
+// zero reading, for the same reason the rules abstain instead of interpreting a
+// missing humidity as 0%, and the reason the vector recorded travels into the
+// factor so a stored level says which window was short.
 func inferenceSample(features Features) (map[string]*float64, []Factor) {
 	sample := make(map[string]*float64, len(inferenceInputs))
 	factors := make([]Factor, 0, len(inferenceInputs))
 	for _, input := range inferenceInputs {
-		factor := Factor{Name: input.Factor, Note: input.Note + " (" + input.Unit + ")"}
-		var reading Feature
+		measured := Measured{}
 		if input.Read != nil {
-			reading = input.Read(features)
+			measured = input.Read(features.Model)
 		}
+		factor := Factor{Name: input.Factor, Note: input.Note + " (" + input.Unit + ")"}
+		if measured.Reason != "" {
+			factor.Note += ": " + measured.Reason
+		}
+		reading := measured.Value
 		switch {
 		case !reading.Present:
-			factor.Note += ": sin lectura, se declara nula y el artefacto la imputa"
+			factor.Note += "; sin lectura, se declara nula y el artefacto la imputa"
 			sample[input.Feature] = nil
 		case math.IsNaN(reading.Value) || math.IsInf(reading.Value, 0):
 			// The artifact's own preprocessing maps NaN to its imputed value, so a
 			// non-finite reading is declared unobserved instead of being encoded as
 			// a number. It is recorded on the factor, never dropped in silence.
-			factor.Note += ": el valor recibido no es un número finito, se declara nulo y el artefacto lo imputa"
+			factor.Note += "; el valor recibido no es un número finito, se declara nulo y el artefacto lo imputa"
 			sample[input.Feature] = nil
 		default:
 			value := reading.Value * input.Scale

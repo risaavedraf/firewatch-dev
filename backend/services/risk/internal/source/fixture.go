@@ -36,7 +36,7 @@ func (FixtureProvider) Describe() observations.SourceDescriptor {
 		Endpoint:    "builtin://fixture-sample/sample-v1",
 		License:     "N/A (datos sintéticos de demostración)",
 		Attribution: "FireWatch (2026). Muestra sintética de demostración. No contiene observaciones reales.",
-		Variables:   observations.VariableNames(),
+		Variables:   ReadingVariableNames(),
 		// The coverage fields describe the synthetic sample honestly rather than
 		// borrowing the coverage of a real dataset it does not contain.
 		GeoCoverage:      "Región de Valparaíso (muestra sintética)",
@@ -100,8 +100,16 @@ func (FixtureProvider) Fetch(ctx context.Context, window observations.Window) (o
 	}, nil
 }
 
-// FixtureRecords returns the synthetic sample, one observation per canonical
-// variable. Values are fixed so a test can assert an exact classification.
+// FixtureRecords returns the synthetic sample, one observation per variable the
+// readings history stores. Values and units are fixed so a test can assert an
+// exact classification and an exact aggregate.
+//
+// The sample carries the weather variables the trained artifact asks for, not
+// only the five the rule classifiers use, so the whole publication path -
+// readings history, daily aggregates, model request - is exercisable end to end
+// without external data. Every record declares its unit explicitly, because a
+// reading without one is refused by the validator and would make the fixture
+// unpublishable.
 func FixtureRecords() []observations.Observation {
 	values := []struct {
 		variable string
@@ -113,6 +121,12 @@ func FixtureRecords() []observations.Observation {
 		{observations.VariableWind, 45.0, "km/h"},
 		{observations.VariableVegetation, 65.0, "%"},
 		{observations.VariableHistoricalFires, 4.0, "count"},
+		{VariableWindDirection, 225.0, "deg"},
+		// A measured zero, not a missing value: the fixture's own window is
+		// covered, so zero millimetres is a real reading and must stay
+		// distinguishable from the null a missing window produces.
+		{VariablePrecipitation, 0.0, "mm"},
+		{VariableRadiation, 640.0, "W/m2"},
 	}
 	records := make([]observations.Observation, 0, len(values))
 	for _, entry := range values {

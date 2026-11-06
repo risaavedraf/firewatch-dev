@@ -9,9 +9,9 @@ import (
 	observations "firewatch.local/contracts/observations/v1"
 )
 
-// validateSet builds a complete set of five canonical records for one zone, so a
-// test mutates exactly one field and the rejection can be attributed to it. The
-// validator itself lives in validate.go.
+// validateSet builds a complete set of records for one zone, one per variable the
+// readings history stores, so a test mutates exactly one field and the rejection
+// can be attributed to it. The validator itself lives in validate.go.
 func validateSet() observations.ObservationSet {
 	instant := time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC)
 	records := FixtureRecords()
@@ -35,8 +35,8 @@ func TestValidateAcceptsACompleteWellFormedSet(t *testing.T) {
 	if !report.Complete() {
 		t.Fatalf("a complete set was rejected: %s", report.Reasons())
 	}
-	if len(report.Accepted) != 5 || len(report.Rejected) != 0 {
-		t.Fatalf("accepted=%d rejected=%d, want 5/0", len(report.Accepted), len(report.Rejected))
+	if len(report.Accepted) != len(ReadingVariableNames()) || len(report.Rejected) != 0 {
+		t.Fatalf("accepted=%d rejected=%d, want %d/0", len(report.Accepted), len(report.Rejected), len(ReadingVariableNames()))
 	}
 	if missing := report.Missing; len(missing) != 0 {
 		t.Fatalf("a complete set reported missing variables %v", missing)
@@ -52,6 +52,12 @@ func TestValidateRejectsEachInvalidRecordWithARecordedCause(t *testing.T) {
 		cause     RejectCause
 		detailHas string
 	}{
+		{
+			name:      "unit from another scale",
+			mutate:    func(r *observations.Observation) { r.Unit = "°F" },
+			cause:     CauseUnit,
+			detailHas: "C",
+		},
 		{
 			name:      "missing required field",
 			mutate:    func(r *observations.Observation) { r.Unit = "" },
@@ -115,8 +121,8 @@ func TestValidateRejectsEachInvalidRecordWithARecordedCause(t *testing.T) {
 			if report.Complete() {
 				t.Fatalf("an invalid record was accepted: %+v", set.Records[0])
 			}
-			if len(report.Accepted) != 4 {
-				t.Fatalf("accepted = %d, want the 4 valid records", len(report.Accepted))
+			if len(report.Accepted) != len(ReadingVariableNames())-1 {
+				t.Fatalf("accepted = %d, want the %d valid records", len(report.Accepted), len(ReadingVariableNames())-1)
 			}
 			if len(report.Rejected) != 1 {
 				t.Fatalf("rejected = %d, want 1", len(report.Rejected))
@@ -150,8 +156,8 @@ func TestValidateRejectsDuplicatesAndKeepsTheFirst(t *testing.T) {
 	if len(report.Rejected) != 1 || report.Rejected[0].Cause != CauseDuplicate {
 		t.Fatalf("rejected = %+v, want one duplicate", report.Rejected)
 	}
-	if len(report.Accepted) != 5 {
-		t.Fatalf("accepted = %d, want the 5 first occurrences", len(report.Accepted))
+	if len(report.Accepted) != len(ReadingVariableNames()) {
+		t.Fatalf("accepted = %d, want the %d first occurrences", len(report.Accepted), len(ReadingVariableNames()))
 	}
 	for _, record := range report.Accepted {
 		if record.Value == 99 {

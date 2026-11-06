@@ -319,3 +319,43 @@ func TestMLFixtureV1MigrationRecordsTheFrozenParamsHash(t *testing.T) {
 		}
 	}
 }
+
+// TestReadingsMigrationIsGuardedAndIdempotent protects the history the model's
+// aggregates are computed from. The table has to exist before the publication
+// path can record a reading; its identity is what makes re-ingestion idempotent,
+// the window index is the shape the aggregate read uses, and every statement is
+// guarded so applying the file twice is a no-op.
+func TestReadingsMigrationIsGuardedAndIdempotent(t *testing.T) {
+	migration := migrationFor(t, 12)
+	if migration.Name != "readings" {
+		t.Errorf("migration 12 is named %q, want %q", migration.Name, "readings")
+	}
+	sql := migration.SQL
+	for _, fragment := range []string{
+		"CREATE TABLE IF NOT EXISTS readings",
+		"CONSTRAINT readings_identity UNIQUE (zone_id, variable, observed_at)",
+		"CREATE INDEX IF NOT EXISTS readings_variable_window ON readings(zone_id, variable, observed_at DESC)",
+		"GRANT SELECT, INSERT ON readings TO risk_app",
+	} {
+		if !strings.Contains(sql, fragment) {
+			t.Errorf("012_readings.sql does not contain %q", fragment)
+		}
+	}
+	// The history is append-only: no grant may let the application rewrite or
+	// delete a reading, because a stored aggregate has to stay reproducible from
+	// what the source actually said.
+	if strings.Contains(sql, "GRANT SELECT, INSERT, UPDATE") || strings.Contains(sql, "GRANT DELETE") {
+		t.Error("012_readings.sql grants a write privilege beyond appending; the readings history is append-only")
+	}
+	// A foreign key to zones would make storage depend on the catalogue catching
+	// up, discarding history that cannot be re-fetched. The decision is deliberate
+	// and is recorded in the file's own comment.
+	if strings.Contains(sql, "REFERENCES zones") {
+		t.Error("012_readings.sql references zones; a reading must not be refused because the catalogue lags")
+	}
+	for _, forbidden := range []string{"DROP TABLE", "TRUNCATE", "DELETE FROM", "UPDATE "} {
+		if strings.Contains(sql, forbidden) {
+			t.Errorf("012_readings.sql contains %q; schema migrations here never destroy data", forbidden)
+		}
+	}
+}

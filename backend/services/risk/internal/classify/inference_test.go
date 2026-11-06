@@ -116,10 +116,16 @@ func TestInferenceClassifierMapsTheServedProbabilityToItsLevel(t *testing.T) {
 }
 
 // TestInferenceClassifierSendsTheFixtureFeatureMap pins the cross-contract
-// mapping: the artifact's feature names, the explicit null for a feature this
-// service does not publish, and the unit conversion for the one it publishes in a
-// different unit. A silent change to any of the three would be a silent change to
-// what the model is asked about.
+// mapping: the artifact's seven feature names, the unit conversion for the one
+// canonical reading expressed in a different unit, and the values the model input
+// vector supplies.
+//
+// This test USED TO assert the old two-feature behaviour - two values from the
+// rules and five hardcoded nulls - because that is all the publication path could
+// answer before the readings history existed. It now asserts the opposite: seven
+// populated values, which is the behaviour this slice delivers. The null case is
+// pinned separately, by
+// TestInferenceClassifierDeclaresAnUncoveredWindowAsNullWithItsCoverage.
 func TestInferenceClassifierSendsTheFixtureFeatureMap(t *testing.T) {
 	var (
 		captured map[string]map[string]*float64
@@ -145,15 +151,19 @@ func TestInferenceClassifierSendsTheFixtureFeatureMap(t *testing.T) {
 		mu.Unlock()
 		io.WriteString(w, predictionBody("medium", 0.5))
 	})
-	// 45 km/h is 12.5 m/s: the artifact declares wind_speed in m/s, so sending
-	// km/h would be a unit error its guard cannot catch (both are inside
-	// [0, 40]).
+	// The vector is what internal/features builds at publication time; here it is
+	// supplied directly, in the canonical units this service stores, so the unit
+	// conversion below is observable.
 	assessment, err := classifier.Classify(context.Background(), fixtureFeatures(t, func(f *Features) {
-		f.TemperatureC = Known(31.5)
-		f.RelativeHumidityPct = Known(22)
-		f.WindSpeedKmh = Known(45)
-		f.VegetationCoverPct = Known(80)
-		f.HistoricalFires = Known(3)
+		f.Model = ModelInput{
+			TempMaxC:         Measured{Value: Known(31.5), Reason: "máximo del día civil"},
+			TempMinC:         Measured{Value: Known(12.5), Reason: "mínimo del día civil"},
+			HumidityRelPct:   Measured{Value: Known(22), Reason: "lectura instantánea de humedad_relativa"},
+			WindSpeedKmh:     Measured{Value: Known(45), Reason: "lectura instantánea de viento"},
+			WindDirectionDeg: Measured{Value: Known(195), Reason: "lectura instantánea de direccion_viento"},
+			PrecipitationMM:  Measured{Value: Known(16), Reason: "suma de siete días locales", Coverage: Coverage{Covered: 7, Required: 7, Unit: "días locales"}},
+			RadiationWPerM2:  Measured{Value: Known(1680), Reason: "lectura instantánea de radiacion_solar"},
+		}
 	}))
 	if err != nil {
 		t.Fatalf("classify with the model path: %v", err)
@@ -164,37 +174,127 @@ func TestInferenceClassifierSendsTheFixtureFeatureMap(t *testing.T) {
 	if !ok {
 		t.Fatalf("the request carries no features object: %v", captured)
 	}
-	want := []string{"temp_max", "temp_min", "humidity_rel", "wind_speed", "wind_dir", "precip_sum", "radiation_sol"}
-	if len(features) != len(want) {
-		t.Fatalf("the request declares %d features, want the artifact's %d: %v", len(features), len(want), features)
+	// Every feature of the artifact must be declared, and every one the vector
+	// measured must travel with its value: a null here would be the two-feature
+	// behaviour this slice replaces.
+	want := map[string]float64{
+		"temp_max":      31.5,
+		"temp_min":      12.5,
+		"humidity_rel":  22,
+		"wind_dir":      195,
+		"precip_sum":    16,
+		"radiation_sol": 1680,
 	}
-	for _, name := range want {
-		if _, declared := features[name]; !declared {
-			t.Fatalf("the request does not declare the artifact's feature %q: %v", name, features)
+	if len(features) != len(want)+1 {
+		t.Fatalf("the request declares %d features, want the artifact's %d: %v", len(features), len(want)+1, features)
+	}
+	for name, expected := range want {
+		value, declared := features[name]
+		if !declared || value == nil {
+			t.Fatalf("%s is not declared with a value: %v", name, features)
+		}
+		if math.Abs(*value-expected) > 1e-12 {
+			t.Fatalf("%s = %v, want %v", name, *value, expected)
 		}
 	}
-	if value := features["humidity_rel"]; value == nil || *value != 22 {
-		t.Fatalf("humidity_rel = %v, want the 22%% reading", value)
-	}
+	// 45 km/h is 12.5 m/s: the artifact declares wind_speed in m/s, so sending
+	// km/h would be a unit error its guard cannot catch (both are inside [0, 40]).
 	if value := features["wind_speed"]; value == nil || math.Abs(*value-12.5) > 1e-12 {
 		t.Fatalf("wind_speed = %v, want 12.5 m/s (45 km/h converted, not sent raw)", value)
 	}
-	// The canonical temperature is an instantaneous reading; the artifact asks for
-	// a daily maximum. Sending it as temp_max would hand the model a value it was
-	// never trained to interpret.
-	for _, absent := range []string{"temp_max", "temp_min", "wind_dir", "precip_sum", "radiation_sol"} {
-		if value := features[absent]; value != nil {
-			t.Fatalf("%s = %v, want null: this service publishes no reading that feature can honestly be built from", absent, *value)
+	// The factors carry the canonical, unconverted reading, so an operator can join
+	// a persisted factor to the history row it came from.
+	wantFactors := map[string]float64{
+		"temperatura_maxima_diaria": 31.5,
+		"temperatura_minima_diaria": 12.5,
+		"humedad_relativa":          22,
+		"viento":                    45,
+		"direccion_viento":          195,
+		"precipitacion_acumulada":   16,
+		"radiacion_solar":           1680,
+	}
+	recorded := make(map[string]Factor, len(assessment.Factors))
+	for _, factor := range assessment.Factors {
+		recorded[factor.Name] = factor
+	}
+	if len(recorded) != len(wantFactors) {
+		t.Fatalf("the assessment carries %d factors, want %d: %+v", len(recorded), len(wantFactors), assessment.Factors)
+	}
+	for name, expected := range wantFactors {
+		factor, ok := recorded[name]
+		if !ok {
+			t.Fatalf("no factor %q: %+v", name, assessment.Factors)
 		}
+		if !factor.Known || factor.Value != expected {
+			t.Fatalf("factor %q = %+v, want the canonical reading %v", name, factor, expected)
+		}
+		// The model does not report per-variable contributions. Recording them as
+		// anything but zero would invent evidence.
+		if factor.Contribution != 0 {
+			t.Fatalf("factor %q reports contribution %v, but the inference service reports none", name, factor.Contribution)
+		}
+	}
+}
+
+// TestInferenceClassifierDeclaresAnUncoveredWindowAsNullWithItsCoverage is the
+// other half of the mapping: when the history cannot cover a window, the feature
+// travels as an explicit null - never as zero - and the persisted factor keeps the
+// reason, including how much of the window was covered.
+func TestInferenceClassifierDeclaresAnUncoveredWindowAsNullWithItsCoverage(t *testing.T) {
+	var (
+		captured map[string]map[string]*float64
+		mu       sync.Mutex
+	)
+	classifier, _ := servePredictor(t, time.Second, func(w http.ResponseWriter, r *http.Request) {
+		raw, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Errorf("read the request body: %v", err)
+		}
+		body := map[string]map[string]*float64{}
+		if err := json.Unmarshal(raw, &body); err != nil {
+			t.Errorf("the request body is not the documented object: %v (%q)", err, raw)
+		}
+		mu.Lock()
+		captured = body
+		mu.Unlock()
+		io.WriteString(w, predictionBody("low", 0.1))
+	})
+	assessment, err := classifier.Classify(context.Background(), fixtureFeatures(t, func(f *Features) {
+		f.Model = ModelInput{
+			TempMaxC: Measured{Value: Known(30), Reason: "máximo del día civil"},
+			PrecipitationMM: Measured{
+				Value:    Unknown(),
+				Reason:   "ventana incompleta: 0 de 7 días locales con lectura de precipitacion; se declara nula y el artefacto la imputa",
+				Coverage: Coverage{Covered: 0, Required: 7, Unit: "días locales"},
+			},
+		}
+	}))
+	if err != nil {
+		t.Fatalf("classify with the model path: %v", err)
+	}
+	mu.Lock()
+	features := captured["features"]
+	mu.Unlock()
+	value, declared := features["precip_sum"]
+	if !declared || value != nil {
+		t.Fatalf("precip_sum = %v (declared=%v), want an explicit null on an uncovered window", value, declared)
+	}
+	if value := features["temp_max"]; value == nil || *value != 30 {
+		t.Fatalf("temp_max = %v, want 30: one absent window must not suppress a present feature", value)
 	}
 	for _, factor := range assessment.Factors {
-		if factor.Name == "humedad_relativa" && (!factor.Known || factor.Value != 22) {
-			t.Fatalf("the humidity factor does not record the reading it sent: %+v", factor)
+		if factor.Name != "precipitacion_acumulada" {
+			continue
 		}
-		if factor.Name == "temperatura_maxima_diaria" && factor.Known {
-			t.Fatalf("the temperature factor claims a reading the artifact never received: %+v", factor)
+		if factor.Known {
+			t.Fatalf("the precipitation factor claims a value the history could not supply: %+v", factor)
 		}
+		if !strings.Contains(factor.Note, "0 de 7 días locales") {
+			t.Fatalf("the factor note %q does not keep the coverage reason", factor.Note)
+		}
+		return
 	}
+	t.Fatal("the assessment carries no precipitation factor")
 }
 
 // TestInferenceClassifierFailsClosedOnTimeout protects the bound that makes a

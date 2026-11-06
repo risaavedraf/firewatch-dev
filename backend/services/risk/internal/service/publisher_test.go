@@ -1014,3 +1014,129 @@ func TestPublishFailsClosedWhenTheModelPathCannotAnswer(t *testing.T) {
 		t.Fatalf("the failure does not record why the model did not answer: %v", publishErr)
 	}
 }
+
+// stubModelFeatures is the model input vector's source as the publication path
+// sees it: it records what it was asked and in which order, and answers with a
+// vector the test pins.
+type stubModelFeatures struct {
+	order     []string
+	zones     []string
+	recordErr error
+	buildErr  error
+	input     classify.ModelInput
+}
+
+func (m *stubModelFeatures) Record(_ context.Context, zoneID string, _ observations.ObservationSet) error {
+	m.order = append(m.order, "record")
+	m.zones = append(m.zones, zoneID)
+	return m.recordErr
+}
+
+func (m *stubModelFeatures) Build(_ context.Context, zoneID string, _ observations.ObservationSet) (classify.ModelInput, error) {
+	m.order = append(m.order, "build")
+	m.zones = append(m.zones, zoneID)
+	return m.input, m.buildErr
+}
+
+// captureClassifier records the features it was asked to classify, so a test can
+// assert what the model path would have sent without an HTTP stand-in.
+type captureClassifier struct {
+	kind     classify.Kind
+	features classify.Features
+	calls    int
+}
+
+func (c *captureClassifier) ID() string { return classify.MLFixtureV1ID }
+
+func (c *captureClassifier) Kind() classify.Kind { return c.kind }
+
+func (c *captureClassifier) Classify(_ context.Context, features classify.Features) (classify.Assessment, error) {
+	c.calls++
+	c.features = features
+	return classify.Assessment{
+		Level:     classify.LevelMedio,
+		Rationale: "stub",
+		Policy:    classify.PolicyRef{PolicyID: classify.MLFixtureV1ID, ParamsHash: "stub"},
+	}, nil
+}
+
+// TestPublishBuildsTheModelVectorBeforeClassifying protects the wiring this slice
+// adds to the publication path: the retrieval's readings are recorded, the vector
+// is built from the history that now includes them, and the classifier is asked
+// with that vector. The order is the contract - a vector built before the reading
+// was recorded would never include the reading that just arrived, which is exactly
+// the cold-start defect this work removes.
+func TestPublishBuildsTheModelVectorBeforeClassifying(t *testing.T) {
+	model := &stubModelFeatures{input: classify.ModelInput{
+		TempMaxC: classify.Measured{
+			Value:    classify.Known(31),
+			Reason:   "máximo del día civil",
+			Coverage: classify.Coverage{Covered: 1, Required: 1, Unit: "días locales"},
+		},
+	}}
+	classifier := &captureClassifier{kind: classify.KindTrained}
+	writer := &stubWriter{}
+	request := sampleRequest()
+
+	if err := (Publisher{
+		Provider:   source.NewFixtureProvider(),
+		Classifier: classifier,
+		Store:      writer,
+		Model:      model,
+	}).Publish(context.Background(), request); err != nil {
+		t.Fatalf("publish: %v", err)
+	}
+	if len(model.order) != 2 || model.order[0] != "record" || model.order[1] != "build" {
+		t.Fatalf("the vector source was used as %v, want record then build", model.order)
+	}
+	for _, zone := range model.zones {
+		if zone != request.ZoneID {
+			t.Fatalf("the vector source was asked about zone %q, want the request's %q", zone, request.ZoneID)
+		}
+	}
+	if classifier.calls != 1 || writer.calls != 1 {
+		t.Fatalf("classifier calls=%d writer calls=%d, want one each", classifier.calls, writer.calls)
+	}
+	if got := classifier.features.Model.TempMaxC; !got.Value.Present || got.Value.Value != 31 {
+		t.Fatalf("the classifier received %+v, want the vector the source built", got)
+	}
+}
+
+// TestPublishFailsClosedWhenTheModelVectorCannotBeBuilt protects both halves of the
+// new step: a reading that cannot be stored, and a vector that cannot be computed,
+// must stop the publication before classification or persistence. Without this, a
+// level could be stored from a history that is missing the readings it claims to
+// summarise.
+func TestPublishFailsClosedWhenTheModelVectorCannotBeBuilt(t *testing.T) {
+	cases := []struct {
+		name  string
+		model *stubModelFeatures
+	}{
+		{"readings cannot be recorded", &stubModelFeatures{recordErr: errors.New("readings table unavailable")}},
+		{"vector cannot be built", &stubModelFeatures{buildErr: errors.New("window query failed")}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			classifier := &captureClassifier{kind: classify.KindTrained}
+			writer := &stubWriter{}
+			err := (Publisher{
+				Provider:   source.NewFixtureProvider(),
+				Classifier: classifier,
+				Store:      writer,
+				Model:      tc.model,
+			}).Publish(context.Background(), sampleRequest())
+			if err == nil {
+				t.Fatal("a publication whose model vector could not be built was published")
+			}
+			if classifier.calls != 0 || writer.calls != 0 {
+				t.Fatalf("classifier calls=%d writer calls=%d, want neither reached", classifier.calls, writer.calls)
+			}
+			// A storage or read failure can heal on a retry, so it must not be
+			// classified as permanent and dead-lettered.
+			var permanent interface{ Permanent() bool }
+			if errors.As(err, &permanent) && permanent.Permanent() {
+				t.Fatalf("a recoverable failure was classified as permanent: %v", err)
+			}
+		})
+	}
+}

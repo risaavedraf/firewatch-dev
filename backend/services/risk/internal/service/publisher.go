@@ -37,6 +37,25 @@ type RiskObserver interface {
 	Observe(level classify.Level)
 }
 
+// ModelFeatures is the source of the trained model's input vector.
+//
+// It has two methods because the vector is built from what the publication just
+// recorded: Record appends the retrieval's readings to the history, and Build
+// computes the aggregates over that history. Splitting them would let a caller
+// build the vector without accumulating it, which is the cold-start defect L9
+// describes - the history would only ever hold what somebody else stored.
+//
+// internal/features.Source implements it. The interface lives here so the
+// publication path can be exercised without a database, and so a store that only
+// answers windows cannot be mistaken for a source that also records them.
+type ModelFeatures interface {
+	// Record appends one retrieval's readings to the readings history for zoneID.
+	Record(ctx context.Context, zoneID string, set observations.ObservationSet) error
+	// Build returns the seven-value input vector for zoneID, computed from the
+	// retrieval and the history Record just accumulated.
+	Build(ctx context.Context, zoneID string, set observations.ObservationSet) (classify.ModelInput, error)
+}
+
 // permanentError declares that an error can never succeed on a retry. The
 // publication path is the place that knows the cause, so it decides here instead
 // of forcing the consumer to inspect an error string. The consumer only asks
@@ -75,6 +94,13 @@ type Publisher struct {
 	// documented registry/bootstrap precedence.
 	Classifiers ClassifierSource
 	Store       BatchWriter
+	// Model builds the trained model's seven-value input vector and keeps the
+	// readings history it is computed from. It is optional: a process that serves a
+	// rule does not read it, and a model-path publication without it keeps the
+	// documented behaviour of an empty vector (every model feature declared absent)
+	// instead of inventing values. Production wires it unconditionally so history
+	// accumulates from the first cycle, whichever classifier is serving.
+	Model ModelFeatures
 	// Outcomes records the level of every persisted assessment. It is optional:
 	// a nil observer means the outcome is logged but not counted.
 	Outcomes RiskObserver
@@ -190,11 +216,14 @@ func (p Publisher) PublishScheduled(ctx context.Context, request v1.Event) error
 //  6. the retrieval is adapted into classifier features, which refuses a set
 //     that mixes zones and, for a non-synthetic retrieval, a set whose own zone
 //     labels do not identify the requested zone;
-//  7. the resolved classifier is asked for a level, its factors and its
+//  7. the retrieval's readings are recorded and the model input vector is built
+//     from the history that now includes them, so a model classifier receives
+//     seven real values instead of two values and five invented absences;
+//  8. the resolved classifier is asked for a level, its factors and its
 //     rationale;
-//  8. the assessment is validated before storage, so a non-canonical level can
+//  9. the assessment is validated before storage, so a non-canonical level can
 //     never reach the database;
-//  9. the assessment is handed to persist with the provenance-derived demo flag,
+//  10. the assessment is handed to persist with the provenance-derived demo flag,
 //     and the request's scenario metadata travels untouched into the persisted
 //     batch because the store copies the request.
 func (p Publisher) publish(ctx context.Context, request v1.Event, persist func(context.Context, v1.Event, repository.Assessment) error) error {
@@ -257,6 +286,24 @@ func (p Publisher) publish(ctx context.Context, request v1.Event, persist func(c
 	features, err := featuresFrom(set, request.ZoneID)
 	if err != nil {
 		return fmt.Errorf("build features from provider %s: %w", descriptor.ID, err)
+	}
+	// The model's vector is built here, after every guard and before classification,
+	// because it depends on both: the readings it just recorded (so the reading that
+	// arrived is part of its own day's aggregate) and the retrieval instant that
+	// fixes the civil day. A publication without this collaborator keeps the
+	// documented zero value of the vector - every model feature declared absent -
+	// which is the same fail-closed shape the model path always had and no new
+	// refusal: the classifier is still asked, and a model that cannot answer still
+	// fails the unit closed exactly as before.
+	if p.Model != nil {
+		if err := p.Model.Record(ctx, request.ZoneID, set); err != nil {
+			return fmt.Errorf("record the readings of provider %s for zone %s: %w", descriptor.ID, request.ZoneID, err)
+		}
+		input, err := p.Model.Build(ctx, request.ZoneID, set)
+		if err != nil {
+			return fmt.Errorf("build the model input vector for zone %s: %w", request.ZoneID, err)
+		}
+		features.Model = input
 	}
 	assessment, err := classifier.Classify(ctx, features)
 	if err != nil {
