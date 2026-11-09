@@ -1,0 +1,15 @@
+{
+  "format": "firewatch-model/v2",
+  "version": "unsupported-format-v2",
+  "trained_at": "2026-11-01T00:00:00Z",
+  "data_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+  "features": [
+    { "name": "temp_max", "unit": "degC", "min": -5, "max": 45 }
+  ],
+  "impute": [24.0],
+  "center": [18.5],
+  "scale": [6.5],
+  "kind": "logistic",
+  "intercept": -2.25,
+  "coef": [0.62]
+}

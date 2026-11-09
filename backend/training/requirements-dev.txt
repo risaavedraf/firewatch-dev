@@ -1,0 +1,18 @@
+# Pinned, and installed by .github/workflows/training.yml only.
+#
+# The panel half of this package (assemble.py, comunas.py, meteo.py, seasons.py,
+# centroids.py, fetch_sample.py) still needs nothing beyond the standard library, and
+# stays that way. `train_delivered.py` is the exception and it is a deliberate one: it
+# fits a logistic regression and a random forest, and re-implementing either plus
+# PR-AUC and Brier by hand would be a second scorer nobody reviewed, which is the thing
+# the Go equivalence test exists to prevent. numpy and scikit-learn are the two
+# libraries the plan's model work names, and they are pinned here so two runs measure
+# the same way.
+#
+# pytest runs the tests, ruff is the lint gate, tzdata makes the zone the panel cuts
+# every day in available on hosts without a system zone database (Windows, slim images).
+pytest==9.1.0
+ruff==0.17.4
+tzdata==2025.3
+numpy==2.4.6
+scikit-learn==1.9.0

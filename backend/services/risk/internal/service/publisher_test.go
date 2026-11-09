@@ -11,6 +11,9 @@ package service
 import (
 	"context"
 	"errors"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
@@ -944,5 +947,204 @@ func TestPublisherDoesNotReportAnOutcomeWhenPersistenceFails(t *testing.T) {
 	}
 	if len(observer.levels) != 0 {
 		t.Fatalf("the observer recorded %v for a failed publication", observer.levels)
+	}
+}
+
+// TestPublishFailsClosedWhenTheModelPathCannotAnswer is the anti-fallback guard at
+// the publication path, which is where a fallback would actually have to happen.
+//
+// It is written as a pair on purpose. The first publication proves the same unit,
+// from the same provider, is classifiable and gets persisted under a rule; the
+// second proves that when the model path cannot answer, the unit fails with the
+// model's reason, persists nothing, and records no outcome. If a fallback to a
+// rule existed anywhere below Publish, the second half would persist the level the
+// first half proves is available, and this test would fail.
+func TestPublishFailsClosedWhenTheModelPathCannotAnswer(t *testing.T) {
+	ruleWriter := &stubWriter{}
+	if err := (Publisher{
+		Provider:   source.NewFixtureProvider(),
+		Classifier: classify.NewAcademicRuleV1(),
+		Store:      ruleWriter,
+	}).Publish(context.Background(), sampleRequest()); err != nil {
+		t.Fatalf("the control publication under a rule failed: %v", err)
+	}
+	if ruleWriter.calls != 1 || ruleWriter.assessment.RiskLevel == "" {
+		t.Fatalf("the control publication persisted nothing: %+v", ruleWriter.assessment)
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Construction reads the artifact's declared feature list once, so the
+		// stand-in has to answer GET /v1/model before it can be the service that
+		// fails every prediction.
+		if r.URL.Path == "/v1/model" {
+			w.Header().Set("Content-Type", "application/json")
+			io.WriteString(w, `{"features":[{"name":"humidity_rel","unit":"%","min":0,"max":100}]}`)
+			return
+		}
+		w.WriteHeader(http.StatusInternalServerError)
+		io.WriteString(w, `{"code":"scoring_failed","request_id":"req-9","detail":"model produced no probability"}`)
+	}))
+	defer server.Close()
+	model, err := classify.NewMLFixtureV1(context.Background(), server.URL, time.Second)
+	if err != nil {
+		t.Fatalf("configure the model-path classifier: %v", err)
+	}
+	writer := &stubWriter{}
+	observer := &stubObserver{}
+	publishErr := (Publisher{
+		Provider:   source.NewFixtureProvider(),
+		Classifier: model,
+		Store:      writer,
+		Outcomes:   observer,
+	}).Publish(context.Background(), sampleRequest())
+	if publishErr == nil {
+		t.Fatal("a publication whose model could not answer was reported as successful")
+	}
+	if writer.calls != 0 || writer.scheduled != 0 {
+		t.Fatalf("the failed publication persisted %d completion and %d scheduled batches, want none", writer.calls, writer.scheduled)
+	}
+	if len(observer.levels) != 0 {
+		t.Fatalf("the failed publication recorded the outcomes %v", observer.levels)
+	}
+	// The failure is attributable: it names the classifier version that could not
+	// answer, carries the model's own reason and stays classified as the model
+	// being unavailable rather than as a bad sample.
+	if !errors.Is(publishErr, classify.ErrModelUnavailable) {
+		t.Fatalf("the publication error is not classified as the model being unavailable: %v", publishErr)
+	}
+	if errors.Is(publishErr, classify.ErrModelRefused) {
+		t.Fatalf("a 500 was classified as the model refusing the sample: %v", publishErr)
+	}
+	if !strings.Contains(publishErr.Error(), classify.MLFixtureV1ID) {
+		t.Fatalf("the failure does not name the version that failed: %v", publishErr)
+	}
+	if !strings.Contains(publishErr.Error(), "scoring_failed") || !strings.Contains(publishErr.Error(), "500") {
+		t.Fatalf("the failure does not record why the model did not answer: %v", publishErr)
+	}
+}
+
+// stubModelFeatures is the model input vector's source as the publication path
+// sees it: it records what it was asked and in which order, and answers with a
+// vector the test pins.
+type stubModelFeatures struct {
+	order     []string
+	zones     []string
+	recordErr error
+	buildErr  error
+	input     classify.ModelInput
+}
+
+func (m *stubModelFeatures) Record(_ context.Context, zoneID string, _ observations.ObservationSet) error {
+	m.order = append(m.order, "record")
+	m.zones = append(m.zones, zoneID)
+	return m.recordErr
+}
+
+func (m *stubModelFeatures) Build(_ context.Context, zoneID string, _ observations.ObservationSet) (classify.ModelInput, error) {
+	m.order = append(m.order, "build")
+	m.zones = append(m.zones, zoneID)
+	return m.input, m.buildErr
+}
+
+// captureClassifier records the features it was asked to classify, so a test can
+// assert what the model path would have sent without an HTTP stand-in.
+type captureClassifier struct {
+	kind     classify.Kind
+	features classify.Features
+	calls    int
+}
+
+func (c *captureClassifier) ID() string { return classify.MLFixtureV1ID }
+
+func (c *captureClassifier) Kind() classify.Kind { return c.kind }
+
+func (c *captureClassifier) Classify(_ context.Context, features classify.Features) (classify.Assessment, error) {
+	c.calls++
+	c.features = features
+	return classify.Assessment{
+		Level:     classify.LevelMedio,
+		Rationale: "stub",
+		Policy:    classify.PolicyRef{PolicyID: classify.MLFixtureV1ID, ParamsHash: "stub"},
+	}, nil
+}
+
+// TestPublishBuildsTheModelVectorBeforeClassifying protects the wiring this slice
+// adds to the publication path: the retrieval's readings are recorded, the vector
+// is built from the history that now includes them, and the classifier is asked
+// with that vector. The order is the contract - a vector built before the reading
+// was recorded would never include the reading that just arrived, which is exactly
+// the cold-start defect this work removes.
+func TestPublishBuildsTheModelVectorBeforeClassifying(t *testing.T) {
+	model := &stubModelFeatures{input: classify.ModelInput{
+		TempMaxC: classify.Measured{
+			Value:    classify.Known(31),
+			Reason:   "máximo del día civil",
+			Coverage: classify.Coverage{Covered: 1, Required: 1, Unit: "días locales"},
+		},
+	}}
+	classifier := &captureClassifier{kind: classify.KindTrained}
+	writer := &stubWriter{}
+	request := sampleRequest()
+
+	if err := (Publisher{
+		Provider:   source.NewFixtureProvider(),
+		Classifier: classifier,
+		Store:      writer,
+		Model:      model,
+	}).Publish(context.Background(), request); err != nil {
+		t.Fatalf("publish: %v", err)
+	}
+	if len(model.order) != 2 || model.order[0] != "record" || model.order[1] != "build" {
+		t.Fatalf("the vector source was used as %v, want record then build", model.order)
+	}
+	for _, zone := range model.zones {
+		if zone != request.ZoneID {
+			t.Fatalf("the vector source was asked about zone %q, want the request's %q", zone, request.ZoneID)
+		}
+	}
+	if classifier.calls != 1 || writer.calls != 1 {
+		t.Fatalf("classifier calls=%d writer calls=%d, want one each", classifier.calls, writer.calls)
+	}
+	if got := classifier.features.Model.TempMaxC; !got.Value.Present || got.Value.Value != 31 {
+		t.Fatalf("the classifier received %+v, want the vector the source built", got)
+	}
+}
+
+// TestPublishFailsClosedWhenTheModelVectorCannotBeBuilt protects both halves of the
+// new step: a reading that cannot be stored, and a vector that cannot be computed,
+// must stop the publication before classification or persistence. Without this, a
+// level could be stored from a history that is missing the readings it claims to
+// summarise.
+func TestPublishFailsClosedWhenTheModelVectorCannotBeBuilt(t *testing.T) {
+	cases := []struct {
+		name  string
+		model *stubModelFeatures
+	}{
+		{"readings cannot be recorded", &stubModelFeatures{recordErr: errors.New("readings table unavailable")}},
+		{"vector cannot be built", &stubModelFeatures{buildErr: errors.New("window query failed")}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			classifier := &captureClassifier{kind: classify.KindTrained}
+			writer := &stubWriter{}
+			err := (Publisher{
+				Provider:   source.NewFixtureProvider(),
+				Classifier: classifier,
+				Store:      writer,
+				Model:      tc.model,
+			}).Publish(context.Background(), sampleRequest())
+			if err == nil {
+				t.Fatal("a publication whose model vector could not be built was published")
+			}
+			if classifier.calls != 0 || writer.calls != 0 {
+				t.Fatalf("classifier calls=%d writer calls=%d, want neither reached", classifier.calls, writer.calls)
+			}
+			// A storage or read failure can heal on a retry, so it must not be
+			// classified as permanent and dead-lettered.
+			var permanent interface{ Permanent() bool }
+			if errors.As(err, &permanent) && permanent.Permanent() {
+				t.Fatalf("a recoverable failure was classified as permanent: %v", err)
+			}
+		})
 	}
 }

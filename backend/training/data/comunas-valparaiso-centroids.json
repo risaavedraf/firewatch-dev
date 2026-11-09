@@ -1,0 +1,381 @@
+{
+  "_comment": [
+    "Comuna centroid for region 05 (Valparaiso), one representative point per CUT.",
+    "This is DATA, not source code: meteo.py reads it for the point each source",
+    "answers for, and never fetches a coordinate at runtime. Derived from the",
+    "tracked DPA GeoJSON by backend/training/centroids.py; rerun that script to",
+    "reproduce the file. Two of the 38 comunas are archipelagos, so their centroid",
+    "is a point between islands -- water, which is fine for a gridded lookup and is",
+    "why 'method' and 'parts' are recorded per entry."
+  ],
+  "region": {
+    "cut": "05",
+    "name": "Valparaiso"
+  },
+  "method": "area-weighted planar centroid of the feature's polygon parts in the EPSG:4326 frame (shoelace formula, holes subtracted, parts weighted by their own signed area). Not a geodesic centroid; the error is far below both sources' grid spacing.",
+  "entries": [
+    {
+      "cut": "05101",
+      "name": "Valparaíso",
+      "provincia": "Valparaíso",
+      "latitude": -33.129605,
+      "longitude": -71.572904,
+      "area_deg2": 0.030018,
+      "parts": 2
+    },
+    {
+      "cut": "05102",
+      "name": "Casablanca",
+      "provincia": "Valparaíso",
+      "latitude": -33.315683,
+      "longitude": -71.434846,
+      "area_deg2": 0.092388,
+      "parts": 1
+    },
+    {
+      "cut": "05103",
+      "name": "Concón",
+      "provincia": "Valparaíso",
+      "latitude": -32.95245,
+      "longitude": -71.467032,
+      "area_deg2": 0.007191,
+      "parts": 1
+    },
+    {
+      "cut": "05104",
+      "name": "Juan Fernández",
+      "provincia": "Valparaíso",
+      "latitude": -33.331403,
+      "longitude": -79.872733,
+      "area_deg2": 0.010708,
+      "parts": 8
+    },
+    {
+      "cut": "05105",
+      "name": "Puchuncaví",
+      "provincia": "Valparaíso",
+      "latitude": -32.745201,
+      "longitude": -71.38756,
+      "area_deg2": 0.028822,
+      "parts": 1
+    },
+    {
+      "cut": "05107",
+      "name": "Quintero",
+      "provincia": "Valparaíso",
+      "latitude": -32.843058,
+      "longitude": -71.472843,
+      "area_deg2": 0.014283,
+      "parts": 1
+    },
+    {
+      "cut": "05109",
+      "name": "Viña del Mar",
+      "provincia": "Valparaíso",
+      "latitude": -33.027628,
+      "longitude": -71.515291,
+      "area_deg2": 0.011664,
+      "parts": 1
+    },
+    {
+      "cut": "05201",
+      "name": "Isla de Pascua",
+      "provincia": "Isla de Pascua",
+      "latitude": -27.118765,
+      "longitude": -109.350943,
+      "area_deg2": 0.014906,
+      "parts": 4
+    },
+    {
+      "cut": "05301",
+      "name": "Los Andes",
+      "provincia": "Los Andes",
+      "latitude": -32.950591,
+      "longitude": -70.243009,
+      "area_deg2": 0.11903,
+      "parts": 1
+    },
+    {
+      "cut": "05302",
+      "name": "Calle Larga",
+      "provincia": "Los Andes",
+      "latitude": -32.950408,
+      "longitude": -70.544115,
+      "area_deg2": 0.030985,
+      "parts": 1
+    },
+    {
+      "cut": "05303",
+      "name": "Rinconada",
+      "provincia": "Los Andes",
+      "latitude": -32.876095,
+      "longitude": -70.705824,
+      "area_deg2": 0.011836,
+      "parts": 1
+    },
+    {
+      "cut": "05304",
+      "name": "San Esteban",
+      "provincia": "Los Andes",
+      "latitude": -32.686443,
+      "longitude": -70.348323,
+      "area_deg2": 0.132212,
+      "parts": 1
+    },
+    {
+      "cut": "05401",
+      "name": "La Ligua",
+      "provincia": "Petorca",
+      "latitude": -32.35379,
+      "longitude": -71.271137,
+      "area_deg2": 0.111385,
+      "parts": 1
+    },
+    {
+      "cut": "05402",
+      "name": "Cabildo",
+      "provincia": "Petorca",
+      "latitude": -32.41701,
+      "longitude": -70.823455,
+      "area_deg2": 0.139512,
+      "parts": 1
+    },
+    {
+      "cut": "05403",
+      "name": "Papudo",
+      "provincia": "Petorca",
+      "latitude": -32.474671,
+      "longitude": -71.379886,
+      "area_deg2": 0.016024,
+      "parts": 2
+    },
+    {
+      "cut": "05404",
+      "name": "Petorca",
+      "provincia": "Petorca",
+      "latitude": -32.190443,
+      "longitude": -70.870034,
+      "area_deg2": 0.144957,
+      "parts": 1
+    },
+    {
+      "cut": "05405",
+      "name": "Zapallar",
+      "provincia": "Petorca",
+      "latitude": -32.5872,
+      "longitude": -71.335776,
+      "area_deg2": 0.027679,
+      "parts": 3
+    },
+    {
+      "cut": "05501",
+      "name": "Quillota",
+      "provincia": "Quillota",
+      "latitude": -32.904492,
+      "longitude": -71.272408,
+      "area_deg2": 0.029132,
+      "parts": 1
+    },
+    {
+      "cut": "05502",
+      "name": "Calera",
+      "provincia": "Quillota",
+      "latitude": -32.793802,
+      "longitude": -71.155972,
+      "area_deg2": 0.005706,
+      "parts": 1
+    },
+    {
+      "cut": "05503",
+      "name": "Hijuelas",
+      "provincia": "Quillota",
+      "latitude": -32.86907,
+      "longitude": -71.080876,
+      "area_deg2": 0.025833,
+      "parts": 1
+    },
+    {
+      "cut": "05504",
+      "name": "La Cruz",
+      "provincia": "Quillota",
+      "latitude": -32.824719,
+      "longitude": -71.240517,
+      "area_deg2": 0.007561,
+      "parts": 1
+    },
+    {
+      "cut": "05506",
+      "name": "Nogales",
+      "provincia": "Quillota",
+      "latitude": -32.691195,
+      "longitude": -71.176373,
+      "area_deg2": 0.038982,
+      "parts": 1
+    },
+    {
+      "cut": "05601",
+      "name": "San Antonio",
+      "provincia": "San Antonio",
+      "latitude": -33.664116,
+      "longitude": -71.489323,
+      "area_deg2": 0.038601,
+      "parts": 1
+    },
+    {
+      "cut": "05602",
+      "name": "Algarrobo",
+      "provincia": "San Antonio",
+      "latitude": -33.329341,
+      "longitude": -71.599529,
+      "area_deg2": 0.017057,
+      "parts": 1
+    },
+    {
+      "cut": "05603",
+      "name": "Cartagena",
+      "provincia": "San Antonio",
+      "latitude": -33.533478,
+      "longitude": -71.442415,
+      "area_deg2": 0.023728,
+      "parts": 1
+    },
+    {
+      "cut": "05604",
+      "name": "El Quisco",
+      "provincia": "San Antonio",
+      "latitude": -33.415245,
+      "longitude": -71.652242,
+      "area_deg2": 0.005001,
+      "parts": 2
+    },
+    {
+      "cut": "05605",
+      "name": "El Tabo",
+      "provincia": "San Antonio",
+      "latitude": -33.482523,
+      "longitude": -71.581074,
+      "area_deg2": 0.009647,
+      "parts": 1
+    },
+    {
+      "cut": "05606",
+      "name": "Santo Domingo",
+      "provincia": "San Antonio",
+      "latitude": -33.809648,
+      "longitude": -71.677339,
+      "area_deg2": 0.052249,
+      "parts": 3
+    },
+    {
+      "cut": "05701",
+      "name": "San Felipe",
+      "provincia": "San Felipe de Aconcagua",
+      "latitude": -32.736194,
+      "longitude": -70.752584,
+      "area_deg2": 0.017976,
+      "parts": 1
+    },
+    {
+      "cut": "05702",
+      "name": "Catemu",
+      "provincia": "San Felipe de Aconcagua",
+      "latitude": -32.707104,
+      "longitude": -70.94475,
+      "area_deg2": 0.034798,
+      "parts": 1
+    },
+    {
+      "cut": "05703",
+      "name": "Llaillay",
+      "provincia": "San Felipe de Aconcagua",
+      "latitude": -32.88784,
+      "longitude": -70.901444,
+      "area_deg2": 0.033617,
+      "parts": 1
+    },
+    {
+      "cut": "05704",
+      "name": "Panquehue",
+      "provincia": "San Felipe de Aconcagua",
+      "latitude": -32.793054,
+      "longitude": -70.827985,
+      "area_deg2": 0.011673,
+      "parts": 1
+    },
+    {
+      "cut": "05705",
+      "name": "Putaendo",
+      "provincia": "San Felipe de Aconcagua",
+      "latitude": -32.481187,
+      "longitude": -70.521667,
+      "area_deg2": 0.139265,
+      "parts": 1
+    },
+    {
+      "cut": "05706",
+      "name": "Santa María",
+      "provincia": "San Felipe de Aconcagua",
+      "latitude": -32.685718,
+      "longitude": -70.609577,
+      "area_deg2": 0.015936,
+      "parts": 1
+    },
+    {
+      "cut": "05801",
+      "name": "Quilpué",
+      "provincia": "Marga Marga",
+      "latitude": -33.147081,
+      "longitude": -71.253774,
+      "area_deg2": 0.051813,
+      "parts": 1
+    },
+    {
+      "cut": "05802",
+      "name": "Limache",
+      "provincia": "Marga Marga",
+      "latitude": -33.030666,
+      "longitude": -71.278423,
+      "area_deg2": 0.028335,
+      "parts": 1
+    },
+    {
+      "cut": "05803",
+      "name": "Olmué",
+      "provincia": "Marga Marga",
+      "latitude": -33.03548,
+      "longitude": -71.110382,
+      "area_deg2": 0.022343,
+      "parts": 1
+    },
+    {
+      "cut": "05804",
+      "name": "Villa Alemana",
+      "provincia": "Marga Marga",
+      "latitude": -33.067316,
+      "longitude": -71.329825,
+      "area_deg2": 0.009274,
+      "parts": 1
+    }
+  ],
+  "provenance": {
+    "authority": "Official DPA (Division Politico Administrativa) layer of IDE Chile, retrieved by backend/scripts/fetch_comunas.py; the same layer data/comunas-maule-cut.json comes from.",
+    "url": "https://rest-sit.mop.gob.cl/arcgis/rest/services/INTEROP/SERVICIO_DPA/MapServer/1/query?where=CUT_REG%3D%2705%27&outFields=CUT_COM,COMUNA,PROVINCIA,CUT_PROV&returnGeometry=true&outSR=4326&f=json",
+    "query": "where=CUT_REG='05'&outFields=CUT_COM,COMUNA,PROVINCIA,CUT_PROV&returnGeometry=true&outSR=4326&f=json",
+    "source_srid": 4326,
+    "retrieved_at": "2026-10-11T18:42:42+00:00",
+    "retrieved_at_note": "The retrieval date of the GEOMETRY, copied from backend/contracts/gen/geo/valparaiso-comunas.provenance.json. The centroids were derived from that file on derived_at; nothing was fetched to build this file.",
+    "derived_at": "2026-11-06T21:51:38Z",
+    "derived_from": {
+      "path": "backend/contracts/gen/geo/valparaiso-comunas.geojson",
+      "sha256": "02ef8e8ff49ab2ca37e5f52c3666d3993fe53730bfd7d7920c933fcec9b5da76",
+      "record_count": 38
+    },
+    "method": "area-weighted planar centroid of the feature's polygon parts in the EPSG:4326 frame (shoelace formula, holes subtracted, parts weighted by their own signed area). Not a geodesic centroid; the error is far below both sources' grid spacing.",
+    "record_count": 38,
+    "entries_sha256": "c0ccf87921bc78eb0ad285b8d8c0060dd792d0b30fdabbd26e8481de73e427ff",
+    "entries_sha256_rule": "sha256 of json.dumps(entries, ensure_ascii=False, sort_keys=True, separators=(',', ':')) over the entries exactly as this file writes them (coordinates rounded to 6 decimals). Recompute it with tests/test_centroids.py; it is what makes this file auditable without the geometry.",
+    "attribution": "Subsecretaria de Desarrollo Regional y Administrativo (SUBDERE), Instituto Geografico Militar (IGM) e Instituto Nacional de Estadisticas (INE)",
+    "restriction": "las publicaciones y productos derivados de esta cartografia deben ser revisadas y validadas por DIFROL.",
+    "restriction_source": "Metadatos del servicio INTEROP/SERVICIO_DPA, capa Comunas (MapServer/1) de IDE Chile: https://rest-sit.mop.gob.cl/arcgis/rest/services/INTEROP/SERVICIO_DPA/MapServer/1?f=json"
+  }
+}

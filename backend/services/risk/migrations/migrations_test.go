@@ -1,7 +1,12 @@
 package migrations
 
 import (
+	"errors"
+	"io/fs"
+	"os"
+	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -10,6 +15,10 @@ import (
 
 // quotedSHA256 matches a single-quoted lowercase sha256 literal in SQL.
 var quotedSHA256 = regexp.MustCompile(`'([0-9a-f]{64})'`)
+
+// siblingVersionClaim matches one entry of another service's All() list, which
+// is how a sibling registers the version it records in the shared ledger.
+var siblingVersionClaim = regexp.MustCompile(`\{Version: (\d+),`)
 
 // migrationFor returns the migration with the given version, failing the test
 // when it is absent.
@@ -27,9 +36,10 @@ func migrationFor(t *testing.T, version int) Migration {
 // TestMigrationsAreOrderedByUniqueVersion guards the list's shape. Versions must
 // start at 1 and increase strictly, but NOT contiguously: this service shares the
 // database's schema_migrations ledger with the prevention service, which owns
-// version 9 (009_preventive_actions.sql). A version is therefore reserved against
-// the integrated tree, not against this module alone; a decrease or a duplicate
-// would still make a migration run out of order or skip in silence.
+// versions 9 and 11 (009_preventive_actions.sql, 011_preventive_evidence.sql). A
+// version is therefore reserved against the integrated tree, not against this
+// module alone; a decrease or a duplicate would still make a migration run out of
+// order or skip in silence.
 func TestMigrationsAreOrderedByUniqueVersion(t *testing.T) {
 	all := All()
 	if len(all) == 0 {
@@ -50,6 +60,47 @@ func TestMigrationsAreOrderedByUniqueVersion(t *testing.T) {
 		}
 		if strings.TrimSpace(migration.SQL) == "" {
 			t.Errorf("migration %d (%s) has empty SQL", migration.Version, migration.Name)
+		}
+	}
+}
+
+// TestVersionsDoNotCollideWithPrevention guards the invariant neither module can
+// check alone: migration versions are keyed into the same schema_migrations table
+// of the database both services own, and the ledger records a version, never a
+// filename or a sender. A version claimed by both services makes whichever
+// migrator runs second skip its own migration in silence, which appears at
+// runtime as a missing table, not as an error. The sibling's registration is read
+// from source because the two services are separate modules with no shared
+// package; the integrated tree is what reserves a version.
+func TestVersionsDoNotCollideWithPrevention(t *testing.T) {
+	registry := filepath.Join("..", "..", "prevention", "migrations", "embed.go")
+	raw, err := os.ReadFile(registry)
+	if err != nil {
+		// Each service's test image copies only its own service, so the sibling
+		// module is absent inside the container and this guard has nothing to read
+		// there. Skipping is not a weakening: the per-service workflow runs this
+		// package on the runner with the integrated tree checked out, and that is
+		// where the reservation can actually be enforced. A missing file that is not
+		// a container boundary stays a failure.
+		if errors.Is(err, fs.ErrNotExist) {
+			t.Skipf("prevention's migration registry is not in this tree (%s); the integrated-tree run enforces this guard", registry)
+		}
+		t.Fatalf("read prevention's migration registry %s: %v", registry, err)
+	}
+	sibling := map[int]bool{}
+	for _, match := range siblingVersionClaim.FindAllStringSubmatch(string(raw), -1) {
+		version, err := strconv.Atoi(match[1])
+		if err != nil {
+			t.Fatalf("prevention's registry has an unparsable version %q: %v", match[1], err)
+		}
+		sibling[version] = true
+	}
+	if len(sibling) == 0 {
+		t.Fatal("no migration versions parsed from prevention's registry; the guard would pass vacuously")
+	}
+	for _, migration := range All() {
+		if sibling[migration.Version] {
+			t.Errorf("version %d (%s) is also claimed by prevention's migrations; both record into the shared schema_migrations ledger, so the migrator that runs second would skip its own migration in silence", migration.Version, migration.Name)
 		}
 	}
 }
@@ -271,6 +322,91 @@ func TestModelsIntegrityMigrationIsGuardedAndIdempotent(t *testing.T) {
 	for _, forbidden := range []string{"DROP TABLE", "TRUNCATE", "DELETE FROM", "UPDATE "} {
 		if strings.Contains(sql, forbidden) {
 			t.Errorf("006_models_integrity.sql contains %q; schema migrations here never destroy data", forbidden)
+		}
+	}
+}
+
+// TestMLFixtureV1MigrationRecordsTheFrozenParamsHash protects T8's registry row:
+// the fixture-backed model version exists before MODEL_ID can select it, it stays
+// inactive so it replaces nothing, its kind says it is a fixture rather than a
+// rule or a placeholder, and its params_hash is the fingerprint of the artifact
+// description in classify.MLFixtureV1Params - pinned here rather than trusted, so
+// describing a different artifact breaks the build instead of silently
+// redefining what a stored level came from.
+func TestMLFixtureV1MigrationRecordsTheFrozenParamsHash(t *testing.T) {
+	migration := migrationFor(t, 13)
+	if migration.Name != "ml_fixture_v1" {
+		t.Errorf("migration 13 is named %q, want %q", migration.Name, "ml_fixture_v1")
+	}
+	sql := migration.SQL
+	for _, fragment := range []string{
+		"'" + classify.MLFixtureV1ID + "'",
+		"'fixture'",
+		"ON CONFLICT (version) DO NOTHING",
+		`"trained": false`,
+		"NULL::timestamptz",
+		"false)",
+	} {
+		if !strings.Contains(sql, fragment) {
+			t.Errorf("013_ml_fixture_v1.sql does not contain %q", fragment)
+		}
+	}
+	// The trained version must not be seeded: it can only reach the registry
+	// together with the artifact that produced it, and only an explicit
+	// activation may put it in front of the publication path.
+	if strings.Contains(sql, "'ml-v1'") {
+		t.Error("013_ml_fixture_v1.sql seeds ml-v1; the trained version may only be registered with its trained artifact")
+	}
+	recorded := quotedSHA256.FindAllStringSubmatch(sql, -1)
+	if len(recorded) != 1 {
+		t.Fatalf("013_ml_fixture_v1.sql records %d quoted sha256 literals, want exactly 1", len(recorded))
+	}
+	if got := recorded[0][1]; got != classify.MLFixtureV1ParamsHash {
+		t.Errorf("013_ml_fixture_v1.sql records params hash %q, want the frozen %q", got, classify.MLFixtureV1ParamsHash)
+	}
+	for _, forbidden := range []string{"DROP TABLE", "TRUNCATE", "DELETE FROM", "UPDATE "} {
+		if strings.Contains(sql, forbidden) {
+			t.Errorf("013_ml_fixture_v1.sql contains %q; schema migrations here never destroy data", forbidden)
+		}
+	}
+}
+
+// TestReadingsMigrationIsGuardedAndIdempotent protects the history the model's
+// aggregates are computed from. The table has to exist before the publication
+// path can record a reading; its identity is what makes re-ingestion idempotent,
+// the window index is the shape the aggregate read uses, and every statement is
+// guarded so applying the file twice is a no-op.
+func TestReadingsMigrationIsGuardedAndIdempotent(t *testing.T) {
+	migration := migrationFor(t, 12)
+	if migration.Name != "readings" {
+		t.Errorf("migration 12 is named %q, want %q", migration.Name, "readings")
+	}
+	sql := migration.SQL
+	for _, fragment := range []string{
+		"CREATE TABLE IF NOT EXISTS readings",
+		"CONSTRAINT readings_identity UNIQUE (zone_id, variable, observed_at)",
+		"CREATE INDEX IF NOT EXISTS readings_variable_window ON readings(zone_id, variable, observed_at DESC)",
+		"GRANT SELECT, INSERT ON readings TO risk_app",
+	} {
+		if !strings.Contains(sql, fragment) {
+			t.Errorf("012_readings.sql does not contain %q", fragment)
+		}
+	}
+	// The history is append-only: no grant may let the application rewrite or
+	// delete a reading, because a stored aggregate has to stay reproducible from
+	// what the source actually said.
+	if strings.Contains(sql, "GRANT SELECT, INSERT, UPDATE") || strings.Contains(sql, "GRANT DELETE") {
+		t.Error("012_readings.sql grants a write privilege beyond appending; the readings history is append-only")
+	}
+	// A foreign key to zones would make storage depend on the catalogue catching
+	// up, discarding history that cannot be re-fetched. The decision is deliberate
+	// and is recorded in the file's own comment.
+	if strings.Contains(sql, "REFERENCES zones") {
+		t.Error("012_readings.sql references zones; a reading must not be refused because the catalogue lags")
+	}
+	for _, forbidden := range []string{"DROP TABLE", "TRUNCATE", "DELETE FROM", "UPDATE "} {
+		if strings.Contains(sql, forbidden) {
+			t.Errorf("012_readings.sql contains %q; schema migrations here never destroy data", forbidden)
 		}
 	}
 }

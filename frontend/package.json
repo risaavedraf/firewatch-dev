@@ -7,11 +7,12 @@
     "test": "vitest run",
     "smoke": "node scripts/smoke.mjs",
     "dev": "vite",
-    "build": "tsc --noEmit && vite build",
+    "build": "node scripts/require-build-env.mjs && tsc --noEmit && vite build",
+    "build:local": "tsc --noEmit && vite build --mode development",
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
     "check": "node scripts/check.mjs",
-    "verify": "npm run lint && npm run typecheck && npm run test && npm run check && npm run build && npm run smoke"
+    "verify": "npm run lint && npm run typecheck && npm run test && npm run check && npm run build:local && npm run smoke"
   },
   "dependencies": {
     "@tanstack/react-query": "^5.104.2",

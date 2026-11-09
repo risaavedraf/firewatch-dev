@@ -30,3 +30,11 @@ scrape_configs:
   - job_name: prevention
     static_configs:
       - targets: ['prevention:8084']
+  # inference publishes its own /metrics on the same port `risk` calls it on, so
+  # it is scraped like the services whose failure it participates in. It is the
+  # one dependency `risk` is designed to survive by failing closed: an inference
+  # that stops answering degrades every classification silently, so the alert
+  # has to be able to see the target instead of reading it as absent.
+  - job_name: inference
+    static_configs:
+      - targets: ['inference:8080']

@@ -3,6 +3,7 @@ go 1.27.3
 use (
 	./contracts/gen
 	./services/gateway
+	./services/inference
 	./services/jobs
 	./services/prevention
 	./services/risk

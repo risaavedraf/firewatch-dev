@@ -153,6 +153,13 @@ Plan de producción en [`../plan-produccion/README.md`](../plan-produccion/READM
 | Duplicado residual en la raíz | **Listo** | Eliminado el 2026-10-17: `odd/tasks/backend-hardening/` contenía las versiones previas (`Status: pending`, casillas sin marcar) de 12 unidades; la copia trabajada y verificada vive en `security/backend-hardening/` |
 | Área `publication/` agregada | **Listo** | El documento de preparación de publicación vive en `publication/` y este índice apunta a la ruta nueva |
 
+## Entrega en curso
+
+| Entrega / documento | Estado | Qué está entregado | Qué falta |
+| --- | --- | --- | --- |
+| [Producción con modelo sobre AWS](plan-produccion/aws-ml-delivery.md) | **Parcial — abierta 2026-11-06** | Registro de decisiones D1–S7 con su evidencia; rama `feat/aws-ml-delivery`; contrato del artefacto `firewatch-model/v1`, servicio `inference` y Compose de producción en ejecución | T1–T11 del documento; bloqueados T9 (acceso al DOI y correo a CONAF) y T10 (EC2 y dominio). Sin modelo entrenado: la etiqueta real todavía no está disponible |
+| [Cierre de la versión 1.0](v1-produccion.md) | **Pendiente — abierto 2026-11-09** | Plan de cierre con 46 tareas en 7 grupos y las decisiones del acta; el modelo queda fuera de v1.0 por decisión del responsable y su frente sigue abierto con la condición de datos medida | Las 46 tareas. El tag `v1.0-produccion` no se emite hasta cerrarlas |
+
 ## Convención práctica
 
 **Regla para todo documento nuevo y para cada cambio de estado:**

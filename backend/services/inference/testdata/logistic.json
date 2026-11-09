@@ -1,0 +1,36 @@
+{
+  "format": "firewatch-model/v1",
+  "version": "valparaiso-logistic-v1",
+  "trained_at": "2026-11-01T00:00:00Z",
+  "data_hash": "9f2c41d7b0e35a6c18d4f7e2a9b03c5d6e8f1a2b4c7d9e0f3a5b6c8d1e2f4a7b",
+  "features": [
+    { "name": "temp_max", "unit": "degC", "min": -5, "max": 45 },
+    { "name": "temp_min", "unit": "degC", "min": -10, "max": 30 },
+    { "name": "humidity_rel", "unit": "%", "min": 0, "max": 100 },
+    { "name": "wind_speed", "unit": "m/s", "min": 0, "max": 40 },
+    { "name": "wind_dir", "unit": "deg", "min": 0, "max": 360 },
+    { "name": "precip_sum", "unit": "mm", "min": 0, "max": 200 },
+    { "name": "radiation_sol", "unit": "W/m2", "min": 0, "max": 1758 }
+  ],
+  "impute": [24.0, 12.0, 62.0, 3.5, 210.0, 0.0, 420.0],
+  "center": [18.5, 8.0, 70.0, 4.0, 200.0, 1.0, 380.0],
+  "scale": [6.5, 4.5, 12.0, 2.0, 60.0, 3.0, 180.0],
+  "kind": "logistic",
+  "intercept": -2.25,
+  "coef": [0.62, 0.18, -0.44, 0.51, 0.07, 0.35, 0.29],
+  "thresholds": { "medium": 0.35, "high": 0.65 },
+  "metrics": {
+    "rows": 90,
+    "positives": 9,
+    "roc_auc": 0.78,
+    "pr_auc": 0.41,
+    "brier": 0.089
+  },
+  "baseline": {
+    "kind": "climatology",
+    "rows": 90,
+    "positives": 9,
+    "roc_auc": 0.5,
+    "brier": 0.092
+  }
+}

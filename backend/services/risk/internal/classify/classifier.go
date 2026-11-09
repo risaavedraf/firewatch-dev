@@ -91,6 +91,19 @@ type Features struct {
 	WindSpeedKmh        Feature
 	VegetationCoverPct  Feature
 	HistoricalFires     Feature
+
+	// Model is the input vector the trained artifact declares, built by
+	// internal/features at publication time: instantaneous readings from the
+	// current retrieval plus daily aggregates read from the readings history.
+	// It is a separate section because the rules do not read it - a rule that
+	// started consuming a daily maximum would be a different rule - and because
+	// every value in it carries the reason it is what it is, which is what a
+	// persisted factor has to keep once the value is null (see Measured).
+	//
+	// Zero value: every feature is absent. The model path then declares every
+	// feature the artifact asks for as null, which is the documented "declared but
+	// unobserved" state the artifact imputes, never a fabricated zero.
+	Model ModelInput
 }
 
 // named pairs a canonical variable name with its feature, so missing inputs can

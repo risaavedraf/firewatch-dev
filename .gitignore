@@ -25,6 +25,21 @@ portable/
 # ignored here.
 data/raw/geo/valparaiso-comunas-*.esri.json
 
+# The three files delivered by the Gestión de Datos course are the origin of the
+# training phase, not a rebuildable artefact: nobody re-downloads them, so what
+# belongs in version control is the derivation, not the bytes. They are
+# identified by the sha256 recorded in
+# backend/training/tests/fixtures/delivered/PROVENANCE.md, and the trimmed
+# fixtures under that directory are what the suites and the documented commands
+# read. Keeping the originals out means a clone reproduces the measurements from
+# pinned samples instead of silently trusting files of unknown vintage.
+data/*.csv
+
+# Rendered pages of a delivered PDF, written by the agent harness while reading
+# it. Transient review evidence with no runtime reader, and the source PDF is
+# the artifact worth keeping.
+.pi-scratch/
+
 # Local scratch. It holds transient review evidence (frozen manifests and
 # ledgers), a byte-identical copy of the retired frontend mockup and one-off
 # scripts. This repository already documents tmp/ as OUT of version control:

@@ -1,0 +1,51 @@
+{
+  "format": "firewatch-model/v1",
+  "version": "valparaiso-forest-v1",
+  "trained_at": "2026-11-02T00:00:00Z",
+  "data_hash": "3b7d90c1e5a4286f0b9c3d6e1f4a7b2c5d8e0f3a6b9c1d4e7f0a2b5c8d1e3f6a",
+  "features": [
+    { "name": "temp_max", "unit": "degC", "min": -5, "max": 45 },
+    { "name": "temp_min", "unit": "degC", "min": -10, "max": 30 },
+    { "name": "humidity_rel", "unit": "%", "min": 0, "max": 100 },
+    { "name": "wind_speed", "unit": "m/s", "min": 0, "max": 40 },
+    { "name": "wind_dir", "unit": "deg", "min": 0, "max": 360 },
+    { "name": "precip_sum", "unit": "mm", "min": 0, "max": 200 },
+    { "name": "radiation_sol", "unit": "W/m2", "min": 0, "max": 1758 }
+  ],
+  "impute": [24.0, 12.0, 62.0, 3.5, 210.0, 0.0, 420.0],
+  "center": [0, 0, 0, 0, 0, 0, 0],
+  "scale": [1, 1, 1, 1, 1, 1, 1],
+  "kind": "forest",
+  "trees": [
+    {
+      "nodes": [
+        { "feature": 0, "threshold": 30, "left": 1, "right": 2 },
+        { "value": 0.1 },
+        { "feature": 3, "threshold": 8, "left": 3, "right": 4 },
+        { "value": 0.55 },
+        { "value": 0.8 }
+      ]
+    },
+    {
+      "nodes": [
+        { "feature": 1, "threshold": 10, "left": 1, "right": 2 },
+        { "value": 0.2 },
+        { "value": 0.6 }
+      ]
+    }
+  ],
+  "metrics": {
+    "rows": 90,
+    "positives": 9,
+    "roc_auc": 0.72,
+    "pr_auc": 0.38,
+    "brier": 0.094
+  },
+  "baseline": {
+    "kind": "climatology",
+    "rows": 90,
+    "positives": 9,
+    "roc_auc": 0.5,
+    "brier": 0.092
+  }
+}

@@ -1,0 +1,12 @@
+[tool.pytest.ini_options]
+# The suite imports the package modules by bare name (``import assemble``), and it
+# runs from this directory in CI, so the package root is on the path explicitly.
+testpaths = ["tests"]
+pythonpath = ["."]
+
+[tool.ruff]
+# The interpreter the CI job installs. Only ruff's default rule set is enabled
+# (E4, E7, E9, F): the point of the lint job is to catch a real defect in the
+# panel code, not to impose a formatting opinion nobody has agreed to.
+target-version = "py311"
+line-length = 100

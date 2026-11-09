@@ -33,6 +33,11 @@ const (
 	// CauseDuplicate means another record already claimed the identity
 	// (variable, zone, instant). The first occurrence is kept.
 	CauseDuplicate RejectCause = "duplicate"
+	// CauseUnit means the unit contradicts the one its variable is stored and
+	// aggregated in. A `°F` temperature is not converted: it is refused, because
+	// entering an aggregate under the wrong unit silently changes the value the
+	// model reads and no downstream guard can see it.
+	CauseUnit RejectCause = "unit"
 )
 
 // Rejection records one refused record and why, with the index so an operator can
@@ -108,7 +113,10 @@ func Validate(set observations.ObservationSet) ValidationReport {
 		report.Accepted = append(report.Accepted, record)
 	}
 
-	for _, variable := range observations.VariableNames() {
+	// Every variable the readings history can store is reported: the caller that
+	// computes a daily aggregate needs to know which of its window's variables are
+	// absent from the retrieval, not only which of the five rule inputs are.
+	for _, variable := range ReadingVariableNames() {
 		if !present[variable] {
 			report.Missing = append(report.Missing, variable)
 		}
@@ -138,6 +146,9 @@ func rejectRecord(record observations.Observation, index int, retrievedAt time.T
 		return reject(CauseDate, "observed_at is zero")
 	case !canonicalVariableName(record.Variable):
 		return reject(CauseFormat, fmt.Sprintf("variable %q is not in the canonical vocabulary", record.Variable))
+	case !unitMatchesVariable(record.Variable, record.Unit):
+		expected, _ := ExpectedUnit(record.Variable)
+		return reject(CauseUnit, fmt.Sprintf("variable %s is stored in unit %q but the reading declares %q", record.Variable, expected, record.Unit))
 	case !canonicalQuality(record.Quality):
 		return reject(CauseFormat, fmt.Sprintf("quality %q is not in the canonical vocabulary", record.Quality))
 	case math.IsNaN(record.Value) || math.IsInf(record.Value, 0):
@@ -171,13 +182,22 @@ func canonicalQuality(quality observations.Quality) bool {
 	return false
 }
 
-// canonicalVariableName reports whether a variable name belongs to the shared
-// canonical vocabulary of the observations contract.
+// canonicalVariableName reports whether a variable name belongs to the vocabulary
+// the readings history understands: the shared canonical names plus the weather
+// variables this service stores (see ReadingVariableNames).
 func canonicalVariableName(name string) bool {
-	for _, candidate := range observations.VariableNames() {
+	for _, candidate := range ReadingVariableNames() {
 		if name == candidate {
 			return true
 		}
 	}
 	return false
+}
+
+// unitMatchesVariable reports whether a reading's unit is the one its variable is
+// stored in. A variable with no declared unit is not unit-checked, so this guard
+// never rejects a reading nobody has assigned a unit expectation to.
+func unitMatchesVariable(variable, unit string) bool {
+	expected, declared := ExpectedUnit(variable)
+	return !declared || expected == unit
 }

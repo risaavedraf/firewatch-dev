@@ -1,0 +1,70 @@
+# Caddy is the only public edge of the production stack. It terminates TLS for
+# the two names below — one certificate per name, no wildcard — serves the built
+# browser application, and forwards the API paths to the gateway.
+#
+# `FIREWATCH_DOMAIN`, `FIREWATCH_AUTH_DOMAIN` and `ACME_EMAIL` come from the
+# container environment (docker-compose.prod.yml marks all three required). An
+# empty site address is a configuration error, so a missing name fails the start
+# instead of serving the wrong host.
+
+{
+	# Certificate expiry and renewal failure notices go to this address.
+	email {$ACME_EMAIL}
+	# No admin API: this file is the only source of truth and nothing configures
+	# the proxy at runtime.
+	admin off
+	servers {
+		# 443/udp is deliberately not published, so HTTP/3 is not advertised and
+		# no client is told to try a protocol the edge does not accept.
+		protocols h1 h2
+	}
+}
+
+# The browser origin. The page and the API share it, so the client makes no
+# cross-origin request and the gateway's `WEB_ORIGIN` is this same string.
+{$FIREWATCH_DOMAIN} {
+	encode zstd gzip
+
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options nosniff
+		X-Frame-Options DENY
+		Referrer-Policy strict-origin-when-cross-origin
+		Cross-Origin-Opener-Policy same-origin
+		# Same policy the development server sends, with the identity provider
+		# named explicitly: it is the only origin besides this one the page talks
+		# to. No wildcard, no `unsafe-eval`.
+		Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' https://{$FIREWATCH_AUTH_DOMAIN}; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
+		-Server
+	}
+
+	# The API. The body limit is enforced here, before the request reaches the
+	# gateway, which keeps its own smaller per-route limit: no route of this
+	# deployment accepts an upload, so a large body is a mistake or an abuse.
+	handle /v1/* {
+		request_body {
+			max_size 64KB
+		}
+		reverse_proxy gateway:8080
+	}
+
+	handle /health/* {
+		reverse_proxy gateway:8080
+	}
+
+	# The built application (`npm run build` in frontend/). Routing is hash-based,
+	# so a path that is not a file is a mistake and answers 404 instead of
+	# quietly serving the shell.
+	handle {
+		root * /srv/frontend
+		file_server
+	}
+}
+
+# The identity provider, on its own name: the browser needs a public OIDC issuer,
+# and a path prefix on the application origin would make the issuer a name the
+# realm and the tokens do not carry. This name is the gateway's `OIDC_ISSUER`,
+# the services' `OIDC_JWKS_URL` and the realm's `KC_HOSTNAME`.
+{$FIREWATCH_AUTH_DOMAIN} {
+	reverse_proxy identity:8080
+}

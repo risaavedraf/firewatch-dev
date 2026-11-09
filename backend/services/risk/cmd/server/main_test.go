@@ -3,6 +3,8 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"io"
+	"net/http"
 	"net/http/httptest"
 	"reflect"
 	"strings"
@@ -144,6 +146,233 @@ func TestDLQConfiguration(t *testing.T) {
 	}
 	if got, err := parseDLQReadyMaxDepth(""); err != nil || got != 0 {
 		t.Fatalf("depth=%d err=%v", got, err)
+	}
+}
+
+// fixtureModelDocument is the model document the startup stand-in serves: the same
+// shape GET /v1/model answers with, carrying the seven features of the committed
+// fixture artifact in its declared order. Startup only needs the feature list to be
+// coherent, so the provenance members a real service also sends are omitted.
+const fixtureModelDocument = `{
+  "format": "firewatch-model/v1",
+  "version": "valparaiso-logistic-v1",
+  "kind": "logistic",
+  "features": [
+    {"name": "temp_max", "unit": "degC", "min": -5, "max": 45},
+    {"name": "temp_min", "unit": "degC", "min": -10, "max": 30},
+    {"name": "humidity_rel", "unit": "%", "min": 0, "max": 100},
+    {"name": "wind_speed", "unit": "m/s", "min": 0, "max": 40},
+    {"name": "wind_dir", "unit": "deg", "min": 0, "max": 360},
+    {"name": "precip_sum", "unit": "mm", "min": 0, "max": 200},
+    {"name": "radiation_sol", "unit": "W/m2", "min": 0, "max": 1758}
+  ]
+}`
+
+// serveModelDocument starts an inference stand-in that serves one model document.
+// It answers every path, because the only request startup makes is GET /v1/model.
+func serveModelDocument(t *testing.T, document string) *httptest.Server {
+	t.Helper()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		io.WriteString(w, document)
+	}))
+	t.Cleanup(server.Close)
+	return server
+}
+
+// TestClassifierRegistryRefusesToStartWithoutTheModelDocument is the startup guard
+// this slice adds: the artifact's declared feature list is what the classifier
+// sends, so a service that cannot answer GET /v1/model must stop startup instead of
+// starting with an empty or guessed feature set. The error has to name the inference
+// service and the reason, because that is what an operator sees in place of a
+// running container.
+func TestClassifierRegistryRefusesToStartWithoutTheModelDocument(t *testing.T) {
+	withAddress := func(url string) map[string]string {
+		return map[string]string{"MODEL_ID": classify.MLFixtureV1ID, inferenceURLEnv: url}
+	}
+
+	servingGarbage := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		io.WriteString(w, `{"features":[]}`)
+	}))
+	t.Cleanup(servingGarbage.Close)
+	closed := serveModelDocument(t, fixtureModelDocument)
+	closed.Close()
+
+	for _, tc := range []struct {
+		name string
+		env  map[string]string
+		want []string
+	}{
+		{
+			name: "unreachable",
+			env:  withAddress(closed.URL),
+			want: []string{"the inference service", "/v1/model"},
+		},
+		{
+			name: "incoherent document",
+			env:  withAddress(servingGarbage.URL),
+			want: []string{"the inference service", "empty feature list"},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			classifiers, selected, active, err := classifierRegistry(context.Background(), classifierEnvironment(tc.env))
+			if err == nil {
+				t.Fatalf("startup accepted %q as %q with %q registered", tc.env[inferenceURLEnv], selected, active.ID())
+			}
+			if classifiers != nil || selected != "" || active != nil {
+				t.Fatalf("a failed startup returned a usable registry: %+v", classifiers)
+			}
+			for _, fragment := range tc.want {
+				if !strings.Contains(err.Error(), fragment) {
+					t.Fatalf("the startup error does not name %q: %v", fragment, err)
+				}
+			}
+		})
+	}
+}
+
+// classifierEnvironment reads configuration from a map instead of the process,
+// so startup selection is exercised without touching the environment of the test
+// binary or of a parallel test.
+func classifierEnvironment(values map[string]string) func(string) string {
+	return func(key string) string { return values[key] }
+}
+
+// TestClassifierRegistrySelection pins startup selection by MODEL_ID.
+//
+// It covers the states that matter: the unreconfigured default, the second rule
+// version, the model path selected with the inference service configured, and the
+// model path selected without an address. The last one is the failure this exists
+// for: a model deployment that starts healthy and only discovers it has nowhere
+// to call at the first prediction is worse than one that refuses to start, so a
+// missing INFERENCE_URL aborts startup by name.
+//
+// The configured model path points at a stand-in that serves a model document,
+// because registering that classifier reads the artifact's declared feature list
+// at construction (see TestClassifierRegistryRefusesToStartWithoutTheModelDocument
+// for what happens when it cannot).
+func TestClassifierRegistrySelection(t *testing.T) {
+	server := serveModelDocument(t, fixtureModelDocument)
+	for _, tc := range []struct {
+		name     string
+		env      map[string]string
+		want     string
+		wantKind classify.Kind
+		wantErr  string
+	}{
+		{name: "default", want: classify.AcademicRuleV1ID, wantKind: classify.KindRule},
+		{
+			name:     "second rule",
+			env:      map[string]string{"MODEL_ID": classify.FirewatchRuleV2ID},
+			want:     classify.FirewatchRuleV2ID,
+			wantKind: classify.KindRule,
+		},
+		{
+			name: "model path",
+			env: map[string]string{
+				"MODEL_ID":          classify.MLFixtureV1ID,
+				inferenceURLEnv:     server.URL,
+				"INFERENCE_TIMEOUT": "2s",
+			},
+			want:     classify.MLFixtureV1ID,
+			wantKind: classify.KindTrained,
+		},
+		{
+			name:    "model path without an address",
+			env:     map[string]string{"MODEL_ID": classify.MLFixtureV1ID},
+			wantErr: inferenceURLEnv,
+		},
+		{
+			name: "model path with an invalid timeout",
+			env: map[string]string{
+				"MODEL_ID":          classify.MLFixtureV1ID,
+				inferenceURLEnv:     server.URL,
+				"INFERENCE_TIMEOUT": "soon",
+			},
+			wantErr: "INFERENCE_TIMEOUT",
+		},
+		{
+			name: "model path with a relative address",
+			env: map[string]string{
+				"MODEL_ID":      classify.MLFixtureV1ID,
+				inferenceURLEnv: "inference:8080",
+			},
+			wantErr: inferenceURLEnv,
+		},
+		{
+			// The trained version does not exist yet, so selecting it must fail loudly
+			// instead of starting on a version nobody registered.
+			name: "version this binary does not execute",
+			env: map[string]string{
+				"MODEL_ID":      "ml-v1",
+				inferenceURLEnv: server.URL,
+			},
+			wantErr: "unknown classifier",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			classifiers, selected, active, err := classifierRegistry(context.Background(), classifierEnvironment(tc.env))
+			if tc.wantErr != "" {
+				if err == nil {
+					t.Fatalf("the configuration was accepted and selected %q", selected)
+				}
+				if !strings.Contains(err.Error(), tc.wantErr) {
+					t.Fatalf("the startup error does not name %q: %v", tc.wantErr, err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("classifier selection failed: %v", err)
+			}
+			if selected != tc.want || active.ID() != tc.want || active.Kind() != tc.wantKind {
+				t.Fatalf("selected %q (kind %q), want %q (kind %q)", active.ID(), active.Kind(), tc.want, tc.wantKind)
+			}
+			// Registering the model path never replaces a rule version: the registry
+			// lists every version this binary can execute, so an activation can move
+			// between them in either direction.
+			ids := classifiers.IDs()
+			for _, required := range []string{classify.AcademicRuleV1ID, classify.FirewatchRuleV2ID} {
+				found := false
+				for _, id := range ids {
+					found = found || id == required
+				}
+				if !found {
+					t.Fatalf("the registry does not carry %q: %v", required, ids)
+				}
+			}
+			if _, configured := tc.env[inferenceURLEnv]; configured {
+				if _, err := classifiers.Select(classify.MLFixtureV1ID); err != nil {
+					t.Fatalf("the registry does not carry the fixture model path: %v", err)
+				}
+			} else if _, err := classifiers.Select(classify.MLFixtureV1ID); err == nil {
+				t.Fatal("the model path was registered without an inference address")
+			}
+		})
+	}
+}
+
+// TestInferenceTimeoutConfiguration pins the prediction bound: unset uses the
+// documented default, a positive duration is accepted, and anything else is a
+// configuration error rather than a silent fallback.
+func TestInferenceTimeoutConfiguration(t *testing.T) {
+	for _, tc := range []struct {
+		raw     string
+		want    time.Duration
+		invalid bool
+	}{
+		{"", defaultInferenceTimeout, false},
+		{"2s", 2 * time.Second, false},
+		{"750ms", 750 * time.Millisecond, false},
+		{"garbage", 0, true},
+		{"0s", 0, true},
+		{"-1s", 0, true},
+	} {
+		t.Run("timeout="+tc.raw, func(t *testing.T) {
+			got, err := parseInferenceTimeout(tc.raw)
+			if (err != nil) != tc.invalid || got != tc.want {
+				t.Fatalf("parseInferenceTimeout(%q) = %v, %v; want %v, invalid=%v", tc.raw, got, err, tc.want, tc.invalid)
+			}
+		})
 	}
 }
 

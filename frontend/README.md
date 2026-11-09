@@ -49,8 +49,8 @@ The dev server is **not** the CSP witness: it injects its own scripts and sends 
 the built path below when the policy matters.
 
 ```sh
-npm run build      # type-check, then build into dist/
-npm run serve      # serve dist/ on http://localhost:4173 with the real headers
+npm run build:local  # type-check, then build into dist/ with the localhost origins
+npm run serve        # serve dist/ on http://localhost:4173 with the real headers
 ```
 
 ## Where it points
@@ -140,7 +140,8 @@ npm run verify     # lint → typecheck → tests → source gate → build → 
 | `npm run typecheck` | `tsc --noEmit`, strict |
 | `npm test` | Vitest: domain rules, transport, session, map projection, routing and the views |
 | `npm run check` | The honesty statement is present, no fixture or frozen clock ships, the real endpoints are there, no client-side role guard, no persisted token, no secret, no external asset, and the sidebar keeps the scroll that makes its controls reachable |
-| `npm run build` | The production bundle |
+| `npm run build:local` | The demo bundle: the same build, resolving the localhost origins |
+| `npm run build` | The production bundle; it requires the three `VITE_*` origins and fails with `FAIL: missing required build variable(s)` without them. [`env.example`](env.example) and [`env.production.example`](env.production.example) document them |
 | `npm run smoke` | Loopback: the built assets, MIME types, CSP, `HEAD`/`405`/`404`, traversal confinement |
 
 ## What is not verified

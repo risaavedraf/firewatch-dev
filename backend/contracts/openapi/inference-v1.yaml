@@ -1,0 +1,277 @@
+openapi: 3.0.3
+info:
+  title: FireWatch inference service
+  version: 0.1.0
+  description: >-
+    Internal surface. Go executes a versioned firewatch-model/v1 JSON artifact
+    (no onnxruntime, no cgo). This service is not published through the gateway:
+    the risk service calls it on the internal network, so there is no bearer
+    token, no CORS and no quota here - the network is the boundary that keeps
+    arbitrary callers off the model. The document is deliberately unversioned in
+    its paths except for /v1/model, which is the provenance route.
+servers:
+  - url: http://inference:8080
+paths:
+  /predict:
+    post:
+      operationId: predictRisk
+      description: >-
+        Scores one sample against the loaded artifact. Features are matched by
+        name and evaluated in the artifact's order, so the JSON key order is
+        irrelevant. The preprocessing order is fixed by the model contract: a
+        null becomes the artifact's imputed value, then the reading is
+        standardized as (x - center) / scale, then the model runs. A null means
+        "declared but unobserved"; omitting the key is a missing feature and is
+        refused. Values outside the feature's declared min/max are refused with
+        400 out_of_range and are never clamped, because clamping would answer
+        confidently about a reading the model was never trained on. A model that
+        produces a non-finite probability answers 500 instead of a number.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/PredictionRequest'}
+      responses:
+        '200':
+          description: One scored sample.
+          headers:
+            X-Request-ID: {$ref: '#/components/headers/RequestID'}
+            Cache-Control: {schema: {type: string, enum: [no-store]}}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Prediction'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '500': {$ref: '#/components/responses/InternalError'}
+  /health:
+    get:
+      operationId: getInferenceHealth
+      description: >-
+        Readiness plus the identity of the active model. The service validates
+        the artifact before it binds the listener and never reloads it, so a 200
+        here means the model this process executes is the one it validated;
+        there is no dependency left to probe, and a non-200 would only describe
+        a state that cannot occur while the process is answering.
+      responses:
+        '200':
+          description: The active artifact, ready to score.
+          headers:
+            Cache-Control: {schema: {type: string, enum: [no-store]}}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Health'}
+  /v1/model:
+    get:
+      operationId: getInferenceModel
+      description: >-
+        Provenance of the active model: its identity, its feature order and
+        guards, the level thresholds in force, and the metrics and baseline
+        objects the artifact carries verbatim. The parameters themselves
+        (impute, center, scale, coef, trees) are not exposed; they live in the
+        artifact file and in the frozen equivalence fixture, which is where a
+        reviewer reproduces them.
+      responses:
+        '200':
+          description: Provenance of the active artifact.
+          headers:
+            Cache-Control: {schema: {type: string, enum: [no-store]}}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ModelDocument'}
+  /metrics:
+    get:
+      operationId: getInferenceMetrics
+      description: >-
+        Prometheus text exposition: predictions by level, refusals by stable
+        code, the active model as an info series, HTTP responses by class with a
+        request-duration histogram, and process resources. Scraped internally.
+      responses:
+        '200':
+          description: Prometheus text exposition format 0.0.4.
+          content:
+            text/plain:
+              schema: {type: string}
+components:
+  headers:
+    RequestID:
+      description: >-
+        Correlation id, echoed from X-Request-ID and minted here when absent.
+        Repeats as request_id in every JSON error body.
+      schema: {type: string, format: uuid}
+  responses:
+    BadRequest:
+      description: >-
+        The sample was refused before any scoring: malformed body, duplicate,
+        missing or unknown feature, or a value outside the declared guard.
+      headers:
+        X-Request-ID: {$ref: '#/components/headers/RequestID'}
+        Cache-Control: {schema: {type: string, enum: [no-store]}}
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/ErrorResponse'}
+    InternalError:
+      description: >-
+        The model produced a probability that is not a finite number, or an
+        unexpected failure occurred. Never returned with a probability in the
+        body: a non-finite score is reported, not answered with.
+      headers:
+        X-Request-ID: {$ref: '#/components/headers/RequestID'}
+        Cache-Control: {schema: {type: string, enum: [no-store]}}
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/ErrorResponse'}
+  schemas:
+    Level:
+      type: string
+      enum: [low, medium, high]
+      description: >-
+        Canonical level vocabulary, matching the levels risk persists. Cut
+        points come from the artifact when it declares them and from the
+        documented defaults (medium 0.40, high 0.70) otherwise; /v1/model
+        reports the pair in force.
+    ErrorCode:
+      type: string
+      enum:
+        - invalid_body
+        - duplicate_feature
+        - missing_feature
+        - unknown_feature
+        - out_of_range
+        - non_finite_probability
+        - scoring_failed
+      description: >-
+        Stable machine-readable code. Callers match on this literal, never on
+        the human-readable detail.
+    ErrorResponse:
+      type: object
+      additionalProperties: false
+      required: [code, request_id, detail]
+      properties:
+        code: {$ref: '#/components/schemas/ErrorCode'}
+        request_id:
+          type: string
+          description: >-
+            The same literal as the X-Request-ID response header, so a caller
+            can join its own log line to this refusal.
+        detail:
+          type: string
+          description: Human-readable reason, for logs only.
+          example: 'feature "temp_max" value 46 is outside [-5, 45] degC'
+    PredictionRequest:
+      type: object
+      additionalProperties: false
+      required: [features]
+      properties:
+        features:
+          type: object
+          additionalProperties:
+            type: number
+            nullable: true
+          description: >-
+            One entry per feature the artifact declares. Property names are the
+            artifact's feature names; the valid set is served by /v1/model and
+            is deliberately not enumerated here, because an enum in this
+            document would drift from the model. A null declares the feature as
+            unobserved and is imputed from the artifact.
+          example:
+            temp_max: 34.2
+            temp_min: 18.4
+            humidity_rel: 22
+            wind_speed: 9.5
+            wind_dir: 195
+            precip_sum: 0
+            radiation_sol: 1680
+    Prediction:
+      type: object
+      additionalProperties: false
+      required: [level, probability, model_version]
+      properties:
+        level: {$ref: '#/components/schemas/Level'}
+        probability:
+          type: number
+          minimum: 0
+          maximum: 1
+          description: >-
+            Finite by contract. A model that cannot produce one answers 500
+            instead.
+        model_version:
+          type: string
+          example: valparaiso-logistic-v1
+    Feature:
+      type: object
+      additionalProperties: false
+      required: [name, unit, min, max]
+      properties:
+        name: {type: string, example: temp_max}
+        unit:
+          type: string
+          description: >-
+            Declared unit of the feature. The source mixes units (radiation_sol
+            reaches 1758 W/m2, pressure_atm drops to 593 hPa with no unit
+            declared), so the unit is what makes the guard interpretable.
+          example: degC
+        min:
+          type: number
+          description: >-
+            Inclusive lower guard. A lower value is refused, never clamped.
+        max:
+          type: number
+          description: >-
+            Inclusive upper guard. A higher value is refused, never clamped.
+    Thresholds:
+      type: object
+      additionalProperties: false
+      required: [medium, high]
+      description: >-
+        The level cut points in force, from the artifact or the documented
+        defaults.
+      properties:
+        medium: {type: number, minimum: 0, maximum: 1, example: 0.35}
+        high: {type: number, minimum: 0, maximum: 1, example: 0.65}
+    Health:
+      type: object
+      additionalProperties: false
+      required:
+        [status, format, model_version, data_hash, kind, trained_at,
+         feature_count, thresholds]
+      properties:
+        status: {type: string, enum: [ready]}
+        format: {type: string, enum: [firewatch-model/v1]}
+        model_version: {type: string, example: valparaiso-logistic-v1}
+        data_hash:
+          type: string
+          description: >-
+            Hash of the data the artifact was trained on, carried for
+            provenance.
+        kind: {type: string, enum: [logistic, forest]}
+        trained_at: {type: string, format: date-time}
+        feature_count: {type: integer, minimum: 0}
+        thresholds: {$ref: '#/components/schemas/Thresholds'}
+    ModelDocument:
+      type: object
+      additionalProperties: false
+      required:
+        [format, version, trained_at, data_hash, kind, features, thresholds,
+         metrics, baseline]
+      properties:
+        format: {type: string, enum: [firewatch-model/v1]}
+        version: {type: string, example: valparaiso-logistic-v1}
+        trained_at: {type: string, format: date-time}
+        data_hash: {type: string}
+        kind: {type: string, enum: [logistic, forest]}
+        features:
+          type: array
+          description: >-
+            The model's input order. This order is the positional contract.
+          items: {$ref: '#/components/schemas/Feature'}
+        thresholds: {$ref: '#/components/schemas/Thresholds'}
+        metrics:
+          type: object
+          additionalProperties: true
+          description: >-
+            Opaque provenance, carried verbatim and never read while scoring.
+        baseline:
+          type: object
+          additionalProperties: true
+          description: >-
+            Opaque baseline provenance, carried verbatim and never read while
+            scoring.

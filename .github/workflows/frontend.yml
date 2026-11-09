@@ -40,9 +40,20 @@ jobs:
           if [ -f package-lock.json ]; then
             npm run lint
             npm run typecheck
-            npm run build
+            npm run build:local
           fi
       - name: Run tests
         run: npm test
       - name: Loopback smoke
         run: npm run smoke
+      # Proves the strict production path compiles. Runs last: the smoke
+      # above still needs a bundle built with the localhost origins.
+      - name: Production build with explicit origins
+        env:
+          VITE_GATEWAY_ORIGIN: https://firewatch.example.com
+          VITE_ISSUER: https://auth.firewatch.example.com/realms/firewatch
+          VITE_REDIRECT_URI: https://firewatch.example.com/
+        run: |
+          if [ -f package-lock.json ]; then
+            npm run build
+          fi

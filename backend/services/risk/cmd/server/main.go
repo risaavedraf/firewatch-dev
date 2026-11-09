@@ -18,6 +18,7 @@ import (
 
 	"firewatch.local/risk/internal/classify"
 	"firewatch.local/risk/internal/cycle"
+	"firewatch.local/risk/internal/features"
 	"firewatch.local/risk/internal/handler"
 	"firewatch.local/risk/internal/messaging"
 	"firewatch.local/risk/internal/metrics"
@@ -133,23 +134,15 @@ func run() error {
 	// The selected version must have a row in the models table (migration 002),
 	// because batches.model_version is a foreign key into it; a new model version
 	// is therefore a new classifier version plus a new migration row.
-	classifiers := classify.NewRegistry()
-	if err := classifiers.Register(classify.NewAcademicRuleV1()); err != nil {
-		return fmt.Errorf("register classifier: %w", err)
-	}
-	// The second rule version is registered alongside v1, not instead of it, so
-	// both are selectable through MODEL_ID and neither replaces the other by
-	// default (the default below stays academic-rule-v1).
-	if err := classifiers.Register(classify.NewFirewatchRuleV2()); err != nil {
-		return fmt.Errorf("register classifier: %w", err)
-	}
-	activeModel := os.Getenv("MODEL_ID")
-	if activeModel == "" {
-		activeModel = classify.AcademicRuleV1ID
-	}
-	active, err := classifiers.Select(activeModel)
+	//
+	// The model path - the classifier that delegates to the inference service - is
+	// registered by the same call and selected by the same MODEL_ID. It is only
+	// registered when INFERENCE_URL is configured, and a MODEL_ID naming it
+	// without that address aborts startup here rather than at the first
+	// prediction. See classifierRegistry.
+	classifiers, activeModel, active, err := classifierRegistry(ctx, os.Getenv)
 	if err != nil {
-		return fmt.Errorf("invalid MODEL_ID configuration %q: %w", activeModel, err)
+		return err
 	}
 	// Fail closed before serving: the selected classifier version must exist in the
 	// models registry, and when its fingerprint is frozen in code the stored
@@ -183,6 +176,19 @@ func run() error {
 	if err != nil {
 		return fmt.Errorf("configure source provider: %w", err)
 	}
+	// The trained model's seven-value input vector is built from the readings
+	// history this component also records on every publication. It is wired even
+	// when a rule classifier is serving, because the history has to accumulate from
+	// the first cycle for the aggregates to have a chance of covering their window
+	// by the time the model is selected; a rule deployment that skipped it would
+	// hand the model seven nulls on day one of its activation. New returns an error
+	// rather than falling back to UTC when the civil time zone cannot be loaded, so
+	// a host without tzdata stops here instead of publishing plausible aggregates
+	// cut in the wrong day.
+	featureSource, err := features.New(store)
+	if err != nil {
+		return err
+	}
 	// The model-outcome counters are shared between the publication path, which
 	// writes them, and /metrics, which reads them: one value, two surfaces.
 	outcomes := &metrics.RiskOutcomes{}
@@ -193,7 +199,7 @@ func run() error {
 	// MODEL_ID selection above is the bootstrap. A version this binary cannot
 	// execute, or a frozen fingerprint mismatch, fails the publication closed.
 	classifierSource := service.RegistryClassifierSource{Models: store, Registry: classifiers, Bootstrap: active}
-	publisher := service.Publisher{Provider: provider, Classifiers: classifierSource, Store: store, Outcomes: outcomes}
+	publisher := service.Publisher{Provider: provider, Classifiers: classifierSource, Store: store, Outcomes: outcomes, Model: featureSource}
 	// Validate both bounds before starting any broker worker.
 	dlqReadyMaxDepth, err := parseDLQReadyMaxDepth(os.Getenv("DLQ_READY_MAX_DEPTH"))
 	if err != nil {
@@ -265,6 +271,94 @@ func run() error {
 		return nil
 	}
 	return err
+}
+
+// inferenceURLEnv is where the internal address of the inference service lives.
+// It is required exactly when the selected classifier is executed by that
+// service: a rule deployment must not need an address it never calls, and a
+// model deployment must not start without one and discover it at the first
+// prediction.
+const inferenceURLEnv = "INFERENCE_URL"
+
+// inferenceTimeoutEnv bounds one prediction. An unset value uses the documented
+// default below; a value that is not a positive duration is a configuration
+// error rather than a silent fallback.
+const inferenceTimeoutEnv = "INFERENCE_TIMEOUT"
+
+// defaultInferenceTimeout is the documented default for INFERENCE_TIMEOUT. It is
+// a bound on one call made while a job is being published, so it stays well
+// inside the consumer's own patience: a stalled model must fail the unit, not
+// hold the queue.
+const defaultInferenceTimeout = 5 * time.Second
+
+// parseInferenceTimeout reads the prediction bound once at startup.
+func parseInferenceTimeout(raw string) (time.Duration, error) {
+	if raw == "" {
+		return defaultInferenceTimeout, nil
+	}
+	value, err := time.ParseDuration(raw)
+	if err != nil || value <= 0 {
+		return 0, fmt.Errorf("invalid INFERENCE_TIMEOUT %q: must be a positive duration", raw)
+	}
+	return value, nil
+}
+
+// classifierRegistry builds the runtime registry from configuration and resolves
+// the classifier MODEL_ID selects. It is a named seam so startup selection - the
+// rule versions, the model version served over HTTP, and the failure of a model
+// selection that has no address - can be exercised without a database or a
+// listener.
+//
+// It returns the selected version identifier as well as the classifier, because
+// the startup check that follows reads the models registry row for that version.
+//
+// Registering the model path reads the inference service's model document
+// (GET /v1/model, once) because the artifact's declared feature list is what the
+// classifier sends. A service that is down, or that answers something which is not
+// a coherent model document, therefore fails startup here by name instead of at the
+// first prediction; ctx bounds that read.
+func classifierRegistry(ctx context.Context, getenv func(string) string) (*classify.Registry, string, classify.Classifier, error) {
+	classifiers := classify.NewRegistry()
+	if err := classifiers.Register(classify.NewAcademicRuleV1()); err != nil {
+		return nil, "", nil, fmt.Errorf("register classifier: %w", err)
+	}
+	// The second rule version is registered alongside v1, not instead of it, so
+	// both are selectable through MODEL_ID and neither replaces the other by
+	// default (the default below stays academic-rule-v1).
+	if err := classifiers.Register(classify.NewFirewatchRuleV2()); err != nil {
+		return nil, "", nil, fmt.Errorf("register classifier: %w", err)
+	}
+	selected := getenv("MODEL_ID")
+	if selected == "" {
+		selected = classify.AcademicRuleV1ID
+	}
+	// The model path is registered only when the inference service has an
+	// address, because a model classifier without one can only fail. Registering
+	// it unconditionally would either require INFERENCE_URL from every rule
+	// deployment or ship a classifier that fails per prediction, and the whole
+	// point of failing at startup is that neither is acceptable.
+	baseURL := getenv(inferenceURLEnv)
+	if baseURL == "" && classify.ServedByInference(selected) {
+		return nil, "", nil, fmt.Errorf("%s is required: MODEL_ID selects %q, which is executed by the inference service and cannot be served from this binary", inferenceURLEnv, selected)
+	}
+	if baseURL != "" {
+		timeout, err := parseInferenceTimeout(getenv(inferenceTimeoutEnv))
+		if err != nil {
+			return nil, "", nil, err
+		}
+		fixture, err := classify.NewMLFixtureV1(ctx, baseURL, timeout)
+		if err != nil {
+			return nil, "", nil, fmt.Errorf("configure the inference classifier (check %s and that the inference service is up with its model document): %w", inferenceURLEnv, err)
+		}
+		if err := classifiers.Register(fixture); err != nil {
+			return nil, "", nil, fmt.Errorf("register classifier: %w", err)
+		}
+	}
+	active, err := classifiers.Select(selected)
+	if err != nil {
+		return nil, "", nil, fmt.Errorf("invalid MODEL_ID configuration %q: %w", selected, err)
+	}
+	return classifiers, selected, active, nil
 }
 
 // cycleZones parses FIREWATCH_CYCLE_ZONES into the zones one cycle publishes.

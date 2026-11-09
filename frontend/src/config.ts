@@ -1,19 +1,53 @@
 // Public configuration of the browser client. A bundled client has no secrets:
 // every value here is visible to any visitor and none of them is a credential.
-// The three values mirror the retired page exactly, because they are registered
-// in services this repository does not own.
+//
+// The three origins are build-time variables rather than literals, because they
+// are the three values that change between a development machine and a deployed
+// host, and a bundle that points at the wrong origin fails in the browser as an
+// opaque network error. Vite inlines every `VITE_`-prefixed variable it finds in
+// `frontend/.env*`; `frontend/env.example` and `frontend/env.production.example`
+// document the values they must satisfy.
+//
+// Development keeps the historical local values as fallbacks, so a fresh
+// checkout runs with no `.env` file at all. A production build does not fall
+// back: it throws at module load instead, because a bundle that quietly keeps
+// talking to `localhost` looks healthy while login and every API call are gone.
 
-// Prefixes every gateway call. The page is served from its own origin (:4173)
-// while the gateway stays on :8080, so every API URL is absolute.
-export const gatewayOrigin = 'http://localhost:8080';
+// The declarations sit next to the only module that reads them: this project has
+// no `vite-env.d.ts`, and these three variables are optional in the environment
+// and required in the exported configuration below.
+declare global {
+  interface ImportMetaEnv {
+    readonly VITE_GATEWAY_ORIGIN?: string;
+    readonly VITE_ISSUER?: string;
+    readonly VITE_REDIRECT_URI?: string;
+  }
+}
+
+function environmentOrigin(name: string, value: string | undefined, developmentValue: string): string {
+  const configured = value?.trim();
+  if (configured) return configured;
+  // Gated on `MODE`, not on `PROD`: Vite sets `PROD` for every build including
+  // `npm run build:local`, so the demo bundle would throw as well.
+  if (import.meta.env.MODE === 'production') {
+    throw new Error(
+      `Missing required build variable ${name}: a production build must set it instead of falling back to ${developmentValue}. See the production runbook.`,
+    );
+  }
+  return developmentValue;
+}
+
+// Prefixes every gateway call. Locally the page is served from its own origin
+// (:4173) while the gateway stays on :8080, so every API URL is absolute.
+export const gatewayOrigin = environmentOrigin('VITE_GATEWAY_ORIGIN', import.meta.env.VITE_GATEWAY_ORIGIN, 'http://localhost:8080');
 // The identity provider is NOT the gateway: `/token`, `/auth` and `/logout`
 // resolve against this issuer and must never receive `gatewayOrigin`.
-export const issuer = 'http://localhost:8081/realms/firewatch';
+export const issuer = environmentOrigin('VITE_ISSUER', import.meta.env.VITE_ISSUER, 'http://localhost:8081/realms/firewatch');
 // Must match the realm client's registered valid redirect URI, and the gateway's
-// `WEB_ORIGIN` must be exactly this string. The `localhost` spelling is
-// load-bearing: `127.0.0.1:4173` is a different origin to a browser and fails
-// both the login round trip and the cross-origin API calls.
-export const redirectURI = 'http://localhost:4173/';
+// `WEB_ORIGIN` must be exactly this string. The spelling is load-bearing:
+// `127.0.0.1:4173` is a different origin to a browser than `localhost:4173` and
+// fails both the login round trip and the cross-origin API calls.
+export const redirectURI = environmentOrigin('VITE_REDIRECT_URI', import.meta.env.VITE_REDIRECT_URI, 'http://localhost:4173/');
 export const clientID = 'firewatch-demo';
 
 // The PKCE transaction (`state` + `code_verifier`) is the only value the app

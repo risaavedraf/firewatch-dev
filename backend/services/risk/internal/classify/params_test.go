@@ -405,6 +405,43 @@ func TestCanonicalFormRoundTrips(t *testing.T) {
 }
 
 // numericViolation is one numeric literal that escaped the Params object.
+// modelPathSourceFile is the one non-test file allowed to spell numeric values at
+// package level.
+//
+// The model path speaks HTTP, and a status class, a response bound and a unit
+// conversion are neither rule thresholds nor expressible without a number; the
+// only alternatives are a magic value smuggled into Params (where it would claim
+// to be a scoring parameter and land in a frozen hash) or an unreadable
+// expression built from other literals. The exemption is therefore narrow in two
+// ways: it covers package-level const and var declarations ONLY, so every numeric
+// literal inside a function body stays a violation there, and it is scoped to this
+// one file, so the rule files keep the stricter reading. In practice a threshold
+// added to the model path cannot be anonymous: it has to be a named constant.
+const modelPathSourceFile = "inference.go"
+
+// packageLevelNumericRanges returns the ranges of the values of every
+// package-level const/var declaration in a file. It is the exemption surface of
+// modelPathSourceFile.
+func packageLevelNumericRanges(file *ast.File) []sourceRange {
+	var ranges []sourceRange
+	for _, decl := range file.Decls {
+		genDecl, ok := decl.(*ast.GenDecl)
+		if !ok || (genDecl.Tok != token.CONST && genDecl.Tok != token.VAR) {
+			continue
+		}
+		for _, spec := range genDecl.Specs {
+			valueSpec, ok := spec.(*ast.ValueSpec)
+			if !ok {
+				continue
+			}
+			for _, value := range valueSpec.Values {
+				ranges = append(ranges, sourceRange{start: value.Pos(), end: value.End()})
+			}
+		}
+	}
+	return ranges
+}
+
 type numericViolation struct {
 	position token.Position
 	literal  string
@@ -430,7 +467,11 @@ type sourceRange struct {
 //
 //   - No package-level const or var may carry a numeric value. 0 and 1 are the
 //     only exemptions: they are zero checks, loop bounds and unit steps, not rule
-//     thresholds.
+//     thresholds. inference.go (modelPathSourceFile) is the single documented
+//     exception, and only for its package-level declarations: a transport bound
+//     or a unit conversion cannot be expressed without a number, so there it has
+//     to be at least a named constant. Inline literals in its function bodies
+//     stay violations, which is what keeps the exemption from becoming a split.
 //   - Behaviour files (academic_rule.go, classifier.go, and any future non-test
 //     file other than params.go) may contain only 0 and 1. Every other integer or
 //     float is a behaviour number and belongs in Params, so an inline threshold
@@ -479,6 +520,13 @@ func structuralViolations(name string, src []byte) ([]numericViolation, error) {
 	falling := functionRanges(file, "falling")
 	defaults, shapeViolations := defaultsCompositeRanges(file, fset)
 	encoding := functionRanges(file, "deriveParameters")
+	// named holds the package-level declarations modelPathSourceFile may spell with
+	// a number. It stays empty for every other file, so the exemption cannot spread
+	// by accident.
+	var named []sourceRange
+	if name == modelPathSourceFile {
+		named = packageLevelNumericRanges(file)
+	}
 	seen := map[token.Pos]bool{}
 	violations := append([]numericViolation(nil), shapeViolations...)
 	record := func(literal *ast.BasicLit, reason string) {
@@ -510,6 +558,9 @@ func structuralViolations(name string, src []byte) ([]numericViolation, error) {
 					if !ok || !isNumericLiteral(literal) || isStructuralLiteral(literal) {
 						return true
 					}
+					if insideAnyRange(literal.Pos(), named) {
+						return true
+					}
 					record(literal, fmt.Sprintf("a package-level %s must not carry a numeric value", genDecl.Tok))
 					return true
 				})
@@ -521,6 +572,9 @@ func structuralViolations(name string, src []byte) ([]numericViolation, error) {
 	ast.Inspect(file, func(node ast.Node) bool {
 		literal, ok := node.(*ast.BasicLit)
 		if !ok || !isNumericLiteral(literal) {
+			return true
+		}
+		if insideAnyRange(literal.Pos(), named) {
 			return true
 		}
 		if name == "params.go" {
@@ -879,5 +933,37 @@ func TestNoBehaviorNumbersOutsideTheParamsObject(t *testing.T) {
 	}
 	if len(violations) != 1 {
 		t.Fatalf("the guard found %d violations for 64 outside the encoding function, want exactly 1: %v", len(violations), violations)
+	}
+
+	// The model path's exemption is narrow in both directions. A named constant
+	// there is allowed, because a transport bound cannot be written without one...
+	namedModelConstant := "package classify\n\nconst maxReasonBytes = 200\n"
+	violations, err = structuralViolations(modelPathSourceFile, []byte(namedModelConstant))
+	if err != nil {
+		t.Fatalf("parse the named model constant source: %v", err)
+	}
+	if len(violations) != 0 {
+		t.Fatalf("the guard rejected a named package-level constant in the model path: %v", violations)
+	}
+
+	// ...and every inline literal in a function body of that same file is still a
+	// violation, so a threshold cannot be added there anonymously.
+	inlineModelLiteral := "package classify\n\nfunc plantedInline() bool { return 4 > 3 }\n"
+	violations, err = structuralViolations(modelPathSourceFile, []byte(inlineModelLiteral))
+	if err != nil {
+		t.Fatalf("parse the inline model literal source: %v", err)
+	}
+	if len(violations) != 2 {
+		t.Fatalf("the guard found %d violations for inline literals in the model path, want 2: %v", len(violations), violations)
+	}
+
+	// The exemption does not follow the file name into the rule files: the same
+	// named constant is still a violation where a rule lives.
+	violations, err = structuralViolations("classifier.go", []byte(namedModelConstant))
+	if err != nil {
+		t.Fatalf("parse the named constant outside the model path: %v", err)
+	}
+	if len(violations) != 1 {
+		t.Fatalf("the guard found %d violations for a named constant outside the model path, want exactly 1: %v", len(violations), violations)
 	}
 }
