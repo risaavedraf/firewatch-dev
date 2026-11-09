@@ -91,7 +91,7 @@ func MLFixtureV1Params() map[string]string {
 
 // MLFixtureV1ParamsHash is the fingerprint of MLFixtureV1Params. It is computed
 // from the description rather than written twice, so the frozen literal in
-// migration 011 can only agree with the description by describing the same
+// migration 013 can only agree with the description by describing the same
 // artifact.
 var MLFixtureV1ParamsHash = ParamsHash(MLFixtureV1Params())
 

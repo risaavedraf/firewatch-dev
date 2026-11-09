@@ -35,7 +35,7 @@ var firewatchRuleV2 string
 //go:embed 010_models_activation_grant.sql
 var modelsActivationGrant string
 
-//go:embed 011_ml_fixture_v1.sql
+//go:embed 013_ml_fixture_v1.sql
 var mlFixtureV1 string
 
 //go:embed 012_readings.sql
@@ -53,9 +53,11 @@ type Migration struct {
 // All returns the known migrations in ascending version order.
 //
 // Adding a migration means adding one file under this directory plus one entry
-// here, with the next version number and a short name. The runner applies
-// whatever is still pending in schema_migrations and does nothing on a database
-// that is already up to date.
+// here, with the next version number and a short name. A version is reserved
+// against the integrated tree, not against this module alone: the prevention
+// service records into the same ledger and owns versions 9 and 11. The runner
+// applies whatever is still pending in schema_migrations and does nothing on a
+// database that is already up to date.
 func All() []Migration {
 	return []Migration{
 		{Version: 1, Name: "initial", SQL: initial},
@@ -67,7 +69,7 @@ func All() []Migration {
 		{Version: 7, Name: "synthetic_evaluation", SQL: syntheticEvaluation},
 		{Version: 8, Name: "firewatch_rule_v2", SQL: firewatchRuleV2},
 		{Version: 10, Name: "models_activation_grant", SQL: modelsActivationGrant},
-		{Version: 11, Name: "ml_fixture_v1", SQL: mlFixtureV1},
 		{Version: 12, Name: "readings", SQL: readings},
+		{Version: 13, Name: "ml_fixture_v1", SQL: mlFixtureV1},
 	}
 }

@@ -1,4 +1,12 @@
--- 011: register the fixture-backed model version the inference service executes.
+-- 013: register the fixture-backed model version the inference service executes.
+--
+-- Version 13, not 11. The schema_migrations ledger is shared with the prevention
+-- service, whose shipped 011_preventive_evidence.sql already records version 11
+-- on main, so a second migration claiming 11 would be skipped in silence by
+-- whichever migrator runs second. This file was registered as 11 on this branch;
+-- a database that recorded that number re-runs the guarded insert below under 13
+-- as a no-op and then records 13, so no environment is left without the row.
+-- Version 12 is 012_readings.sql, so 13 is the next free version.
 --
 -- 008 registered the second rule version. This migration registers the model
 -- path's fixture, so a local stack can exercise the whole publication route -

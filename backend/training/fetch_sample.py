@@ -131,10 +131,11 @@ def verify(
 
 def _urlopen(url: str, timeout: int):
     """Open the URL. Kept as one function so the tests can replace it."""
-    request = urllib.request.Request(  # noqa: S310 - https constant, no user input
-        url, headers={"User-Agent": USER_AGENT}
-    )
-    return urllib.request.urlopen(request, timeout=timeout)  # noqa: S310
+    # urllib raises the S310 audit hint here; that rule is not part of the enabled
+    # set, so this is a note rather than a suppression: url is the frozen https
+    # SOURCE_URL (or the opener seam the tests replace), never network input.
+    request = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
+    return urllib.request.urlopen(request, timeout=timeout)
 
 
 def download(destination: Path, *, url: str = SOURCE_URL, opener=_urlopen) -> Fetched:

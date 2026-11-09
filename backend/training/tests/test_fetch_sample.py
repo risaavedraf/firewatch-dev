@@ -17,17 +17,22 @@ import fetch_sample
 BODY = b"Region,Provincia,Comuna,Inicio\nMaule,Talca,Talca,07/09/2018 09:38\n"
 DIGEST = hashlib.sha256(BODY).hexdigest()
 
+# Every opener below takes ``(url, timeout)`` positionally, the same shape as
+# ``urllib.request.urlopen``, because ``fetch_sample.download`` calls whichever
+# opener it was given with no special case for a stand-in. The fakes read
+# neither argument on purpose; the names keep the contract they mirror visible.
+
 
 def opener_returning(body: bytes = BODY):
     """A stand-in for urllib that answers with a fixed body."""
 
-    def opener(url, timeout):  # noqa: ARG001
+    def opener(url, timeout):
         return io.BytesIO(body)
 
     return opener
 
 
-def opener_refusing(url, timeout):  # noqa: ARG001
+def opener_refusing(url, timeout):
     raise urllib.error.URLError("no route to host")
 
 
@@ -74,7 +79,7 @@ def test_an_existing_verified_copy_is_reused_without_downloading(tmp_path, monke
     destination.write_bytes(BODY)
     calls: list[str] = []
 
-    def opener(url, timeout):  # noqa: ARG001
+    def opener(url, timeout):
         calls.append(url)
         return io.BytesIO(b"should not be downloaded")
 
