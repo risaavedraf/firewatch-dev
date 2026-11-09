@@ -89,10 +89,12 @@ groups:
     rules:
       - alert: FireWatchTargetDown
         # Every application target Prometheus scrapes is covered here, including
-        # prevention: it publishes its own /metrics on its contract port, so a
-        # prevention that stops answering is a target that goes down, not a
-        # target that was never watched.
-        expr: up{job=~"jobs|risk|gateway|prevention"} == 0
+        # prevention and inference: each publishes its own /metrics, so a service
+        # that stops answering is a target that goes down, not a target that was
+        # never watched. inference matters most of the four: `risk` fails closed
+        # when it cannot classify, so its absence would otherwise degrade the
+        # product with no signal pointing at the cause.
+        expr: up{job=~"jobs|risk|gateway|prevention|inference"} == 0
         for: 2m
         labels:
           severity: critical

@@ -1,7 +1,7 @@
 # FireWatch — entrega de producción con modelo sobre AWS
 
 Feature: ejecutar el plan de implementación del modelo con inferencia en Go y etiquetas reales de CONAF, en dos frentes paralelos (modelo y despliegue). Depende de dos accesos externos; todo lo demás ya es ejecutable.
-Estado: en curso · abierto 2026-11-06 · documento fuente: [`Referencias/FireWatch-Plan-implementacion-modelo-AWS.md`](../../Referencias/FireWatch-Plan-implementacion-modelo-AWS.md)
+Estado: en curso · abierto 2026-11-06 · documento fuente: [`Referencias/FireWatch-Plan-implementacion-modelo-AWS.md`](../../../Referencias/FireWatch-Plan-implementacion-modelo-AWS.md)
 
 ## Specs
 
@@ -137,3 +137,19 @@ Tres garantías por construcción, no por esperanza: la etiqueta es el avance di
 **Estado de la rama.** 13 commits sobre `f3f1d02`, unas 25.000 líneas autoradas. Python en 306 pruebas verdes; los paquetes Go de `risk` (12) e `inference` (5) en verde.
 
 **Sigue sin verificarse.** `ruff` no está instalado en este host; las 17 pruebas de Go que necesitan Postgres; `-race` y `govulncheck`, que corren en CI; y el Caddyfile, que nunca se ejecutó por falta de daemon.
+
+**L13 — cierre de rama: scrape de `inference`, enlace y deudas de verificación.** Este slice no agrega funcionalidad: paga lo que L11/L12 dejaron abierto y corrige un enlace que apuntaba a un archivo inexistente.
+
+**Un hallazgo que sí era defecto.** `inference` publica `/metrics` desde `113b755` y nadie lo scrapeaba: `prometheus.yml` tenía cinco jobs y `FireWatchTargetDown` enumeraba `jobs|risk|gateway|prevention`. El servicio del que `risk` depende para clasificar era el único que podía caerse sin alerta, y justo cuando el diseño de `risk` es fallar cerrado: su ausencia degrada el producto sin señalar la causa. Se agrega el job `inference` con target `inference:8080` —el mismo puerto por el que `risk` lo llama— y la cláusula correspondiente en la alerta, con la razón escrita en ambos archivos para que nadie la borre por parecer redundante.
+
+**Enlace roto.** `aws-ml-delivery.md:4` apuntaba a `../../Referencias/`, que desde `odd/tasks/plan-produccion/` resuelve a `odd/Referencias/` y no existe. Corregido a `../../../`. El chequeo de enlaces reportaba `BROKEN: 0` con el defecto presente, así que esa clase de enlace no está cubierta por él.
+
+**Corrección a L12.** `ruff` **sí** está instalado en este host (0.15.11); la afirmación de L12 era falsa. La primera corrida real falló: dos `E731` en `backend/training/tests/test_train_delivered.py:303-304`, dos `lambda` asignadas a variable que convivían con los `def` equivalentes. Corregidas a `def`; `python -m ruff check .` da «All checks passed!». La deuda real no era «no se pudo correr» sino «falla», y `training.yml:41` la habría marcado en rojo en la primera corrida de CI.
+
+**Verificaciones nuevas en verde.** `pytest -q` → 306 pasan en 14,49 s, offline y contra fixture. `govulncheck` en `risk` e `inference` con la versión que fija CI (`v1.9.0`, `_go-service.yml:36`) y también con `@latest` → «No vulnerabilities found» en ambos casos.
+
+**Sigue sin verificarse, ahora con razón medida.** `go test -race` no corre en este host: `CGO_ENABLED=0` y no hay compilador C, así que falla con «-race requires cgo»; lo ejecuta el runner Linux de CI. Las 17 pruebas de Go que necesitan Postgres siguen sin correr: el daemon de Docker está apagado y hay un PostgreSQL escuchando en :5432 cuya credencial no está disponible para este proceso. El Caddyfile sigue sin ejecutarse: no hay binario `caddy` ni daemon.
+
+**Deudas de L8 saldadas en el camino.** El README de `services/inference` ya no dice «Not wired yet», e `INFERENCE_URL`/`INFERENCE_TIMEOUT` están documentadas en `backend/docs/model-activation.md`; el servicio además ya figura en `backend/docker-compose.yml`. Lo que sigue fuera es su lugar en `docker-compose.prod.yml:21`.
+
+**Repositorio.** `.gitignore` excluye `data/*.csv` —los tres archivos entregados, identificados por sha256 en `backend/training/tests/fixtures/delivered/PROVENANCE.md`— y `.pi-scratch/`, que solo contiene las páginas renderizadas del PDF. El plan fuente y su transcripción entran a `Referencias/`: el documento de ODD los cita, y dejarlos sin versionar mantenía el enlace apuntando a un archivo que ningún clon tendría.

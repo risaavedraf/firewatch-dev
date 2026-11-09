@@ -300,8 +300,11 @@ def test_the_forbidden_column_is_worth_exactly_the_label(rows, counts):
         extra = np.asarray([leak(row) for row in rows_side], dtype=np.float64).reshape(-1, 1)
         return np.hstack([matrix, extra])
 
-    cumulative = lambda row: with_counts[(row.region, row.date.isoformat())]
-    difference = lambda row: float(row.fires_today or 0)
+    def cumulative(row):
+        return with_counts[(row.region, row.date.isoformat())]
+
+    def difference(row):
+        return float(row.fires_today or 0)
 
     def pr_auc(leak=None):
         if leak is None:
