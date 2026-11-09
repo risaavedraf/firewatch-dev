@@ -193,7 +193,7 @@ is not exposable from the public edge.
 transport failure, 5xx, refused sample or unreadable body fails that unit closed:
 nothing is persisted and no rule classifier is consulted, because falling back
 silently would break the traceability the published batch guarantees. The
-variables are documented in [`../docs/model-activation.md`](../docs/model-activation.md).
+variables are documented in [`../../docs/model-activation.md`](../../docs/model-activation.md).
 
 The production Compose stack and the Kubernetes manifests do not know this service
 yet; that belongs to the deployment slice, together with the deploy workflow.

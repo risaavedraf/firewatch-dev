@@ -18,7 +18,7 @@ The exception is `train_delivered.py`, and it is a small, deliberate one: it tra
 models on the 90-day regional dashboard export the owner delivered, to **measure what that
 data can and cannot support** and to prove the artifact exporter against the Go reader.
 Its most likely honest outcome is that no model beats climatology, and that outcome is
-the deliverable -- see [A rehearsal on the delivered data](#a-rehearsal-on-the-delivered-data-traindeliveredpy).
+the deliverable -- see [A rehearsal on the delivered data](#a-rehearsal-on-the-delivered-data-train_deliveredpy).
 Nothing it writes may ever be registered in `models` or activated.
 
 ## Commands
