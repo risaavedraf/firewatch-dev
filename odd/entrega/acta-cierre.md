@@ -90,3 +90,17 @@ Lo que esta corrección establece, y que las secciones anteriores de esta acta n
 | F4 | Modelo de datos de la aplicación | Parcial: motor de datos pendiente (D1), sin esquema de dominio documentado |
 
 La consecuencia operativa es una sola: **la entrega de E1 no se llama `v1.0-produccion`**. El inventario de lo que falta para llegar a esa versión, con los IDs de ODD que hay que cerrar, es trabajo de la fase siguiente y no se resuelve en esta acta.
+
+## 6. Alcance de la versión 1.0
+
+Decisión del responsable del proyecto, textual:
+
+> «B, se cierra sin modelo real, no importa que no funcione bien pero dejamos el frente abierto para que más adelante consigamos los datos y armemos un modelo con los datos que si nos sirven»
+
+Consecuencias:
+
+1. **La versión 1.0 se cierra sin modelo real.** Un modelo que no funciona bien no es requisito: el que existe es un ensayo y así queda declarado.
+2. **El frente del modelo queda abierto**, no abandonado. Lo que lo desbloquea está medido, no supuesto: meteorología diaria en días **sin** incendio (ERA5-Land o la red DMC) unida por (comuna, fecha), y acceso al registro de eventos de CONAF (DOI `10.71578/UXAUN5`, hoy 403 anónimo).
+3. **El cómputo de v1.0 se hace sobre lo demás**: diseño web terminado, usuarios y asignación de trabajos, modelo de datos de la aplicación, los doce frentes abiertos del plan de producción y las unidades de hardening pendientes.
+
+El plan de v1.0 con sus tareas vive en [`../tasks/v1-produccion.md`](../tasks/v1-produccion.md).
