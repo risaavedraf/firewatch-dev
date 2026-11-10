@@ -504,7 +504,6 @@ func TestServiceUsesOnlyItsOwnResourceNames(t *testing.T) {
 	}
 }
 
-
 func TestPublishesOnItsOwnExchange(t *testing.T) {
 	if publishExchange != v1.RiskExchange {
 		t.Fatalf("publishExchange=%q want %q", publishExchange, v1.RiskExchange)
