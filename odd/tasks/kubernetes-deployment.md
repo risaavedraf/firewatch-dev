@@ -22,13 +22,13 @@ Requisito externo nuevo: la entrega se monta en Kubernetes. Sustituye el sustrat
 | T4 | RabbitMQ como StatefulSet con persistencia y gestión acotada | S3 | inline | Hecho en `3c7b0b0` |
 | T5 | Jobs de migración en el orden correcto (risk → prevention → jobs) | S3 | inline | Hecho en `dd9a542` — un Job con initContainers secuenciales; contrato ejecutable en `backend/deploy/k8s/tests/render-contract.sh` |
 | T6 | Job que aprovisiona broker e identidades con el script existente | S3 | inline | Hecho en `dd9a542` — el script del repositorio montado desde ConfigMap; la API de administración pasó a TLS 15671 |
-| **T7** | **Deployments de la aplicación contra los secretos reales, sin `replace-before-deploy`** — bloque abierto, partido en nueve unidades T7.1–T7.9; la dependencia de cada una va en su propia celda | S1 | inline | En curso: las nueve unidades están pendientes |
-| T7.1 | **T7.1 — Gateway: TLS de entrada, upstreams HTTPS y CA de confianza.** Superficie disjunta: en paralelo con T7.2–T7.5 | S1 | inline | Pendiente |
-| T7.2 | **T7.2 — jobs: TLS de entrada, AMQP con CA propia y JWKS con CA.** Superficie disjunta: en paralelo con T7.1 y T7.3–T7.5 | S1 | inline | Pendiente |
-| T7.3 | **T7.3 — risk: TLS de entrada, AMQP con CA propia, JWKS y cliente de inferencia con CA.** Superficie disjunta: en paralelo con T7.1, T7.2, T7.4 y T7.5 | S1 | inline | Pendiente |
-| T7.4 | **T7.4 — prevention: TLS de entrada en 8084, JWKS y cliente administrativo del directorio con CA.** Superficie disjunta: en paralelo con T7.1–T7.3 y T7.5 | S1 | inline | Pendiente |
-| T7.5 | **T7.5 — inference: TLS de entrada.** Superficie disjunta: en paralelo con T7.1–T7.4 | S1 | inline | Pendiente |
-| T7.6 | **T7.6 — secretos de runtime y certificados por servicio.** Superficie disjunta: en paralelo con T7.7, T7.8 y con T7.1–T7.5 | S1 | inline | Pendiente |
+| **T7** | **Deployments de la aplicación contra los secretos reales, sin `replace-before-deploy`** — bloque abierto, partido en nueve unidades T7.1–T7.9; la dependencia de cada una va en su propia celda | S1 | inline | En curso: T7.1–T7.6 hechas; quedan T7.7, T7.8 y T7.9 |
+| T7.1 | **T7.1 — Gateway: TLS de entrada, upstreams HTTPS y CA de confianza.** Superficie disjunta: en paralelo con T7.2–T7.5 | S1 | inline | Hecho en `069b418` |
+| T7.2 | **T7.2 — jobs: TLS de entrada, AMQP con CA propia y JWKS con CA.** Superficie disjunta: en paralelo con T7.1 y T7.3–T7.5 | S1 | inline | Hecho en `e8e085f` |
+| T7.3 | **T7.3 — risk: TLS de entrada, AMQP con CA propia, JWKS y cliente de inferencia con CA.** Superficie disjunta: en paralelo con T7.1, T7.2, T7.4 y T7.5 | S1 | inline | Hecho en `b2af3b2` |
+| T7.4 | **T7.4 — prevention: TLS de entrada en 8084, JWKS y cliente administrativo del directorio con CA.** Superficie disjunta: en paralelo con T7.1–T7.3 y T7.5 | S1 | inline | Hecho en `52e943a` |
+| T7.5 | **T7.5 — inference: TLS de entrada.** Superficie disjunta: en paralelo con T7.1–T7.4 | S1 | inline | Hecho en `74145c6` |
+| T7.6 | **T7.6 — secretos de runtime y certificados por servicio.** Superficie disjunta: en paralelo con T7.7, T7.8 y con T7.1–T7.5 | S1 | inline | Hecho en `9f225e2` |
 | T7.7 | **T7.7 — manifiestos de la aplicación.** Superficie disjunta: en paralelo con T7.6, T7.8 y con T7.1–T7.5 | S1 | inline | Pendiente |
 | T7.8 | **T7.8 — Keycloak e inferencia en el clúster.** Superficie disjunta: en paralelo con T7.6, T7.7 y con T7.1–T7.5 | S1 | inline | Pendiente |
 | T7.9 | **T7.9 — contrato de render ampliado.** Va al final: comprueba el resultado de todas las unidades, así que no se ejecuta en paralelo con ninguna | S1 | inline | Pendiente |
@@ -133,3 +133,17 @@ La B se apila sobre la A: un PR para la A y otro para la B, y la B no se abre ha
 **L12 (2026-11-10) — corrección al contrato de L10: `AMQP_URL` en los secretos de runtime.**
 
 L10 fijó `DATABASE_URL` como única clave de `jobs-runtime`, `risk-runtime` y `prevention-runtime`, y omitió `AMQP_URL`. La tabla de secretos de `backend/deploy/k8s/README.md` sí la declaraba para `jobs` y `risk`, y ambos procesos la leen al arrancar (`backend/services/{jobs,risk}/cmd/server/transport.go`): el arranque se detiene sin ella (`backend/services/jobs/cmd/server/main.go:121`, `backend/services/risk/cmd/server/main.go:119`), así que los pods habrían arrancado sin broker y sin servir. La clave entra ahora en esos dos secretos y solo en ellos —`prevention` no declara cola ni cliente de broker (`backend/services/prevention/cmd/server/main.go:194`)— como `amqps://` sobre 5671, con las credenciales que `bootstrap-secrets.sh` ya guarda en `broker-credentials` (`RABBITMQ_JOBS_PASSWORD` y `RABBITMQ_RISK_PASSWORD`, releídas del Secret para que la URL nombre la contraseña que el broker tiene y no la que generó esa ejecución): usuarios `firewatch-jobs` y `firewatch-risk` y vhost `firewatch`, los que provisiona `deploy/local/rabbitmq-topology.sh`; host `rabbitmq` y 5671, el Service y su único listener AMQP en `base/rabbitmq.yaml` (`RABBITMQ_DEFAULT_VHOST: firewatch`, `listeners.ssl.default = 5671`). La URL no lleva parámetros de verificación: la CA entra por `TLS_CA_FILE` en el pod, y `requireSecureBrokerURL` rechaza `verify=verify_none`. Lo detectó la unidad T7.6 al ejecutar el script, no una revisión.
+
+**L13 (2026-11-10) — T7.3 y T7.4 cerradas en `b2af3b2` y `52e943a`.**
+
+Una sesión anterior dejó las dos unidades escritas y sin commitear. Esta las cierra en dos commits, uno por servicio: `b2af3b2` para risk y `52e943a` para prevention, sobre la superficie que L10 asignó a cada una y sin tocar la de ninguna otra unidad.
+
+**Verificación, medida.** `go test -p 1 ./...` en risk: 12 paquetes `ok`, 0 `FAIL`; en prevention: 8 paquetes `ok`, 0 `FAIL`. Ambas suites se repitieron con `-count=1` para que ninguna respuesta viniera de la caché, con el mismo resultado. `gofmt -l` limpio en los 16 archivos tocados. Los handshakes de los tests son reales —`tls.Server` en loopback y `httptest.StartTLS`—, no stubs: lo que se comprueba es el protocolo, no una función que dice haber hecho TLS.
+
+**Rebanada de entrega.** «Rebanada C — cargas de trabajo con TLS, servicios risk y prevention»: `e8e085f..52e943a`, dos commits, uno por servicio. La rama acumula ya 13 commits y unas 4.300 líneas autoradas desde `main`, muy por encima de la rebanada de ~400 que fija el protocolo de revisión, así que la siguiente unidad del frente no empieza sin aplicar la estrategia de entrega que ya decidió L11: PR encadenado o revisión por rebanada.
+
+**Tres hallazgos menores de la revisión independiente, registrados y sin corregir.** Ninguno bloquea esta entrega y ninguno abre una vía insegura en el despliegue; quedan como tarea de un pase posterior:
+
+1. `backend/services/prevention/internal/directory/directory.go` — si la segunda lectura del bundle falla, `New` ignora el error y deja las raíces del sistema, aunque su propio comentario dice lo contrario; y `TestAnUnloadableTLSCAFileDoesNotBecomeATrustAnchor` comprueba `Transport == nil`, que es justamente el caso contrario al que el comentario promete. En el arranque real no hay vía insegura, porque `run()` aborta antes de construir el cliente.
+2. prevention no tiene ningún handshake positivo, ni para el listener ni para JWKS: el listener solo se prueba con un certificado inexistente, y el test de JWKS levanta un servidor TLS al que nunca le hace una petición.
+3. Los call sites de `run()` no están cubiertos en ninguno de los dos servicios —ni en `jobs` desde `e8e085f`—: quitar el pool camino de un cliente deja la suite en verde. Los helpers y los handshakes sí están cubiertos.
