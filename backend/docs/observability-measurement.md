@@ -24,6 +24,7 @@ runs.
 | Identity provider | `quay.io/keycloak/keycloak:26.5.7` |
 | Host | one developer machine, single Docker engine, no orchestrator |
 | Date (UTC) | 2026-11-09 |
+| Build basis | Images built about three weeks before the measurement. They predate migrations `012_readings.sql` and `013_ml_fixture_v1.sql`, so that stack's ledger stopped at 11 (see `schema-inventory.md`); every metric family measured here was already present in those builds, and a stack rebuilt from `HEAD` exposes the same families. |
 
 Scrape interval is `15s` (`deploy/local/prometheus.yml`). Every query below was
 evaluated over a `5m` window, which is the window the alert rules use.
