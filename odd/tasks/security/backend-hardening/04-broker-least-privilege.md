@@ -97,12 +97,20 @@ The outbox makes the exchange switch safe: unpublished events stay in the produc
 
 ## Safe rollback
 
-Queue names, routing keys and queue arguments never changed, so no message needs migrating and no queue is recreated.
+Queue names, routing keys and queue arguments never changed, so no message needs migrating and no queue is recreated. What has to come back is the legacy `firewatch.events` exchange and the **three** bindings that leave it: `risk.jobs.v1` ← `jobs.requested.v1`, `jobs.results.v1` ← `risk.batch.published.v1`, and `jobs.results.v1` ← `risk.job.failed.v1`. The other two bindings hang off `firewatch.dead` and were never removed.
+
+**Only a full revert works: images and compose file together.**
 
 1. `docker compose stop jobs risk`.
-2. Redeploy the previous images and compose file (the one with the shared identity).
-3. The previous services declare the topology themselves under the admin identity, recreating `firewatch.events` and its four bindings; the two service identities remain but nothing uses them, which is harmless.
-4. Unpublished outbox rows publish to `firewatch.events` on restart, in order.
+2. Restore `backend/docker-compose.yml` from the commit before this unit, and check out that commit — or pin its image digests — before rebuilding. `up --build` builds whatever is in the working tree, so building from the current tree produces the new code under the old file, which is the broken variant below. The old file has no `broker-topology` service, and that is correct: the old services declare the topology themselves.
+3. `docker compose up -d jobs risk`. Both connect as the shared `firewatch` identity, whose `.*` permissions the provisioner never narrowed, and declare `firewatch.events`, both queues (idempotent, same arguments) and the three bindings that were deleted with the exchange.
+4. Unpublished outbox rows publish to `firewatch.events` on restart, in order, and route through the bindings step 3 recreated.
+
+**The variant that does not work: reverting the images only.** With the current compose file still in place, `AMQP_URL` names `firewatch-jobs` and `firewatch-risk`. Those identities hold `write` on their own publish exchange only and `configure` on their own resources, while the old code declares `firewatch.events` and its peer's queue at session start. The broker answers `ACCESS_REFUSED`, the session loop treats that as a connection failure and retries with backoff forever, and nothing in the log says permissions are the reason: the service simply never becomes ready. Reverting the images alone is not a rollback, it is a deployment that cannot start.
+
+**Rolling forward again is the rollout above, not the reverse of this one.** The provisioner deletes `firewatch.events` on every run, so a later `docker compose up` with the new file removes the exchange a rolled-back stack is publishing through. The old services declare only at session start, so their publishes turn unroutable (a `mandatory` publication against the missing exchange) until they are restarted against the new topology. Run the rollout steps instead of leaving both topologies interleaved.
+
+The two service identities survive a rollback, unused and harmless; the provisioner re-sets their passwords on its next run, so nothing about them needs preserving.
 
 ## Acceptance checklist
 

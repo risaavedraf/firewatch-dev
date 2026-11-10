@@ -20,7 +20,7 @@ Before this unit, the OIDC endpoints were the only transport that anything refus
 | --- | --- | --- | --- |
 | Browser → edge | Caddy | public CA via ACME | the deployment, renewed automatically |
 | Edge → gateway | Caddy | internal | the deployment |
-| Gateway → services | each service | internal CA | the deployment (Kubernetes: issued at bootstrap) |
+| Gateway → services | each service | internal CA | the deployment; **no certificate exists and the bootstrap does not issue one** — the services listen on plain HTTP and would need their own TLS listener first |
 | Services → PostgreSQL | PostgreSQL | internal CA | the deployment |
 | `jobs`/`risk` → RabbitMQ (AMQP) | RabbitMQ | internal CA | the deployment |
 | Services → IdP (OIDC, JWKS, Admin API) | Keycloak | public CA via the ingress | the identity deployment |
@@ -42,7 +42,7 @@ Tests cover, per guard: production with the insecure form returns the exact mess
 ## What is not done
 
 - **No certificate exists yet** for PostgreSQL, RabbitMQ or the internal hops. The production compose file is therefore fail-closed: it will refuse to start until its URLs point at TLS endpoints with a root certificate. That is the intended behaviour of a guard and not a working deployment.
-- The Kubernetes manifests carry the TLS wiring (server certificates from an internal CA, `amqps` only, plaintext AMQP listener disabled), but **they have never been applied**; see `odd/tasks/kubernetes-deployment.md`.
+- The Kubernetes manifests carry the TLS wiring for the **data plane** only (PostgreSQL and RabbitMQ server certificates from an internal CA, `amqps` only, plaintext AMQP listener disabled). They carry nothing for the gateway's upstreams: `deploy/k8s/base/config.yaml` still points at `http://`, and no service terminates TLS, so that base cannot start the gateway as written. **They have never been applied**; see `odd/tasks/kubernetes-deployment.md`.
 - The verification cases that need a live environment remain unrun: a secure connection succeeding, an untrusted certificate rejected, an expired certificate rejected, and a hostname mismatch rejected. None can be claimed from a manifest.
 - mTLS was considered and not chosen: inside a single-cluster network the client would have to be identified by a certificate the same cluster issued, and service identity is already carried by the bearer token and, for the broker, by the AMQP user whose permissions BH-04 measures. Revisit it if services ever span networks the project does not control.
 
