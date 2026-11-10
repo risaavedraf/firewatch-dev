@@ -6,6 +6,8 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -103,6 +105,61 @@ func TestMetricsHandlerRendersTheServiceSignals(t *testing.T) {
 		if !strings.Contains(body, want) {
 			t.Errorf("body omits %q:\n%s", want, body)
 		}
+	}
+}
+
+// TestRunRefusesMissingListenerTLSOutsideDevelopment pins the process-level
+// wiring of T7.4: outside development a start with no key pair stops before the
+// listener binds, and the message names the variable, so the refusal is not
+// something an operator has to infer from a plaintext listener.
+func TestRunRefusesMissingListenerTLSOutsideDevelopment(t *testing.T) {
+	t.Setenv("APP_ENV", "production")
+	t.Setenv("DATABASE_URL", "postgres://user:pass@127.0.0.1:1/x?sslmode=verify-full")
+	t.Setenv(tlsCertFileEnv, "")
+	t.Setenv(tlsKeyFileEnv, "")
+	err := run()
+	if err == nil || !strings.Contains(err.Error(), tlsCertFileEnv) {
+		t.Fatalf("run() = %v, want a refusal naming %s", err, tlsCertFileEnv)
+	}
+}
+
+// TestRunMigrateDoesNotRequireListenerTLS keeps the migration job of T5 working:
+// it holds only DATABASE_URL, never binds a port and never reads a certificate, so
+// it must not be asked for the key pair even outside development. The database is
+// a closed loopback port, so the run fails on the connection instead of reaching a
+// real server, and the failure has to be the migration one: an error about the key
+// pair would mean the transport decision moved in front of the migrate branch.
+func TestRunMigrateDoesNotRequireListenerTLS(t *testing.T) {
+	args := os.Args
+	t.Cleanup(func() { os.Args = args })
+	os.Args = []string{"server", "migrate"}
+	t.Setenv("APP_ENV", "staging")
+	t.Setenv("DATABASE_URL", "postgres://user:pass@127.0.0.1:1/x?sslmode=verify-full")
+	t.Setenv(tlsCertFileEnv, "")
+	t.Setenv(tlsKeyFileEnv, "")
+	err := run()
+	if err == nil || !strings.Contains(err.Error(), "migration") || strings.Contains(err.Error(), tlsCertFileEnv) {
+		t.Fatalf("run(migrate) = %v, want the migration connection failure and no key-pair requirement", err)
+	}
+}
+
+// TestRunRefusesAnUnusableTLSCAFile pins the other startup decision of T7.4: a
+// TLS_CA_FILE that holds no certificate stops the process, naming the variable,
+// before the OIDC endpoints are even read. Nothing is bound and no client is
+// built with trust the operator did not configure.
+func TestRunRefusesAnUnusableTLSCAFile(t *testing.T) {
+	blank := filepath.Join(t.TempDir(), "blank.crt")
+	if err := os.WriteFile(blank, []byte("not a certificate"), 0o600); err != nil {
+		t.Fatalf("write the unusable bundle: %v", err)
+	}
+	t.Setenv("APP_ENV", "production")
+	t.Setenv("DATABASE_URL", "postgres://user:pass@127.0.0.1:1/x?sslmode=verify-full")
+	t.Setenv(tlsCertFileEnv, listenerCertPath)
+	t.Setenv(tlsKeyFileEnv, listenerKeyPath)
+	t.Setenv(tlsCAFileEnv, blank)
+	err := run()
+	if err == nil || !strings.Contains(err.Error(), tlsCAFileEnv) {
+		t.Fatalf("run() = %v, want a refusal naming %s", err, tlsCAFileEnv)
 	}
 }
 

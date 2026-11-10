@@ -16,6 +16,8 @@ package directory
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -82,6 +84,12 @@ const (
 	maxTokenBody = 8192
 	maxUsersBody = 1 << 20
 	maxUserBody  = 64 << 10
+
+	// tlsCAFileEnv names the internal CA of the deployment
+	// (odd/tasks/kubernetes-deployment.md, L10). It is the same variable every
+	// service of the deployment reads, and the only trust anchor this client uses
+	// when it is set.
+	tlsCAFileEnv = "TLS_CA_FILE"
 )
 
 // Config is the directory configuration, one field per environment variable:
@@ -128,6 +136,24 @@ type Client struct {
 	expiresAt time.Time
 }
 
+// RootCAsFromFile loads the PEM bundle at path into a new pool. An unreadable or
+// certificate-free bundle is refused instead of silently becoming the system
+// roots: the deployment only ever talks to services this CA vouches for, so a
+// missing mount has to be visible at startup and not as a handshake failure later.
+// The service's startup refuses on the same error, which is why this is exported:
+// the OIDC key-set client of cmd/server verifies with the same bundle.
+func RootCAsFromFile(path string) (*x509.CertPool, error) {
+	bundle, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	pool := x509.NewCertPool()
+	if !pool.AppendCertsFromPEM(bundle) {
+		return nil, fmt.Errorf("%s holds no PEM certificate", path)
+	}
+	return pool, nil
+}
+
 // New builds a client. It never fails: a configuration that cannot address the
 // directory is reported by Users and User as ErrNotConfigured, so a deployment
 // without the credential starts and answers 503 instead of refusing to boot.
@@ -145,12 +171,24 @@ func New(config Config) *Client {
 	if config.Environment == "" {
 		config.Environment = os.Getenv("APP_ENV")
 	}
-	return &Client{
+	client := &Client{
 		config:            config,
 		httpClient:        &http.Client{Timeout: requestTimeout},
 		now:               time.Now,
 		allowInsecureHTTP: config.Environment == "development",
 	}
+	// With TLS_CA_FILE the admin API is reached through the internal CA and no
+	// other trust anchor; no variable keeps the bare client with the system roots
+	// this client has always used. A bundle that cannot be loaded stays a startup
+	// refusal - run() reads the same path before this client is built - and a client
+	// built anyway keeps the bare one, so the handshake fails closed rather than
+	// trusting something nobody configured.
+	if path := os.Getenv(tlsCAFileEnv); path != "" {
+		if pool, err := RootCAsFromFile(path); err == nil {
+			client.httpClient.Transport = &http.Transport{TLSClientConfig: &tls.Config{RootCAs: pool}}
+		}
+	}
+	return client
 }
 
 // Users reads the realm's users. It returns ErrNotConfigured when the admin URL
