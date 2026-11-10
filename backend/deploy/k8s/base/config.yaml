@@ -4,22 +4,31 @@ metadata:
   name: firewatch-config
 data:
   APP_ENV: staging
-  OIDC_ISSUER: https://identity.example.invalid/realms/firewatch
-  OIDC_JWKS_URL: https://identity.example.invalid/realms/firewatch/protocol/openid-connect/certs
+  # The identity provider's in-cluster address: Service `identity`, port 8443,
+  # the number and the name the crossing contract fixes and the name
+  # `keycloak-tls` carries as a SAN (base/keycloak.yaml). These two used to name
+  # `identity.example.invalid`, a placeholder no cluster resolves, so every
+  # key-set fetch failed in DNS before TLS was even attempted.
+  OIDC_ISSUER: https://identity:8443/realms/firewatch
+  OIDC_JWKS_URL: https://identity:8443/realms/firewatch/protocol/openid-connect/certs
   OIDC_AUDIENCE: firewatch-api
   # The three upstream hops are https, and the gateway verifies them with the
   # internal CA it mounts at /etc/tls/ca.crt (workloads.yaml): with APP_ENV
   # outside development, `requireSecureUpstreams` refuses a plaintext upstream
   # rather than proxying it, so a scheme that drifts back to http here is a
   # gateway that will not start rather than one that silently downgrades.
-  # INFERENCE_URL is deliberately absent: risk reads it at startup and refuses
-  # to run when the address it names has no answer (the inference Service
-  # arrives with T7.8), so naming it before that Service exists would crash
-  # every risk replica. The classifier default needs no inference address.
   JOBS_URL: https://jobs:8080
   RISK_URL: https://risk:8080
   # prevention listens on its own port (8084), not 8080.
   PREVENTION_URL: https://prevention:8084
+  # risk's only model address, and the reason this key arrives with
+  # inference.yaml instead of before it: `classifierRegistry`
+  # (services/risk/cmd/server/main.go) registers the model classifier whenever
+  # this is set and reads `GET /v1/model` at startup, so a name no Service
+  # answers for stops every risk replica at boot rather than at the first
+  # prediction. inference publishes no port outside the cluster and risk is its
+  # only caller. No other service reads this key.
+  INFERENCE_URL: https://inference:8080
 ---
 apiVersion: v1
 kind: ServiceAccount
