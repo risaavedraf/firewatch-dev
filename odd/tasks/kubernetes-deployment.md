@@ -22,10 +22,33 @@ Requisito externo nuevo: la entrega se monta en Kubernetes. Sustituye el sustrat
 | T4 | RabbitMQ como StatefulSet con persistencia y gestión acotada | S3 | inline | Hecho en `3c7b0b0` |
 | T5 | Jobs de migración en el orden correcto (risk → prevention → jobs) | S3 | inline | Hecho en `dd9a542` — un Job con initContainers secuenciales; contrato ejecutable en `backend/deploy/k8s/tests/render-contract.sh` |
 | T6 | Job que aprovisiona broker e identidades con el script existente | S3 | inline | Hecho en `dd9a542` — el script del repositorio montado desde ConfigMap; la API de administración pasó a TLS 15671 |
-| T7 | Deployments de la aplicación contra los secretos reales, sin `replace-before-deploy` | S1 | inline | Pendiente: hoy el gateway no arrancaría (ver L6) |
+| **T7** | **Deployments de la aplicación contra los secretos reales, sin `replace-before-deploy`** — bloque abierto, partido en nueve unidades T7.1–T7.9; la dependencia de cada una va en su propia celda | S1 | inline | En curso: las nueve unidades están pendientes |
+| T7.1 | **T7.1 — Gateway: TLS de entrada, upstreams HTTPS y CA de confianza.** Superficie disjunta: en paralelo con T7.2–T7.5 | S1 | inline | Pendiente |
+| T7.2 | **T7.2 — jobs: TLS de entrada, AMQP con CA propia y JWKS con CA.** Superficie disjunta: en paralelo con T7.1 y T7.3–T7.5 | S1 | inline | Pendiente |
+| T7.3 | **T7.3 — risk: TLS de entrada, AMQP con CA propia, JWKS y cliente de inferencia con CA.** Superficie disjunta: en paralelo con T7.1, T7.2, T7.4 y T7.5 | S1 | inline | Pendiente |
+| T7.4 | **T7.4 — prevention: TLS de entrada en 8084, JWKS y cliente administrativo del directorio con CA.** Superficie disjunta: en paralelo con T7.1–T7.3 y T7.5 | S1 | inline | Pendiente |
+| T7.5 | **T7.5 — inference: TLS de entrada.** Superficie disjunta: en paralelo con T7.1–T7.4 | S1 | inline | Pendiente |
+| T7.6 | **T7.6 — secretos de runtime y certificados por servicio.** Superficie disjunta: en paralelo con T7.7, T7.8 y con T7.1–T7.5 | S1 | inline | Pendiente |
+| T7.7 | **T7.7 — manifiestos de la aplicación.** Superficie disjunta: en paralelo con T7.6, T7.8 y con T7.1–T7.5 | S1 | inline | Pendiente |
+| T7.8 | **T7.8 — Keycloak e inferencia en el clúster.** Superficie disjunta: en paralelo con T7.6, T7.7 y con T7.1–T7.5 | S1 | inline | Pendiente |
+| T7.9 | **T7.9 — contrato de render ampliado.** Va al final: comprueba el resultado de todas las unidades, así que no se ejecuta en paralelo con ninguna | S1 | inline | Pendiente |
 | T8 | Ingress y TLS, incluidos los listeners internos | S2 | inline | Pendiente |
 | T9 | Validación end-to-end en el clúster, con evidencia | S1 | inline | **Bloqueada**: sin clúster no hay nada que validar |
 | T10 | Camino a producción real documentado y enmienda a D1 | S2, S3 | inline | Pendiente |
+
+**Superficies de edición de T7, una por unidad** (rutas relativas al repositorio):
+
+- `T7.1` — `backend/services/gateway/cmd/server/main.go`, `backend/services/gateway/cmd/server/transport.go`, `backend/services/gateway/internal/handler/gateway.go` y los `_test.go` de esos paquetes.
+- `T7.2` — `backend/services/jobs/cmd/server/`, `backend/services/jobs/internal/messaging/broker.go` y sus tests.
+- `T7.3` — `backend/services/risk/cmd/server/`, `backend/services/risk/internal/messaging/broker.go`, `backend/services/risk/internal/classify/inference.go` y sus tests.
+- `T7.4` — `backend/services/prevention/cmd/server/`, `backend/services/prevention/internal/directory/directory.go` y sus tests.
+- `T7.5` — `backend/services/inference/cmd/server/main.go` y sus tests.
+- `T7.6` — `backend/deploy/k8s/bootstrap-secrets.sh`.
+- `T7.7` — `backend/deploy/k8s/base/workloads.yaml`, `backend/deploy/k8s/base/config.yaml`.
+- `T7.8` — `backend/deploy/k8s/base/keycloak.yaml` (nuevo), `backend/deploy/k8s/base/inference.yaml` (nuevo), `backend/deploy/k8s/base/network.yaml`, `backend/deploy/k8s/base/kustomization.yaml`.
+- `T7.9` — `backend/deploy/k8s/tests/render-contract.sh`.
+
+**Paralelismo.** T7.1–T7.5 tienen superficies disjuntas entre sí. T7.6, T7.7 y T7.8 son disjuntas entre sí y también respecto de T7.1–T7.5. Esas ocho unidades pueden ejecutarse en paralelo. T7.9 no puede: comprueba el resultado de todas y va al final, sobre las ocho anteriores ya presentes.
 
 ## Restricciones que no vienen de este pedido
 
@@ -72,3 +95,26 @@ Requisito externo nuevo: la entrega se monta en Kubernetes. Sustituye el sustrat
 2. **Crítico R4-001 — nombre fijo del Job de migraciones** (`9ae67e1`). El pod template de un Job es inmutable y un Job terminado no se re-ejecuta con `apply`, así que con nombre fijo y TTL de una hora un release dentro de esa hora o saltaba la migración o era rechazado, y la aplicación podía arrancar contra el esquema viejo. `generateName` no sirve: `kubectl apply` y kustomize exigen `metadata.name`. La corrección nombra el Job por la versión de esquema que produce (`migrate-v14`), y el contrato deriva la migración más alta del árbol y falla si el nombre se desincroniza.
 
 **El ciclo quedó abierto.** Con los dos defectos corregidos y commiteados, la captura del plan de corrección se rechazó tres veces con `collectBinding is missing or stale for current STATUS`, incluso con el árbol de `HEAD` idéntico al candidato congelado (`c8a35234`) y el workspace limpio. Es un problema del canal de corrección, no del código: el linaje sigue en `correction_required` y **no hay aprobación de revisión**. Hace falta intervención sobre la autoridad o una revisión nueva del candidato corregido (árbol posterior a `9ae67e1`). El trabajo no se revierte por eso: el bloque está verificado por el contrato de render y por el verificador independiente, y la corrección es la correcta.
+
+**L10 (2026-11-10) — T7 se abre y se parte en unidades.**
+
+**Decisión del responsable, textual:** «t7 completo ahora, en unidades paralelizables si es posible». Se ejecuta el tramo entero y en cortes que no comparten archivos, para que la revisión pueda ir por partes sin releer lo mismo.
+
+**El hallazgo que fija el orden de trabajo.** En el backend no existe hoy ninguna llamada a `ServeTLS`, a `tls.LoadX509KeyPair` ni a `amqp.DialTLS`, mientras las guardas que ya existen rechazan exactamente la configuración de estos manifiestos: `requireTLSOutsideDevelopment` (`backend/services/{jobs,risk,prevention}/cmd/server/transport.go`), `requireSecureBrokerURL` (`backend/services/jobs/cmd/server/transport.go:47`, `backend/services/risk/cmd/server/transport.go:47`), `requireSecureUpstreams` (`backend/services/gateway/cmd/server/transport.go:12`) y las guardas de OIDC en los cuatro `main.go` (gateway, jobs, risk y prevention). Con `APP_ENV=staging`, el `config.yaml` con upstreams `http://` y los DSN con `sslmode=disable`, esos servicios no arrancan. **T7 no añade seguridad: hace que el runtime cumpla las guardas que ya tiene.**
+
+**Contrato de cruce, obligatorio para todas las unidades** —es lo que evita que las unidades diverjan:
+
+- Servidor: `TLS_CERT_FILE` y `TLS_KEY_FILE` con las rutas del certificado y la clave. Si ambos están definidos se sirve TLS con `ListenAndServeTLS`; si ninguno está definido y `APP_ENV=development` se mantiene el texto plano de desarrollo; en cualquier otro caso el arranque falla nombrando la variable que falta.
+- Salientes: `TLS_CA_FILE` con el PEM de la CA interna. Si está definido, alimenta un `x509.CertPool` propio; los clientes internos lo usan en `TLSClientConfig.RootCAs`.
+- AMQP: `amqp.Config` incorpora `TLSClientConfig` con esa CA sobre `amqps://`; el `Dial` de 5 s y el `Heartbeat` se conservan.
+- DSN: el código no cambia. El secreto de runtime aporta `DATABASE_URL` con `sslmode=verify-full&sslrootcert=/etc/tls/ca.crt`.
+- Rutas dentro del pod: `/etc/tls/ca.crt`, `/etc/tls/tls.crt`, `/etc/tls/tls.key`.
+- Secrets: `firewatch-ca` (clave `ca.crt`) ya existe; `bootstrap-secrets.sh` pasa a emitir un certificado por servicio —`gateway-tls`, `jobs-tls`, `risk-tls`, `prevention-tls`, `inference-tls`, `keycloak-tls`— con claves `tls.crt`, `tls.key` y `ca.crt`, y los secretos `jobs-runtime`, `risk-runtime`, `prevention-runtime` con la clave `DATABASE_URL`.
+- Puertos: 8080 en gateway, jobs, risk e inference; 8084 en prevention. Sin cambios. El nombre del puerto en Service y probes pasa de `http` a `https`.
+- Upstreams: `https://jobs:8080`, `https://risk:8080`, `https://prevention:8084`; inferencia `https://inference:8080`.
+- Keycloak: Service `identity` en 8443, issuer y JWKS `https://identity:8443/realms/firewatch`.
+- `APP_ENV` sigue en `staging`.
+
+**Paridad del Compose de producción, verificada.** `backend/docker-compose.prod.yml:35` declara `APP_ENV: production` con `AMQP_URL: amqp://` (`:193`, `:205`) y DSN `sslmode=disable` (`:192`, `:204`), es decir, el Compose de producción tampoco pasaría esas guardas. No se corrige en T7; se registra como pendiente para T10.
+
+**Límite de tamaño por unidad.** Cada unidad debe caber en un candidato de revisión de unas 400 líneas autoradas, porque el relay de revisión corta alrededor de 16 minutos por lente.
