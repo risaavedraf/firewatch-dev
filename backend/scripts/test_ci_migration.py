@@ -19,7 +19,9 @@ These tests pin the contract that closes that window without needing Docker:
   helper, which the entrypoint runs before the real server starts listening;
 * the test-profile services must keep waiting for their completed migrators; and
 * the workflow must keep running the readiness checks and the test-profile gate
-  without ``continue-on-error``.
+  without ``continue-on-error``; and
+* every service whose transport guard refuses plaintext outside development must
+  be told by the local stack that it is in development.
 
 The same file also drives the runtime harness end to end through a fake ``docker``
 executable that is the only ``docker`` on the child's ``PATH`` and records every
@@ -168,6 +170,41 @@ def option_value(tokens: list[str], names: tuple[str, ...]) -> str | None:
     return None
 
 
+TLS_GUARD_ERROR = "is required outside development"
+OIDC_ANCHOR = "x-oidc: &oidc"
+
+
+def anchor_block(compose_text: str, header: str) -> str:
+    """Return the YAML lines under a top-level ``x-`` anchor declaration.
+
+    An anchor's children are indented by two spaces, like a top-level key's, so
+    its block ends at the next line that starts in column zero.
+    """
+    lines = compose_text.splitlines()
+    if header not in lines:
+        raise AssertionError(f"expected docker-compose.yml to declare {header!r}")
+    start = lines.index(header)
+    block: list[str] = []
+    for line in lines[start + 1:]:
+        if line.strip() and not line.startswith("  "):
+            break
+        block.append(line)
+    return "\n".join(block)
+
+
+def services_refusing_plaintext_outside_development() -> list[str]:
+    """Return the services whose ``transport.go`` carries the TLS guard.
+
+    Derived from the sources instead of a hard-coded list, so a service that
+    adopts the guard is covered by this contract the day it is written.
+    """
+    guarded: list[str] = []
+    for transport in sorted((ROOT / "services").glob("*/cmd/server/transport.go")):
+        if TLS_GUARD_ERROR in transport.read_text(encoding="utf-8"):
+            guarded.append(transport.parents[2].name)
+    return guarded
+
+
 class PostgresReadinessProbeTest(unittest.TestCase):
     """The healthcheck must not be answerable by the temporary init server."""
 
@@ -298,6 +335,45 @@ class IntegrationWorkflowGateTest(unittest.TestCase):
             diagnostics,
             teardown,
             "container logs must be captured before the teardown removes the project",
+        )
+
+
+class TlsGuardEnvironmentTest(unittest.TestCase):
+    """The local stack must tell a TLS-guarded service that it is in development.
+
+    Every transport guard refuses plaintext unless ``APP_ENV`` is exactly
+    ``development``. A service that never receives it exits on boot, and
+    ``docker compose up -d`` then reports only ``dependency failed to start:
+    container <name> is unhealthy``: the guard's own explanation reaches the
+    container log and nowhere else. This pins the Compose side of that contract
+    without starting a container.
+    """
+
+    def test_every_service_with_the_tls_guard_receives_the_development_environment(self):
+        compose_text = read(COMPOSE)
+        guarded = services_refusing_plaintext_outside_development()
+        self.assertTrue(
+            guarded,
+            "no transport.go under services/*/cmd/server carries the TLS guard, so this "
+            "contract would pass vacuously",
+        )
+        anchor_declares_it = "APP_ENV: development" in anchor_block(compose_text, OIDC_ANCHOR)
+        declared = set(re.findall(r"^  ([a-z][a-z0-9-]*):", compose_text, re.MULTILINE))
+        missing: list[str] = []
+        for service in guarded:
+            if service not in declared:
+                continue
+            block = service_block(compose_text, service)
+            declares_it = "APP_ENV: development" in block
+            inherits_it = "<<: *oidc" in block and anchor_declares_it
+            if not (declares_it or inherits_it):
+                missing.append(service)
+        self.assertEqual(
+            missing,
+            [],
+            "these services refuse plaintext outside development, but the local stack "
+            "never gives them APP_ENV=development, so their containers exit on boot: "
+            + ", ".join(missing),
         )
 
 
