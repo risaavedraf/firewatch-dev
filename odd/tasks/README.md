@@ -55,7 +55,7 @@ Documentos fuente anteriores a la entrega; sus faltantes se leen contra su fecha
 
 | Documento | Estado | Qué está entregado | Qué falta |
 | --- | --- | --- | --- |
-| [Plan de hardening backend](security/backend-hardening.md) | **Parcial — implementación en curso** | Plan y criterios de 12 unidades; **ejecutadas**: BH-01 (baseline de toolchain), BH-03 (tres capas de cuota del gateway), BH-07 (estado terminal, reporte cruzado del fallo y replay de operador, incluido el replay de un job `queued`), BH-08 (paridad del contrato, re-verificada) y BH-09 (pruebas negativas de autenticación, con la política ratificada por escrito); evidencia de los scans de dependencias de BH-02 | BH-02: inventario y scan de imágenes (exigen daemon de Docker y `trivy`); BH-04/05/06/11: entorno y accesos; BH-10: DB y broker aislados; BH-12: activación explícita; el escenario end-to-end de BH-07 y `-race` local. El **PR #29** quedó contenido en `main` y se cerró con un comentario (L24); no queda merge pendiente |
+| [Plan de hardening backend](security/backend-hardening.md) | **Parcial — implementación en curso** | Plan y criterios de 12 unidades; **ejecutadas**: BH-01 (baseline de toolchain), BH-03 (tres capas de cuota del gateway), BH-07 (estado terminal, reporte cruzado del fallo y replay de operador, incluido el replay de un job `queued`), BH-08 (paridad del contrato, re-verificada) y BH-09 (pruebas negativas de autenticación, con la política ratificada por escrito); evidencia de los scans de dependencias de BH-02 | BH-04/05/06/11: entorno y accesos; BH-10: DB y broker aislados; BH-12: activación explícita; el escenario end-to-end de BH-07 y `-race` local. El **PR #29** quedó contenido en `main` y se cerró con un comentario (L24); no queda merge pendiente |
 
 ### Unidades de hardening
 
@@ -64,7 +64,7 @@ Cada unidad tiene un documento de planificación; su estado indica la **ejecuci�
 | Unidad | Estado | Qué falta |
 | --- | --- | --- |
 | [BH-01 — Toolchain y baseline](security/backend-hardening/01-toolchain-baseline.md) | **Listo — verificado** | — (baseline registrado; la evidencia vive en el propio documento) |
-| [BH-02 — Vulnerabilidades e imágenes](security/backend-hardening/02-vulnerability-scans.md) | **Parcial** | `govulncheck` limpio en los 4 módulos; falta el inventario y el scan de imágenes (daemon de Docker + `trivy`) |
+| [BH-02 — Vulnerabilidades e imágenes](security/backend-hardening/02-vulnerability-scans.md) | **Cerrada** | `govulncheck` limpio en los 4 módulos; inventario de las ocho imágenes con sus ids y fechas, y dos corridas de `trivy` `0.69.3` con el digest que fija CI —2 HIGH en las imágenes viejas y **cero** en las cinco reconstruidas desde `HEAD`— |
 | [BH-03 — Cuotas gateway](security/backend-hardening/03-gateway-rate-limits.md) | **Listo — verificado** | Tres capas (agregado pre-auth, por `sub`, anónimo compartido) implementadas y probadas; `-race` corre solo en CI |
 | [BH-04 — Mínimo privilegio del broker](security/backend-hardening/04-broker-least-privilege.md) | **Pendiente** | Decisión de entorno y accesos antes de configurar y verificar permisos |
 | [BH-05 — Seguridad de transporte](security/backend-hardening/05-transport-security.md) | **Pendiente** | Decisión de entorno antes de implementar y verificar los controles |

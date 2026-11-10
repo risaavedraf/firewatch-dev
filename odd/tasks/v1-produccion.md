@@ -1,7 +1,7 @@
 # v1.0 producción — condiciones de cierre de la versión 1.0 de FireWatch
 
 **Qué es:** documento ODD que define qué falta para llamar `v1.0-produccion` a esta aplicación: diseño web terminado, usuarios y asignación de trabajos, modelo de datos, los doce frentes de producción abiertos, el hardening pendiente, la interfaz declarada no implementada y el cierre documental.
-**Estado:** abierto y en ejecución — 33 tareas abiertas y 13 cerradas (`V1-F-05`, `V1-C-01`…`V1-C-05`, `V1-M-01`, `V1-M-02`, `V1-M-03`, `V1-M-04`, `V1-U-01`, `V1-U-02` y `V1-U-03`); el modelo real queda fuera de este cierre por S2.
+**Estado:** abierto y en ejecución — 32 tareas abiertas y 14 cerradas (`V1-F-05`, `V1-C-01`…`V1-C-05`, `V1-H-02`, `V1-M-01`, `V1-M-02`, `V1-M-03`, `V1-M-04`, `V1-U-01`, `V1-U-02` y `V1-U-03`); el modelo real queda fuera de este cierre por S2.
 **Acta:** [`odd/entrega/acta-cierre.md`](../entrega/acta-cierre.md) §5 (corrección del responsable) y §6 (alcance de la versión 1.0).
 
 ## Specs
@@ -35,7 +35,7 @@ La autoridad es `backend/training/ANALYSIS-delivered-data.md` §4 (`:513-529`), 
 
 ## Tasks
 
-Ninguna tarea de esta tabla está cerrada salvo `V1-F-05`, `V1-C-01`…`V1-C-05`, `V1-M-01`, `V1-M-02`, `V1-M-03`, `V1-M-04`, `V1-U-01`, `V1-U-02` y `V1-U-03`, y las demás no acreditan implementación. Rutas: **inline** = trabajo documental o acotado que ejecuta quien mantiene este documento; **worker** = implementación delegada con superficie declarada; **bloqueado** = no puede empezar hasta que exista el insumo que se nombra en la misma celda.
+Ninguna tarea de esta tabla está cerrada salvo `V1-F-05`, `V1-C-01`…`V1-C-05`, `V1-H-02`, `V1-M-01`, `V1-M-02`, `V1-M-03`, `V1-M-04`, `V1-U-01`, `V1-U-02` y `V1-U-03`, y las demás no acreditan implementación. Rutas: **inline** = trabajo documental o acotado que ejecuta quien mantiene este documento; **worker** = implementación delegada con superficie declarada; **bloqueado** = no puede empezar hasta que exista el insumo que se nombra en la misma celda.
 
 ### G1 — Diseño web (V1-D)
 
@@ -114,7 +114,7 @@ El frente 2 no condiciona el cierre de la versión 1.0: entra aquí solo como el
 
 ### G5 — Hardening (V1-H)
 
-Estado de las unidades en `README.md:63-77`: BH-01, BH-03, BH-07, BH-08 y BH-09 cerradas o implementadas; BH-02 parcial —los cuatro módulos Go están limpios y falta el inventario y el scan de imágenes, que exigen daemon de Docker y `trivy` (`security/backend-hardening/02-vulnerability-scans.md:3,7`)—; BH-04, BH-05, BH-06, BH-10, BH-11 y BH-12 pendientes o diferidas.
+Estado de las unidades en `README.md:63-77`: BH-01, BH-03, BH-07, BH-08 y BH-09 cerradas o implementadas; **BH-02 cerrada (L14)** —inventario con digests y dos corridas de escaneo: 2 HIGH en las imágenes viejas y **cero** en las cinco reconstruidas desde `HEAD`—; BH-04, BH-05, BH-06, BH-10, BH-11 y BH-12 pendientes o diferidas.
 
 Cada fila cierra con lo que su propio documento pide. Este documento no adelanta ninguna de esas verificaciones.
 
@@ -239,3 +239,11 @@ El corte documental del cierre incluye regenerar `../presentacion-mandante.md` �
   - **SLA acordado, y su origen.** RPO **15 min** —elegido porque es el ciclo de ingesta, así que una restauración cuesta como máximo un ciclo de trabajo aceptado—, RTO **1 h** y disponibilidad **99,5%** (la meta de las referencias). El método de backup es `pg_dump` cada 15 min hacia S3, retención de 30 días y restore mensual probado. **Ninguna de las cuatro cifras está medida y la política no está implementada**: eso es T3 y T4 del frente 14, y el acta lo declara.
   - **El hallazgo que salió de la corrección.** La residencia en Chile era el motivo real, y hoy no se cumple: la región de AWS «South America (Chile)» (`sa-west-1`, Santiago) figura en la página de infraestructura global con `"available": false` y 0 zonas de disponibilidad, así que desplegar manda los datos a São Paulo (`sa-east-1`). El acta registra las tres salidas —aceptar São Paulo, esperar la región, o volver a un proveedor con región en Chile— y **no elige ninguna**: es decisión abierta del responsable.
   - **Lo que el §7 no cierra.** El restore probado, la implementación del envío a S3, la elección de región y el despliegue en EC2 (dominio, IAM, security group). Ninguna se declara cumplida por estar escrita.
+- **L14 (2026-11-10) — `V1-H-02` cerrada: inventario y escaneo de imágenes, con la distinción que importa.**
+  - **La versión del escáner es la de CI, y no por etiqueta.** `.github/workflows/_go-service.yml:62` fija `aquasec/trivy:0.69.3@sha256:bcc376…`; la copia local es **ese mismo digest**, no «la misma etiqueta». Un `trivy` distinto habría invalidado la comparación con lo que corre en CI.
+  - **Inventario.** Las ocho imágenes del proyecto —cinco servicios y tres migradores— con id, tamaño y fecha, más las imágenes base y de dependencia. Con una salvedad escrita en el documento: `RepoDigest` coincide con el `Id` porque ninguna imagen se publicó nunca, así que no hay digest de registro que citar; quien lea el inventario no debe creer que lo hay.
+  - **Dos corridas separadas, y ahí está el valor.** La primera, sobre las imágenes locales viejas del 18-19 de octubre: 2 HIGH en cada imagen Go —`CVE-2026-116587` (go-jose v4.1.4, corregido en 4.1.6) y `CVE-2026-111943` (stdlib go1.27.2, corregido en 1.27.3)—, `inference` limpia y `postgis/postgis:17-3.5` con 257 HIGH y 27 CRITICAL que son de la imagen base. La segunda, sobre las cinco **reconstruidas desde `HEAD`** (`3772fc8`): **cero HIGH y cero CRITICAL** en las cinco.
+  - **Conclusión sostenida con evidencia, no con argumento.** Los hallazgos eran de builds desactualizadas y no del código entregado; se probó reconstruyendo y volviendo a escanear, que es lo único que lo prueba.
+  - **Tres desenlaces que no se confunden.** «Sin hallazgos», «el escáner no pudo correr» y «el target no se pudo traer» son resultados distintos y solo el primero es un pase. En esta corrida no hubo fallo de escáner: la base de vulnerabilidades se descargó en la primera invocación y se reutilizó.
+  - **Lo que queda abierto y se declara.** Los tres migradores no se reconstruyeron desde `HEAD` —mismos Dockerfiles, sin resultado propio declarado—; la versión y fecha de la base de vulnerabilidades no quedó registrada; la imagen constructora no es direccionable en local y se anota como **no escaneada**, no como limpia; y los 284 hallazgos de `postgis` no se arreglan desde este repositorio, porque pertenecen a la imagen base y a una decisión de dependencia.
+  - **Evidencia.** [`../tasks/security/backend-hardening/02-vulnerability-scans.md`](../tasks/security/backend-hardening/02-vulnerability-scans.md), con inventario, las dos corridas, la checklist de aceptación y su entrada de Log fechada. Las referencias de estado de BH-02 en `../tasks/README.md`, `../plan-produccion/11-hardening-bh.md` y `../tasks/security/backend-hardening.md` quedaron actualizadas; la tabla de esa última deja las demás unidades como estaban, porque su estado es anterior a esta sesión y no se tocó.

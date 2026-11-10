@@ -15,7 +15,7 @@ Priority denotes suggested sequencing, not a confirmed vulnerability rating: P1 
 | Pending check | ID | Task | Priority | Status | Dependencies |
 |---|---|---|---|---|---|
 | [ ] | BH-01 | [Compatible toolchain and baseline](backend-hardening/01-toolchain-baseline.md) | P1 | pending | None |
-| [ ] | BH-02 | [Fresh vulnerability and image scans](backend-hardening/02-vulnerability-scans.md) | P1 | pending | BH-01 for Go scanning |
+| [x] | BH-02 | [Fresh vulnerability and image scans](backend-hardening/02-vulnerability-scans.md) | P1 | done | BH-01 for Go scanning |
 | [ ] | BH-03 | [Gateway quota isolation](backend-hardening/03-gateway-rate-limits.md) | P1 | pending | BH-01 |
 | [ ] | BH-04 | [Broker identities and least privilege](backend-hardening/04-broker-least-privilege.md) | P1 | pending | Target-environment authorization |
 | [ ] | BH-05 | [Transport security enforcement](backend-hardening/05-transport-security.md) | P1 | pending | BH-01; coordinate BH-04 |

@@ -24,7 +24,7 @@
 | ID | Unidad | Estado | Documento |
 | --- | --- | --- | --- |
 | T1 | BH-01 — Toolchain y baseline | **Cerrada** (`02911d5`) | [`01-toolchain-baseline.md`](../tasks/security/backend-hardening/01-toolchain-baseline.md) |
-| T2 | BH-02 — Vulnerabilidades e imágenes | **Parcial** (`702aff6`) — `govulncheck` limpio en los 4 módulos; falta el inventario y el scan de imágenes con `trivy`, que exige daemon de Docker | [`02-vulnerability-scans.md`](../tasks/security/backend-hardening/02-vulnerability-scans.md) |
+| T2 | BH-02 — Vulnerabilidades e imágenes | **Cerrada** (`702aff6`) — `govulncheck` limpio en los 4 módulos; inventario de las ocho imágenes con sus digests y dos corridas de `trivy` `0.69.3`: 2 HIGH en las imágenes viejas y `0` HIGH y `0` CRITICAL en las cinco reconstruidas desde `HEAD` | [`02-vulnerability-scans.md`](../tasks/security/backend-hardening/02-vulnerability-scans.md) |
 | T3 | BH-03 — Cuotas gateway | **Implementada** (`2981dc5`); `-race` pendiente en CI | [`03-gateway-rate-limits.md`](../tasks/security/backend-hardening/03-gateway-rate-limits.md) |
 | T4 | BH-04 — Mínimo privilegio del broker | Pendiente — decisión de entorno/accesos | [`04-broker-least-privilege.md`](../tasks/security/backend-hardening/04-broker-least-privilege.md) |
 | T5 | BH-05 — Seguridad de transporte | Pendiente — decisión de entorno | [`05-transport-security.md`](../tasks/security/backend-hardening/05-transport-security.md) |
