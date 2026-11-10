@@ -141,11 +141,18 @@ apply_generic migration-credentials \
 # which is safe: neither is mounted by a running container's decision logic, they
 # are read at container start.
 repo_root="$(cd "$(dirname "$0")/../.." && pwd)"
-for pair in "postgres-init:deploy/local/postgres-init.sh" "rabbitmq-plugins:deploy/local/rabbitmq-plugins"; do
-	configmap_name="${pair%%:*}"
-	source_file="$repo_root/${pair#*:}"
+# The ConfigMap key is the file name the container reads, not the repository file
+# name: rabbitmq.yaml mounts subPath `enabled_plugins`, which is also what
+# RABBITMQ_ENABLED_PLUGINS_FILE names. Declaring the key here, per entry, keeps the
+# two sides of that contract visible in one place instead of deriving it from a
+# basename that happens to differ.
+for entry in "postgres-init:deploy/local/postgres-init.sh:postgres-init.sh" "rabbitmq-plugins:deploy/local/rabbitmq-plugins:enabled_plugins"; do
+	configmap_name="${entry%%:*}"
+	rest="${entry#*:}"
+	source_file="$repo_root/${rest%%:*}"
+	configmap_key="${rest#*:}"
 	kubectl --namespace "$namespace" create configmap "$configmap_name" \
-		--from-file="$(basename "$source_file")=$source_file" \
+		--from-file="$configmap_key=$source_file" \
 		--dry-run=client --output yaml | kubectl --namespace "$namespace" apply -f -
 done
 
