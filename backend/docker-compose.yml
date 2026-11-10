@@ -129,6 +129,10 @@ services:
     command: [migrate]
     restart: 'no'
     environment:
+      # This job runs in the development stack and now says so. Outside development
+      # the database guard refuses a plaintext URL, which is what makes a production
+      # migration fail closed instead of quietly running in clear.
+      APP_ENV: development
       DATABASE_URL: postgres://postgres:${POSTGRES_PASSWORD:?required}@postgres:5432/jobs?sslmode=disable
     depends_on:
       postgres: {condition: service_healthy}
@@ -139,6 +143,10 @@ services:
     command: [migrate]
     restart: 'no'
     environment:
+      # This job runs in the development stack and now says so. Outside development
+      # the database guard refuses a plaintext URL, which is what makes a production
+      # migration fail closed instead of quietly running in clear.
+      APP_ENV: development
       DATABASE_URL: postgres://postgres:${POSTGRES_PASSWORD:?required}@postgres:5432/risk?sslmode=disable
     depends_on:
       postgres: {condition: service_healthy}
@@ -149,6 +157,10 @@ services:
     command: [migrate]
     restart: 'no'
     environment:
+      # This job runs in the development stack and now says so. Outside development
+      # the database guard refuses a plaintext URL, which is what makes a production
+      # migration fail closed instead of quietly running in clear.
+      APP_ENV: development
       DATABASE_URL: postgres://postgres:${POSTGRES_PASSWORD:?required}@postgres:5432/risk?sslmode=disable
     depends_on:
       postgres: {condition: service_healthy}
@@ -316,6 +328,10 @@ services:
     command: [migrate]
     restart: 'no'
     environment:
+      # This job runs in the development stack and now says so. Outside development
+      # the database guard refuses a plaintext URL, which is what makes a production
+      # migration fail closed instead of quietly running in clear.
+      APP_ENV: development
       DATABASE_URL: postgres://postgres:${POSTGRES_PASSWORD:?required}@postgres:5432/jobs_test?sslmode=disable
     depends_on:
       postgres: {condition: service_healthy}
@@ -327,6 +343,10 @@ services:
     command: [migrate]
     restart: 'no'
     environment:
+      # This job runs in the development stack and now says so. Outside development
+      # the database guard refuses a plaintext URL, which is what makes a production
+      # migration fail closed instead of quietly running in clear.
+      APP_ENV: development
       DATABASE_URL: postgres://postgres:${POSTGRES_PASSWORD:?required}@postgres:5432/risk_test?sslmode=disable
     depends_on:
       postgres: {condition: service_healthy}
@@ -338,6 +358,10 @@ services:
     command: [migrate]
     restart: 'no'
     environment:
+      # This job runs in the development stack and now says so. Outside development
+      # the database guard refuses a plaintext URL, which is what makes a production
+      # migration fail closed instead of quietly running in clear.
+      APP_ENV: development
       DATABASE_URL: postgres://postgres:${POSTGRES_PASSWORD:?required}@postgres:5432/risk_test?sslmode=disable
     depends_on:
       postgres: {condition: service_healthy}

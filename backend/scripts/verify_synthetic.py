@@ -668,7 +668,7 @@ class Harness:
             self._run_owned_container(
                 f"{self.prefix}-{database}-migrate",
                 f"{self.prefix}-{database}:latest",
-                env={"DATABASE_URL": url},
+                env={"DATABASE_URL": url, "APP_ENV": "development"},
                 command=["migrate"],
             )
         print("PASS: forward migrations applied as the ephemeral PostgreSQL administrator")

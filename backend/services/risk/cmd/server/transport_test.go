@@ -8,12 +8,20 @@ import (
 
 const (
 	plaintextDatabaseURL = "postgres://user:pass@db:5432/x?sslmode=disable"
-	encryptedDatabaseURL = "postgres://user:pass@db:5432/x?sslmode=require"
+	// verify-full is the only mode that both encrypts and authenticates the server,
+	// so it is the only URL these tests may treat as acceptable outside development.
+	encryptedDatabaseURL = "postgres://user:pass@db:5432/x?sslmode=verify-full"
+	// sslmode=require encrypts without checking who answered, and sslmode=prefer
+	// keeps a plaintext fallback. Both look encrypted at a glance and are not.
+	unauthenticatedDatabaseURL = "postgres://user:pass@db:5432/x?sslmode=require"
+	fallbackDatabaseURL        = "postgres://user:pass@db:5432/x?sslmode=prefer"
 	plaintextBrokerURL   = "amqp://user:pass@broker:5672/firewatch"
 	encryptedBrokerURL   = "amqps://user:pass@broker:5671/firewatch"
 	unverifiedBrokerURL  = "amqps://user:pass@broker:5671/firewatch?verify=verify_none"
 
 	tlsGuardMessage    = "DATABASE_URL must require TLS outside development"
+	tlsFallbackMessage = "DATABASE_URL must not fall back to a plaintext connection outside development"
+	tlsVerifyMessage   = "DATABASE_URL must verify the server certificate outside development"
 	amqpsGuardMessage  = "AMQP_URL must use amqps outside development"
 	verifyGuardMessage = "AMQP_URL must not disable certificate verification outside development"
 )
@@ -61,7 +69,11 @@ func TestRequireTLSOutsideDevelopment(t *testing.T) {
 		want        string
 	}{
 		{name: "plaintext outside development", environment: "production", databaseURL: plaintextDatabaseURL, want: tlsGuardMessage},
-		{name: "tls outside development", environment: "production", databaseURL: encryptedDatabaseURL},
+		{name: "verified tls outside development", environment: "production", databaseURL: encryptedDatabaseURL},
+		// Encrypted but unauthenticated, and encrypted with a way out: both are
+		// refusals, because either one lets an active attacker succeed.
+		{name: "require without verification outside development", environment: "production", databaseURL: unauthenticatedDatabaseURL, want: tlsVerifyMessage},
+		{name: "prefer with a plaintext fallback outside development", environment: "production", databaseURL: fallbackDatabaseURL, want: tlsFallbackMessage},
 		{name: "plaintext in development", environment: "development", databaseURL: plaintextDatabaseURL},
 		{name: "plaintext with an unset environment", environment: "", databaseURL: plaintextDatabaseURL, want: tlsGuardMessage},
 		{name: "the development exception is not case-insensitive", environment: "Development", databaseURL: plaintextDatabaseURL, want: tlsGuardMessage},
