@@ -4,6 +4,11 @@ namespace: firewatch
 resources:
   - namespace.yaml
   - config.yaml
+  # Data plane first: the application workloads cannot become ready before these
+  # exist, and a render that lists them here is the closest thing to an ordering
+  # guarantee kustomize offers.
+  - postgres.yaml
+  - rabbitmq.yaml
   - workloads.yaml
   - autoscaling.yaml
   - network.yaml

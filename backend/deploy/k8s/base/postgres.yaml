@@ -1,0 +1,177 @@
+# PostgreSQL with PostGIS for the Kubernetes delivery.
+#
+# One replica on purpose: a second one would need streaming replication and its
+# own failover decision, and claiming high availability without it would be a
+# false statement in a document. The StatefulSet keeps a stable identity and its
+# own claim, so moving to a managed database later is a connection-string
+# change, not a data migration written here.
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres
+  namespace: firewatch
+  labels:
+    app.kubernetes.io/name: postgres
+    app.kubernetes.io/part-of: firewatch
+spec:
+  selector:
+    app.kubernetes.io/name: postgres
+  ports:
+    - name: postgres
+      port: 5432
+      targetPort: postgres
+---
+# Headless service: the StatefulSet's stable network identity needs it, and it
+# is what a future replica set would use to address members.
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres-headless
+  namespace: firewatch
+  labels:
+    app.kubernetes.io/name: postgres
+    app.kubernetes.io/part-of: firewatch
+spec:
+  clusterIP: None
+  selector:
+    app.kubernetes.io/name: postgres
+  ports:
+    - name: postgres
+      port: 5432
+      targetPort: postgres
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: postgres
+  namespace: firewatch
+  labels:
+    app.kubernetes.io/name: postgres
+    app.kubernetes.io/part-of: firewatch
+spec:
+  serviceName: postgres-headless
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: postgres
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: postgres
+        app.kubernetes.io/part-of: firewatch
+    spec:
+      # The official image starts as root and drops to the postgres user through
+      # gosu, so runAsNonRoot cannot be set here: the container would fail before
+      # the entrypoint could drop privileges. Everything else is still restricted.
+      securityContext:
+        fsGroup: 999
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: postgres
+          image: postgis/postgis:17-3.5
+          # TLS is server-side only: no client certificates, because the trust
+          # boundary is the cluster network plus the bearer tokens the services
+          # already present. verify-full on the client side is what makes the
+          # server certificate meaningful.
+          args:
+            - -c
+            - ssl=on
+            - -c
+            - ssl_cert_file=/etc/tls/tls.crt
+            - -c
+            - ssl_key_file=/etc/tls/tls.key
+          ports:
+            - name: postgres
+              containerPort: 5432
+          env:
+            - name: POSTGRES_USER
+              value: postgres
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-credentials
+                  key: POSTGRES_PASSWORD
+            # The init script in the PostgreSQL image reads these three directly;
+            # they must be present before the first start or the roles are never
+            # created, and a volume that already holds a cluster is not re-run.
+            - name: JOBS_DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-credentials
+                  key: JOBS_DB_PASSWORD
+            - name: RISK_DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-credentials
+                  key: RISK_DB_PASSWORD
+            - name: KEYCLOAK_DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-credentials
+                  key: KEYCLOAK_DB_PASSWORD
+            # A subdirectory keeps initdb away from the volume's lost+found, which
+            # makes initdb refuse to run on a freshly formatted filesystem.
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+            - name: tls
+              mountPath: /etc/tls
+              readOnly: true
+            # The role and database creation is the repository's own script,
+            # mounted rather than retyped: it is the single description of which
+            # databases exist and which role may connect to each.
+            - name: init
+              mountPath: /docker-entrypoint-initdb.d
+              readOnly: true
+          # TCP, not the Unix socket: the image's entrypoint runs a temporary
+          # server that answers on the socket while the real one is still starting,
+          # so a socket probe reports ready too early.
+          readinessProbe:
+            exec:
+              command: [pg_isready, -h, 127.0.0.1, -p, '5432', -U, postgres, -d, postgres]
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 12
+          # Liveness is deliberately more forgiving than readiness: killing a
+          # server that is merely slow to answer restarts a database that was
+          # doing work, which is worse than a slow pod staying in service.
+          livenessProbe:
+            exec:
+              command: [pg_isready, -h, 127.0.0.1, -p, '5432', -U, postgres, -d, postgres]
+            initialDelaySeconds: 60
+            periodSeconds: 20
+            timeoutSeconds: 5
+            failureThreshold: 6
+          resources:
+            requests:
+              cpu: 200m
+              memory: 512Mi
+            limits:
+              cpu: '2'
+              memory: 2Gi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: [ALL]
+      volumes:
+        - name: tls
+          secret:
+            secretName: postgres-tls
+        - name: init
+          configMap:
+            name: postgres-init
+  # The claim carries the only state that cannot be recreated by re-applying a
+  # manifest. The storage class is left to the cluster: this base does not know
+  # which provisioner the target offers.
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: [ReadWriteOnce]
+        resources:
+          requests:
+            storage: 8Gi
