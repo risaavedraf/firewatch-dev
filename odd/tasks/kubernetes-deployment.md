@@ -22,18 +22,18 @@ Requisito externo nuevo: la entrega se monta en Kubernetes. Sustituye el sustrat
 | T4 | RabbitMQ como StatefulSet con persistencia y gestión acotada | S3 | inline | Hecho en `3c7b0b0` |
 | T5 | Jobs de migración en el orden correcto (risk → prevention → jobs) | S3 | inline | Hecho en `dd9a542` — un Job con initContainers secuenciales; contrato ejecutable en `backend/deploy/k8s/tests/render-contract.sh` |
 | T6 | Job que aprovisiona broker e identidades con el script existente | S3 | inline | Hecho en `dd9a542` — el script del repositorio montado desde ConfigMap; la API de administración pasó a TLS 15671 |
-| **T7** | **Deployments de la aplicación contra los secretos reales, sin `replace-before-deploy`** — bloque abierto, partido en nueve unidades T7.1–T7.9; la dependencia de cada una va en su propia celda | S1 | inline | En curso: T7.1–T7.6 hechas; quedan T7.7, T7.8 y T7.9 |
+| **T7** | **Deployments de la aplicación contra los secretos reales, sin `replace-before-deploy`** — bloque abierto, partido en nueve unidades T7.1–T7.9; la dependencia de cada una va en su propia celda | S1 | inline | T7.1–T7.9 hechas y validadas en kind (L20); queda la sustitución de los tags `replace-before-deploy` por digests en un overlay (README paso 1) |
 | T7.1 | **T7.1 — Gateway: TLS de entrada, upstreams HTTPS y CA de confianza.** Superficie disjunta: en paralelo con T7.2–T7.5 | S1 | inline | Hecho en `300fa29` |
 | T7.2 | **T7.2 — jobs: TLS de entrada, AMQP con CA propia y JWKS con CA.** Superficie disjunta: en paralelo con T7.1 y T7.3–T7.5 | S1 | inline | Hecho en `c42f254` |
 | T7.3 | **T7.3 — risk: TLS de entrada, AMQP con CA propia, JWKS y cliente de inferencia con CA.** Superficie disjunta: en paralelo con T7.1, T7.2, T7.4 y T7.5 | S1 | inline | Hecho en `4e4cd7b` |
 | T7.4 | **T7.4 — prevention: TLS de entrada en 8084, JWKS y cliente administrativo del directorio con CA.** Superficie disjunta: en paralelo con T7.1–T7.3 y T7.5 | S1 | inline | Hecho en `6662ac4` |
 | T7.5 | **T7.5 — inference: TLS de entrada.** Superficie disjunta: en paralelo con T7.1–T7.4 | S1 | inline | Hecho en `e1f36a0` |
 | T7.6 | **T7.6 — secretos de runtime y certificados por servicio.** Superficie disjunta: en paralelo con T7.7, T7.8 y con T7.1–T7.5 | S1 | inline | Hecho en `fcbabaf` |
-| T7.7 | **T7.7 — manifiestos de la aplicación.** Superficie disjunta: en paralelo con T7.6, T7.8 y con T7.1–T7.5 | S1 | inline | Pendiente |
-| T7.8 | **T7.8 — Keycloak e inferencia en el clúster.** Superficie disjunta: en paralelo con T7.6, T7.7 y con T7.1–T7.5 | S1 | inline | Pendiente |
-| T7.9 | **T7.9 — contrato de render ampliado.** Va al final: comprueba el resultado de todas las unidades, así que no se ejecuta en paralelo con ninguna | S1 | inline | Pendiente |
-| T8 | Ingress y TLS, incluidos los listeners internos | S2 | inline | Pendiente |
-| T9 | Validación end-to-end en el clúster, con evidencia | S1 | inline | **Bloqueada**: sin clúster no hay nada que validar |
+| T7.7 | **T7.7 — manifiestos de la aplicación.** Superficie disjunta: en paralelo con T7.6, T7.8 y con T7.1–T7.5 | S1 | inline | Hecho en `8556c66` — cada Deployment monta su `<servicio>-tls` en `/etc/tls`, declara `TLS_CERT_FILE`/`TLS_KEY_FILE`/`TLS_CA_FILE` con los nombres que el binario lee, `fsGroup: 65532` con `defaultMode: 0440`, puertos y sondas `https` |
+| T7.8 | **T7.8 — Keycloak e inferencia en el clúster.** Superficie disjunta: en paralelo con T7.6, T7.7 y con T7.1–T7.5 | S1 | inline | Hecho en `2ac11ad` con los artefactos que faltaban en `bootstrap-secrets.sh`; el arranque de Keycloak se corrigió en `d5b4053` |
+| T7.9 | **T7.9 — contrato de render ampliado.** Va al final: comprueba el resultado de todas las unidades, así que no se ejecuta en paralelo con ninguna | S1 | inline | Hecho en `fde877c` — 16 renders mutados a propósito, cada uno detectado; el chequeo de volúmenes declarados ahora recorre todo el render |
+| T8 | Ingress y TLS, incluidos los listeners internos | S2 | inline | Hecho en `4ce9b3c` — `backend-protocol: HTTPS` era la línea que faltaba; el Secret `firewatch-tls` lo aporta el operador porque certifica un DNS que el repositorio no posee |
+| T9 | Validación end-to-end en el clúster, con evidencia | S1 | inline | Validada en kind (L20): 14 cargas `1/1 Running`, ambos Jobs `Complete`, handshake verificado contra la CA interna y certificado no confiable rechazado. **Falta el entorno objetivo**: esto es un clúster local, no un despliegue |
 | T10 | Camino a producción real documentado y enmienda a D1 | S2, S3 | inline | Pendiente |
 
 **Superficies de edición de T7, una por unidad** (rutas relativas al repositorio):
@@ -299,3 +299,23 @@ provisioning: PUT /exchanges/firewatch/firewatch.jobs.events: request failed
 **Nota de plataforma.** MSYS/git-bash reescribe un valor de entorno que empieza por `/` como ruta de Windows antes de que lo vea el hijo, así que el patrón del 409 se nombra sin barra inicial. Es una trampa del harness, no del script.
 
 **Frontera de la rebanada.** Los cuatro commits de esta rama —`46e8ff1`, `cd10c4f`, `9f51b4f` y este— son una sola rebanada de revisión: la rama `fix/ci-green` y su PR #65. Supera el umbral de 400 líneas contando pruebas y documento, y no se parte porque los tres rojos y su causa comparten una sola verificación: el run de `Backend integration` sobre el mismo workflow. Partirla dejaría tramos cuyo verde no se puede leer sin el anterior.
+
+**L20 (2026-11-10) — el frente se cierra en un clúster real, y el clúster encontró lo que el render no podía.**
+
+**Lo que se hizo.** T7.7 (`8556c66`) monta el certificado de cada servicio y pasa los upstreams del gateway a `https://`; T8 (`4ce9b3c`) dice al controlador que el backend habla TLS; T7.8 (`2ac11ad`) trae Keycloak e inferencia, con los dos artefactos que no se podían expresar como manifiesto resueltos en `bootstrap-secrets.sh`; T7.9 (`fde877c`) amplía el contrato de render; y `11ae899` deja escrito qué necesita el bootstrap en Windows.
+
+**Se validó en un clúster, no en un render.** kind v0.31.0, Kubernetes v1.35.0, clúster `firewatch-verify`, namespace con `pod-security.kubernetes.io/enforce: restricted`. Secuencia: bootstrap real con la CA interna, `kubectl apply -k deploy/k8s/base`, y espera. Resultado: **catorce cargas en `1/1 Running`** —gateway ×2, jobs ×2, prevention ×2, risk ×2, inference ×2, keycloak, postgres y rabbitmq— y **ambos Jobs en `Complete`** (`migrate-v14` y `broker-provision`). Eso prueba de verdad lo que hasta ahora era promesa: el material de `/etc/tls` se monta y se lee con `fsGroup: 65532` sobre `defaultMode: 0440`, los pods pasan la admisión `restricted`, y las sondas por HTTPS responden.
+
+**Evidencia de transporte (BH-05).** Sonda desde un pod con etiqueta `app: risk`, que es el flujo que las NetworkPolicies permiten hacia `inference:8080`:
+
+- `https://inference:8080/health` con la CA interna → `http=200`, `rc=0`. El handshake verifica y el nombre `inference` coincide con el SAN.
+- El mismo request sin la CA → `rc=60`, `curl: (60) SSL certificate problem: unable to get local issuer certificate`. Un certificado no confiable se rechaza.
+- El mismo request en texto plano, contra `/health` y contra `/v1/model` que sí existe por TLS → `Client sent an HTTP request to an HTTPS server.` Es la capa TLS de Go rechazando, no la aplicación contestando: no hay listener en claro. Se reporta el texto literal porque un `HTTP 400` sin cuerpo se confundiría con un error de la aplicación.
+
+**El defecto que solo apareció al arrancar.** Keycloak entraba en `CrashLoopBackOff` con `exec: "start": executable file not found in $PATH`, porque el manifiesto usaba `command: [start]` y eso **reemplaza** el ENTRYPOINT de la imagen en lugar de sumarse a él. Corregido en `d5b4053` con `args: [start]`. Nada aguas arriba del clúster lo habría detectado: el manifiesto es válido, kustomize renderiza 48 objetos, el contrato pasa y `restricted` lo admite. Es el argumento a favor de T9, escrito en un commit.
+
+**Dos falsos positivos que costaron tiempo, y no eran del repositorio.** El bootstrap falló dos veces en Git Bash: MSYS convierte `-subj "/CN=..."` en una ruta de Windows, y `mktemp -d` devuelve una ruta POSIX que ni el `openssl` de mingw ni el `kubectl.exe` nativo pueden abrir. Ambos son restricciones del host: en Linux no existen. La solución fue un shim de `mktemp` y correr la emisión de certificados con `MSYS_NO_PATHCONV=1` y los ConfigMaps sin él, porque las dos opciones se estorban. Queda documentado en el README para no volver a diagnosticarlo.
+
+**Lo que sigue abierto, y no se disimula.** (1) Los Deployments todavía llevan `firewatch/<servicio>:replace-before-deploy`; en kind se satisfizo cargando la imagen con esa etiqueta literal, pero la sustitución por digests en un overlay es trabajo de entrega pendiente (README paso 1). (2) El realm se aprovisiona fuera de banda. (3) **El tramo ingress→gateway no se ejercitó**: no hay controlador de ingress en kind ni existe el Secret `firewatch-tls`, así que lo verificado ahí es la anotación, no un handshake de borde. (4) `proxy-ssl-verify` sigue apagado por defecto en NGINX: el tramo va cifrado pero no autenticado. (5) Todo esto es un clúster local: el entorno objetivo sigue sin tocarse.
+
+**Frontera de la rebanada.** Los seis commits de `feat/k8s-pr9-app-tls` —`8556c66`, `4ce9b3c`, `2ac11ad`, `fde877c`, `11ae899`, `d5b4053`— son una sola unidad de revisión, con su PR. Pasan de las 400 líneas contando pruebas y documento, y no se parten porque comparten una sola verificación: el mismo `apply` sobre el mismo clúster. Partirlos dejaría tramos cuyo verde no se puede leer sin el anterior.
