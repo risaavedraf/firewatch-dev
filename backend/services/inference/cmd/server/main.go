@@ -36,6 +36,11 @@ import (
 // which is the failure this service is written to prevent.
 const modelPathEnv = "FIREWATCH_MODEL_PATH"
 
+// listenAddr is this service's port. It is unchanged by the TLS work: the
+// crossing contract keeps 8080 and only changes how it is served
+// (odd/tasks/kubernetes-deployment.md, L10).
+const listenAddr = ":8080"
+
 func main() {
 	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, nil)))
 	if err := run(os.Args[1:]); err != nil {
@@ -67,13 +72,40 @@ func run(args []string) error {
 		fmt.Printf("artifact ok: %s %s %s\n", loaded.Format, loaded.Version, loaded.DataHash)
 		return nil
 	}
+	// -validate never binds, so the listener's transport is decided after it: a
+	// pipeline can validate an artifact without the server key pair. A real start
+	// decides before the server is built, so a deployment with no key pair stops
+	// here instead of binding a plaintext port nobody notices.
+	certFile, keyFile, err := startupListenerTLS(os.Getenv("APP_ENV"))
+	if err != nil {
+		return err
+	}
+	server := newServer(loaded)
+	go func() {
+		<-ctx.Done()
+		shutdown, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		_ = server.Shutdown(shutdown)
+	}()
+	slog.Info("inference_ready", "model_version", loaded.Version, "data_hash", loaded.DataHash, "kind", loaded.Kind, "features", len(loaded.Features), "addr", listenAddr, "tls", certFile != "")
+	err = listenAndServe(server, certFile, keyFile)
+	if errors.Is(err, http.ErrServerClosed) {
+		return nil
+	}
+	return err
+}
+
+// newServer builds what run() binds: the routes, the middleware and the timeouts.
+// It is separate from run() so a test can serve the same composition on its own
+// address instead of duplicating the mux, which would let the two drift.
+func newServer(loaded *artifact.Artifact) *http.Server {
 	counters := &metrics.Inference{}
 	httpMetrics := &metrics.HTTPMetrics{}
 	mux := http.NewServeMux()
 	mux.Handle("/", handler.New(loaded, scorer.New(loaded), counters))
 	mux.Handle("GET /metrics", metricsHandler(counters, httpMetrics, loaded))
-	server := &http.Server{
-		Addr:              ":8080",
+	return &http.Server{
+		Addr:              listenAddr,
 		Handler:           middleware(mux, httpMetrics),
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       10 * time.Second,
@@ -81,18 +113,6 @@ func run(args []string) error {
 		IdleTimeout:       60 * time.Second,
 		MaxHeaderBytes:    16384,
 	}
-	go func() {
-		<-ctx.Done()
-		shutdown, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancel()
-		_ = server.Shutdown(shutdown)
-	}()
-	slog.Info("inference_ready", "model_version", loaded.Version, "data_hash", loaded.DataHash, "kind", loaded.Kind, "features", len(loaded.Features))
-	err = server.ListenAndServe()
-	if errors.Is(err, http.ErrServerClosed) {
-		return nil
-	}
-	return err
 }
 
 // modelPath validates the one required setting. A blank value is a configuration
