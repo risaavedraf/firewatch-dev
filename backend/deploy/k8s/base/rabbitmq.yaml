@@ -97,7 +97,15 @@ spec:
         app.kubernetes.io/name: rabbitmq
         app.kubernetes.io/part-of: firewatch
     spec:
+      # Pod Security `restricted` requires the pod to prove it runs unprivileged.
+      # The image's entrypoint drops to uid 999 itself; here it never starts as
+      # root at all, so the drop is not needed.
+      # NOT CONFIRMED ON A CLUSTER YET: the first apply must show the broker running
+      # as 999 with /var/lib/rabbitmq writable and its TLS listener up.
       securityContext:
+        runAsNonRoot: true
+        runAsUser: 999
+        runAsGroup: 999
         fsGroup: 999
         seccompProfile:
           type: RuntimeDefault

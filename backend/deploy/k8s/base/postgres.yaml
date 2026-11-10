@@ -60,13 +60,39 @@ spec:
         app.kubernetes.io/name: postgres
         app.kubernetes.io/part-of: firewatch
     spec:
-      # The official image starts as root and drops to the postgres user through
-      # gosu, so runAsNonRoot cannot be set here: the container would fail before
-      # the entrypoint could drop privileges. Everything else is still restricted.
+      # The namespace enforces Pod Security `restricted`, which refuses a pod that
+      # cannot prove it runs unprivileged. This one is started as uid 999 and never
+      # as root, so the image's gosu path is skipped: there is nothing to drop to.
+      # NOT CONFIRMED ON A CLUSTER YET. Nothing has applied this manifest; the
+      # first apply must show the container running as 999, PGDATA writable on the
+      # claim, and the server accepting TLS with the key staged below.
       securityContext:
+        runAsNonRoot: true
+        runAsUser: 999
+        runAsGroup: 999
         fsGroup: 999
         seccompProfile:
           type: RuntimeDefault
+      initContainers:
+        # PostgreSQL refuses a private key that is group- or world-accessible, and
+        # a Secret volume can only set a numeric mode with root as owner: 0400 is
+        # then unreadable by 999, and 0440 is refused by the server. Copying the
+        # pair into an emptyDir makes the owner 999 and lets 0600 be exact. The
+        # image is reused rather than pulling a second one for two commands.
+        - name: stage-tls
+          image: postgis/postgis:17-3.5
+          command: [sh, -c, 'cp /etc/tls-src/tls.crt /etc/tls/tls.crt && cp /etc/tls-src/tls.key /etc/tls/tls.key && chmod 600 /etc/tls/tls.crt /etc/tls/tls.key']
+          volumeMounts:
+            - name: tls-src
+              mountPath: /etc/tls-src
+              readOnly: true
+            - name: tls
+              mountPath: /etc/tls
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
       containers:
         - name: postgres
           image: postgis/postgis:17-3.5
@@ -158,9 +184,13 @@ spec:
             capabilities:
               drop: [ALL]
       volumes:
-        - name: tls
+        - name: tls-src
           secret:
             secretName: postgres-tls
+            # 288 is 0440: the staging container reads it through the group.
+            defaultMode: 288
+        - name: tls
+          emptyDir: {}
         - name: init
           configMap:
             name: postgres-init
