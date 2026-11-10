@@ -19,7 +19,9 @@ These tests pin the contract that closes that window without needing Docker:
   helper, which the entrypoint runs before the real server starts listening;
 * the test-profile services must keep waiting for their completed migrators; and
 * the workflow must keep running the readiness checks and the test-profile gate
-  without ``continue-on-error``.
+  without ``continue-on-error``; and
+* every service whose transport guard refuses plaintext outside development must
+  be told by the local stack that it is in development.
 
 The same file also drives the runtime harness end to end through a fake ``docker``
 executable that is the only ``docker`` on the child's ``PATH`` and records every
@@ -168,6 +170,41 @@ def option_value(tokens: list[str], names: tuple[str, ...]) -> str | None:
     return None
 
 
+TLS_GUARD_ERROR = "is required outside development"
+OIDC_ANCHOR = "x-oidc: &oidc"
+
+
+def anchor_block(compose_text: str, header: str) -> str:
+    """Return the YAML lines under a top-level ``x-`` anchor declaration.
+
+    An anchor's children are indented by two spaces, like a top-level key's, so
+    its block ends at the next line that starts in column zero.
+    """
+    lines = compose_text.splitlines()
+    if header not in lines:
+        raise AssertionError(f"expected docker-compose.yml to declare {header!r}")
+    start = lines.index(header)
+    block: list[str] = []
+    for line in lines[start + 1:]:
+        if line.strip() and not line.startswith("  "):
+            break
+        block.append(line)
+    return "\n".join(block)
+
+
+def services_refusing_plaintext_outside_development() -> list[str]:
+    """Return the services whose ``transport.go`` carries the TLS guard.
+
+    Derived from the sources instead of a hard-coded list, so a service that
+    adopts the guard is covered by this contract the day it is written.
+    """
+    guarded: list[str] = []
+    for transport in sorted((ROOT / "services").glob("*/cmd/server/transport.go")):
+        if TLS_GUARD_ERROR in transport.read_text(encoding="utf-8"):
+            guarded.append(transport.parents[2].name)
+    return guarded
+
+
 class PostgresReadinessProbeTest(unittest.TestCase):
     """The healthcheck must not be answerable by the temporary init server."""
 
@@ -298,6 +335,45 @@ class IntegrationWorkflowGateTest(unittest.TestCase):
             diagnostics,
             teardown,
             "container logs must be captured before the teardown removes the project",
+        )
+
+
+class TlsGuardEnvironmentTest(unittest.TestCase):
+    """The local stack must tell a TLS-guarded service that it is in development.
+
+    Every transport guard refuses plaintext unless ``APP_ENV`` is exactly
+    ``development``. A service that never receives it exits on boot, and
+    ``docker compose up -d`` then reports only ``dependency failed to start:
+    container <name> is unhealthy``: the guard's own explanation reaches the
+    container log and nowhere else. This pins the Compose side of that contract
+    without starting a container.
+    """
+
+    def test_every_service_with_the_tls_guard_receives_the_development_environment(self):
+        compose_text = read(COMPOSE)
+        guarded = services_refusing_plaintext_outside_development()
+        self.assertTrue(
+            guarded,
+            "no transport.go under services/*/cmd/server carries the TLS guard, so this "
+            "contract would pass vacuously",
+        )
+        anchor_declares_it = "APP_ENV: development" in anchor_block(compose_text, OIDC_ANCHOR)
+        declared = set(re.findall(r"^  ([a-z][a-z0-9-]*):", compose_text, re.MULTILINE))
+        missing: list[str] = []
+        for service in guarded:
+            if service not in declared:
+                continue
+            block = service_block(compose_text, service)
+            declares_it = "APP_ENV: development" in block
+            inherits_it = "<<: *oidc" in block and anchor_declares_it
+            if not (declares_it or inherits_it):
+                missing.append(service)
+        self.assertEqual(
+            missing,
+            [],
+            "these services refuse plaintext outside development, but the local stack "
+            "never gives them APP_ENV=development, so their containers exit on boot: "
+            + ", ".join(missing),
         )
 
 
@@ -741,3 +817,191 @@ class ReadinessHarnessCleanupTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+# ---------------------------------------------------------------------------
+# Broker provisioning contracts, driven by a fake curl.
+#
+# The provisioning script talks to the RabbitMQ management API, which binds its
+# listener a moment after the broker's own healthcheck turns green. The fake
+# reproduces that window without a broker: it is the only ``curl`` ahead of the
+# real one on the child's PATH, it records every invocation, and it can refuse
+# the first N connections.
+# ---------------------------------------------------------------------------
+TOPOLOGY_SCRIPT = ROOT / "deploy" / "local" / "rabbitmq-topology.sh"
+
+FAKE_CURL = r'''\
+import json
+import os
+import sys
+
+LOG = os.environ["FAKE_CURL_LOG"]
+COUNTER = os.environ["FAKE_CURL_COUNTER"]
+REFUSALS = int(os.environ.get("FAKE_CURL_REFUSALS", "0"))
+FAIL_PATH = os.environ.get("FAKE_CURL_FAIL_PATH", "")
+FAIL_STATUS = os.environ.get("FAKE_CURL_FAIL_STATUS", "")
+
+ARGV = sys.argv[1:]
+sys.stdin.read()  # `--config -` carries the credentials; this fake never needs them
+
+
+def take(index):
+    try:
+        return ARGV[index + 1]
+    except IndexError:
+        return ""
+
+
+method = "GET"
+url = ""
+wants_code = False
+index = 0
+while index < len(ARGV):
+    arg = ARGV[index]
+    if arg in ("-X", "--request"):
+        method = take(index)
+        index += 2
+        continue
+    if arg in ("--data", "-d"):
+        index += 2  # only that a body was sent matters here
+        continue
+    if arg in ("-w", "--write-out"):
+        wants_code = "%{http_code}" in take(index)
+        index += 2
+        continue
+    if arg in ("-H", "--header", "-o", "--output", "--config", "-K"):
+        index += 2
+        continue
+    if arg.startswith("-"):
+        index += 1
+        continue
+    url = arg
+    index += 1
+
+with open(LOG, "a", encoding="utf-8") as handle:
+    handle.write(json.dumps({"method": method, "url": url}) + "\n")
+
+attempt = 0
+if os.path.exists(COUNTER):
+    with open(COUNTER, encoding="utf-8") as handle:
+        attempt = int(handle.read().strip() or "0")
+with open(COUNTER, "w", encoding="utf-8") as handle:
+    handle.write(str(attempt + 1))
+
+if attempt < REFUSALS:
+    sys.stderr.write("curl: (7) Failed to connect to broker port 15672: Connection refused\n")
+    sys.exit(7)
+
+if FAIL_PATH and FAIL_PATH in url:
+    status = FAIL_STATUS
+else:
+    status = "204" if method == "DELETE" else "201"
+
+if wants_code:
+    sys.stdout.write("\n" + status)
+'''
+
+
+class FakeCurl:
+    """An isolated fake ``curl`` that records calls and can refuse connections."""
+
+    def __init__(self, root: Path):
+        self.bin = root / "curlbin"
+        self.bin.mkdir(parents=True)
+        self.log = root / "curl-calls.jsonl"
+        self.log.write_text("", encoding="utf-8")
+        self.counter = root / "curl-counter.txt"
+        (self.bin / "fake_curl.py").write_text(FAKE_CURL, encoding="utf-8")
+        # The shim bakes in absolute paths: on a Linux runner `dirname` would need
+        # PATH, and the child's PATH is arranged by the caller below.
+        posix = self.bin / "curl"
+        posix.write_text(
+            f'#!/bin/sh\nexec "{sys.executable}" "{self.bin / "fake_curl.py"}" "$@"\n',
+            encoding="utf-8",
+        )
+        posix.chmod(0o755)
+
+    def calls(self) -> list[dict]:
+        """Return every recorded invocation, in order."""
+        text = self.log.read_text(encoding="utf-8")
+        return [json.loads(line) for line in text.splitlines() if line.strip()]
+
+    def run(self, attempts: int = 4, **options):
+        """Run the provisioning script with this fake as the only curl."""
+        env = dict(os.environ)
+        # `sh`, `tail`, `sed` and `sleep` must still resolve, so the fake shadows
+        # curl by coming first instead of replacing the whole PATH.
+        env["PATH"] = str(self.bin) + os.pathsep + os.environ.get("PATH", "")
+        env["FAKE_CURL_LOG"] = str(self.log)
+        env["FAKE_CURL_COUNTER"] = str(self.counter)
+        for key, value in options.items():
+            env["FAKE_CURL_" + key.upper()] = str(value)
+        env.update({
+            # Set explicitly so an inherited value can never change the outcome.
+            "RABBITMQ_PROVISION_ATTEMPTS": str(attempts),
+            "RABBITMQ_MANAGEMENT_URL": "http://broker:15672",
+            "ADMIN_USER": "firewatch",
+            "ADMIN_PASS": "fake-admin-secret",
+            "JOBS_PASSWORD": "fake-jobs-secret",
+            "RISK_PASSWORD": "fake-risk-secret",
+        })
+        return subprocess.run(
+            ["sh", str(TOPOLOGY_SCRIPT)],
+            capture_output=True,
+            text=True,
+            env=env,
+            cwd=str(ROOT),
+            timeout=120,
+        )
+
+
+class BrokerTopologyRetryTest(unittest.TestCase):
+    """A refused connection is retried; an HTTP error is not.
+
+    The broker's healthcheck answers on the AMQP side, so the management plugin
+    can still be binding its listener when Compose starts the provisioning. The
+    first request then fails at the transport level and, before this contract,
+    took the whole `docker compose up` with it. The retry must stay bounded and
+    must not swallow a status: a 409 that means an existing object disagrees has
+    to fail the step on the first attempt.
+    """
+
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.curl = FakeCurl(Path(tmp.name))
+
+    def test_a_refused_connection_is_retried_until_the_api_answers(self):
+        result = self.curl.run(attempts=4, refusals=2)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("provisioning complete", result.stdout)
+        first = [call for call in self.curl.calls() if call["url"].endswith("/firewatch.jobs.events")]
+        self.assertEqual(
+            len(first),
+            3,
+            "the first exchange declaration must be attempted twice more after the "
+            "connection is refused, then succeed",
+        )
+        self.assertEqual(first[0]["method"], "PUT")
+
+    def test_the_retry_is_bounded_and_still_fails_the_step(self):
+        result = self.curl.run(attempts=3, refusals=99)
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("request failed", result.stderr)
+        self.assertIn(
+            "Connection refused",
+            result.stderr,
+            "the reason must survive the retries instead of being reduced to a count",
+        )
+        self.assertEqual(len(self.curl.calls()), 3, "the retry must stop at the configured bound")
+        self.assertIn("provisioning: exchanges", result.stdout)
+        self.assertNotIn("provisioning: queues", result.stdout)
+
+    def test_an_http_error_fails_on_the_first_attempt(self):
+        # The fragment carries no leading slash on purpose: MSYS/git-bash rewrites
+        # an environment value that starts with `/` into a Windows path before the
+        # child sees it, and the fragment would then match no URL.
+        result = self.curl.run(attempts=5, fail_path="firewatch.jobs.events", fail_status="409")
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("returned HTTP 409", result.stderr)
+        self.assertEqual(len(self.curl.calls()), 1, "an HTTP status must not be retried")

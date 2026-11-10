@@ -250,10 +250,10 @@ test('logout returns the role panel to the explicit unavailable state', async ()
 // port of the legacy assertion
 // `the permissions matrix documents the real server guards and marks what it cannot verify`.
 const GUARD_LINES: Record<string, RegExp> = {
-  'backend/services/gateway/internal/handler/gateway.go:70': /mux\.Handle\("\/v1\/audit"/,
-  'backend/services/gateway/internal/handler/gateway.go:153': /health\/ready/,
-  'backend/services/gateway/internal/handler/gateway.go:177': /auth := strings\.Fields/,
-  'backend/services/gateway/internal/handler/gateway.go:183': /verifier\.Verify\(ctx, auth\[1\]\)/,
+  'backend/services/gateway/internal/handler/gateway.go:78': /mux\.Handle\("\/v1\/audit"/,
+  'backend/services/gateway/internal/handler/gateway.go:166': /health\/ready/,
+  'backend/services/gateway/internal/handler/gateway.go:190': /auth := strings\.Fields/,
+  'backend/services/gateway/internal/handler/gateway.go:196': /verifier\.Verify\(ctx, auth\[1\]\)/,
   'backend/services/risk/internal/handler/security.go:59': /role == "viewer" \|\| role == "admin"/,
   'backend/services/risk/internal/handler/security.go:64': /fail\(w, 403, "forbidden"\)/,
   'backend/services/risk/internal/handler/api.go:58': /"GET \/v1\/risk\/status"/,
@@ -344,6 +344,11 @@ test('no role selector, switcher or picker is ported anywhere in the view', () =
   expect(matrixNote).toMatch(/ruta:línea/);
   expect(matrixNote).toMatch(/risk\/internal\/handler\/security\.go:59/);
   expect(matrixNote).toMatch(/jobs\/internal\/handler\/security\.go:44/);
+  // The note also cites the two `Authorize` wraps. Both are the same full guard
+  // refs the matrix renders, so the matrix test above proves their disk content;
+  // a short `api.go:N` form here would drift unverified, as it did once.
+  expect(matrixNote).toContain('backend/services/risk/internal/handler/api.go:112');
+  expect(matrixNote).toContain('backend/services/jobs/internal/handler/api.go:236');
 });
 
 // F3 — the sign-in control must answer to the session it starts. `Shell.tsx:153`

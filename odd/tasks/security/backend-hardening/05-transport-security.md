@@ -1,6 +1,6 @@
 # BH-05 — Enforce secure internal and data-service transport
 
-**Status:** enforced at startup in all four services and covered by tests; the certificates and listeners that make a secure deployment possible are not provisioned yet | **Priority:** P1 | **Dependencies:** BH-01; coordinate BH-04 and BH-06.
+**Status:** enforced at startup in all four services and covered by tests; `main` issues one server certificate per service, signed by the internal CA, and the runtime Secret bundles the Deployments mount, so provisioning no longer blocks the delivery. What remains is mounting those certificates and their CA into the workloads and moving the gateway upstreams to HTTPS (T7.7), then applying the base to a cluster and verifying it there (T9) | **Priority:** P1 | **Dependencies:** BH-01; coordinate BH-04 and BH-06.
 
 ## Evidence and scope
 
@@ -20,7 +20,7 @@ Before this unit, the OIDC endpoints were the only transport that anything refus
 | --- | --- | --- | --- |
 | Browser → edge | Caddy | public CA via ACME | the deployment, renewed automatically |
 | Edge → gateway | Caddy | internal | the deployment |
-| Gateway → services | each service | internal CA | the deployment; **no certificate exists and the bootstrap does not issue one** — the services listen on plain HTTP and would need their own TLS listener first |
+| Gateway → services | each service | internal CA | the deployment: `bootstrap-secrets.sh` issues one server certificate per service, naming the Service and its `<name>.<namespace>.svc` forms as SANs, and the gateway loads that CA from `TLS_CA_FILE`. **No Deployment mounts the certificate yet**, so the base manifests still serve these hops in plaintext (T7.7) |
 | Services → PostgreSQL | PostgreSQL | internal CA | the deployment |
 | `jobs`/`risk` → RabbitMQ (AMQP) | RabbitMQ | internal CA | the deployment |
 | Services → IdP (OIDC, JWKS, Admin API) | Keycloak | public CA via the ingress | the identity deployment |
@@ -41,8 +41,8 @@ Tests cover, per guard: production with the insecure form returns the exact mess
 
 ## What is not done
 
-- **No certificate exists yet** for PostgreSQL, RabbitMQ or the internal hops. The production compose file is therefore fail-closed: it will refuse to start until its URLs point at TLS endpoints with a root certificate. That is the intended behaviour of a guard and not a working deployment.
-- The Kubernetes manifests carry the TLS wiring for the **data plane** only (PostgreSQL and RabbitMQ server certificates from an internal CA, `amqps` only, plaintext AMQP listener disabled). They carry nothing for the gateway's upstreams: `deploy/k8s/base/config.yaml` still points at `http://`, and no service terminates TLS, so that base cannot start the gateway as written. **They have never been applied**; see `odd/tasks/kubernetes-deployment.md`.
+- **The certificates are issued but not mounted.** `deploy/k8s/base/workloads.yaml` sets neither `TLS_CERT_FILE`, `TLS_KEY_FILE` nor `TLS_CA_FILE` and mounts no `*-tls` Secret, so with `APP_ENV: staging` its pods refuse to start rather than serve in clear (T7.7 in `odd/tasks/kubernetes-deployment.md`). Nothing has been applied to a cluster, so no pod has mounted one of these certificates and no handshake has run there (T9). The production compose file is fail-closed for the same reason: it will refuse to start until its URLs point at TLS endpoints with a root certificate, which is the intended behaviour of a guard and not a working deployment.
+- The Kubernetes manifests carry the TLS wiring for the **data plane** only (PostgreSQL and RabbitMQ server certificates from an internal CA, `amqps` only, plaintext AMQP listener disabled). They carry nothing for the gateway's upstreams: `deploy/k8s/base/config.yaml` still points at `http://`, and no application Deployment mounts a certificate, so that base cannot start the gateway as written. **They have never been applied**; see `odd/tasks/kubernetes-deployment.md`.
 - The verification cases that need a live environment remain unrun: a secure connection succeeding, an untrusted certificate rejected, an expired certificate rejected, and a hostname mismatch rejected. None can be claimed from a manifest.
 - mTLS was considered and not chosen: inside a single-cluster network the client would have to be identified by a certificate the same cluster issued, and service identity is already carried by the bearer token and, for the broker, by the AMQP user whose permissions BH-04 measures. Revisit it if services ever span networks the project does not control.
 
@@ -51,7 +51,7 @@ Tests cover, per guard: production with the insecure form returns the exact mess
 - [x] Transport paths, termination points, trust sources and certificate ownership are documented above.
 - [x] Insecure configurations are refused at startup outside development.
 - [x] The development-only exception is explicit and fails closed for any other value.
-- [ ] Application settings and deployment configuration are aligned: blocked on provisioning the certificates, which is part of the Kubernetes delivery.
+- [ ] Application settings and deployment configuration are aligned: no longer blocked on provisioning the certificates. `fcbabaf`, now in `main`, emits one certificate per service and wires the runtime environment that consumes them. Still unverified: the deployment security verification is pending, because nothing has been applied to a cluster yet — see T9 in `odd/tasks/kubernetes-deployment.md`.
 
 ## Log
 

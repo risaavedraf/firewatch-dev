@@ -23,12 +23,12 @@ Requisito externo nuevo: la entrega se monta en Kubernetes. Sustituye el sustrat
 | T5 | Jobs de migración en el orden correcto (risk → prevention → jobs) | S3 | inline | Hecho en `dd9a542` — un Job con initContainers secuenciales; contrato ejecutable en `backend/deploy/k8s/tests/render-contract.sh` |
 | T6 | Job que aprovisiona broker e identidades con el script existente | S3 | inline | Hecho en `dd9a542` — el script del repositorio montado desde ConfigMap; la API de administración pasó a TLS 15671 |
 | **T7** | **Deployments de la aplicación contra los secretos reales, sin `replace-before-deploy`** — bloque abierto, partido en nueve unidades T7.1–T7.9; la dependencia de cada una va en su propia celda | S1 | inline | En curso: T7.1–T7.6 hechas; quedan T7.7, T7.8 y T7.9 |
-| T7.1 | **T7.1 — Gateway: TLS de entrada, upstreams HTTPS y CA de confianza.** Superficie disjunta: en paralelo con T7.2–T7.5 | S1 | inline | Hecho en `069b418` |
-| T7.2 | **T7.2 — jobs: TLS de entrada, AMQP con CA propia y JWKS con CA.** Superficie disjunta: en paralelo con T7.1 y T7.3–T7.5 | S1 | inline | Hecho en `e8e085f` |
-| T7.3 | **T7.3 — risk: TLS de entrada, AMQP con CA propia, JWKS y cliente de inferencia con CA.** Superficie disjunta: en paralelo con T7.1, T7.2, T7.4 y T7.5 | S1 | inline | Hecho en `b2af3b2` |
-| T7.4 | **T7.4 — prevention: TLS de entrada en 8084, JWKS y cliente administrativo del directorio con CA.** Superficie disjunta: en paralelo con T7.1–T7.3 y T7.5 | S1 | inline | Hecho en `52e943a` |
-| T7.5 | **T7.5 — inference: TLS de entrada.** Superficie disjunta: en paralelo con T7.1–T7.4 | S1 | inline | Hecho en `74145c6` |
-| T7.6 | **T7.6 — secretos de runtime y certificados por servicio.** Superficie disjunta: en paralelo con T7.7, T7.8 y con T7.1–T7.5 | S1 | inline | Hecho en `9f225e2` |
+| T7.1 | **T7.1 — Gateway: TLS de entrada, upstreams HTTPS y CA de confianza.** Superficie disjunta: en paralelo con T7.2–T7.5 | S1 | inline | Hecho en `300fa29` |
+| T7.2 | **T7.2 — jobs: TLS de entrada, AMQP con CA propia y JWKS con CA.** Superficie disjunta: en paralelo con T7.1 y T7.3–T7.5 | S1 | inline | Hecho en `c42f254` |
+| T7.3 | **T7.3 — risk: TLS de entrada, AMQP con CA propia, JWKS y cliente de inferencia con CA.** Superficie disjunta: en paralelo con T7.1, T7.2, T7.4 y T7.5 | S1 | inline | Hecho en `4e4cd7b` |
+| T7.4 | **T7.4 — prevention: TLS de entrada en 8084, JWKS y cliente administrativo del directorio con CA.** Superficie disjunta: en paralelo con T7.1–T7.3 y T7.5 | S1 | inline | Hecho en `6662ac4` |
+| T7.5 | **T7.5 — inference: TLS de entrada.** Superficie disjunta: en paralelo con T7.1–T7.4 | S1 | inline | Hecho en `e1f36a0` |
+| T7.6 | **T7.6 — secretos de runtime y certificados por servicio.** Superficie disjunta: en paralelo con T7.7, T7.8 y con T7.1–T7.5 | S1 | inline | Hecho en `fcbabaf` |
 | T7.7 | **T7.7 — manifiestos de la aplicación.** Superficie disjunta: en paralelo con T7.6, T7.8 y con T7.1–T7.5 | S1 | inline | Pendiente |
 | T7.8 | **T7.8 — Keycloak e inferencia en el clúster.** Superficie disjunta: en paralelo con T7.6, T7.7 y con T7.1–T7.5 | S1 | inline | Pendiente |
 | T7.9 | **T7.9 — contrato de render ampliado.** Va al final: comprueba el resultado de todas las unidades, así que no se ejecuta en paralelo con ninguna | S1 | inline | Pendiente |
@@ -170,9 +170,46 @@ Una sesión anterior dejó las dos unidades escritas y sin commitear. Esta las c
 
 **PRs publicados.** 1 = #57, 2 = #58, 3 = #59, 4 = #60 (base: rama del PR 1), 5 = #61, 6 = #62, 7 = #63 y 8 = esta rama. Por eso la 📍 desapareció de la tabla: no queda ninguna rebanada pendiente de publicar.
 
+**L16 (2026-11-10) — las ocho rebanadas entraron en `main`; `main` queda en rojo por tres defectos que no vienen de ellas.**
+
+**Fusión, en este orden.** `f369b43` (#57) → `e077ef4` (#60) → `f4f850c` (#64) → `1fc564f` (#58) → `4afdba6` (#59) → `0bf7413` (#61) → `14b65f7` (#62) → `c0eedd4` (#63). Cabeza de `main` tras el frente: `c0eedd4`.
+
+**Las rebanadas 4 y 8 se reapuntaron antes de fusionarlas.** Las dos tenían como base ramas de otros PRs —la 4 la del PR 1 y la 8 la del PR 4—, así que se reapuntaron a `main` con `gh pr edit --base main` antes del merge. Por eso el orden de fusión no es el de publicación: entra primero la 4 y solo después la 8, y de ahí 57 → 60 → 64 → 58, 59, 61, 62, 63.
+
+**Se usaron merge commits, no squash.** Este documento cita SHAs concretos rebanada por rebanada, y aplastar los commits los dejaría huérfanos: ningún corte de la tabla de «Plan de entrega (stacked-to-main)» se podría comprobar contra la historia. El merge commit conserva el límite de cada rebanada.
+
+**Verificación de que `main` tiene todo el contenido.** `git diff --stat origin/main feat/k8s-bootstrap-jobs` nombra un solo archivo, `odd/tasks/kubernetes-deployment.md`, con 19 inserciones y 48 borrados al ir de `main` a la rama; la diferencia va a favor de `main`, que tiene la versión corregida del documento. No queda ningún archivo de código en la rama sin entrar en `main`.
+
+**Tres defectos dejan `main` en rojo, y ninguno lo introdujeron estas rebanadas.**
+
+1. `backend/services/risk/internal/messaging/broker_test.go` no pasa `gofmt`: una línea en blanco doble antes de `TestPublishesOnItsOwnExchange`. Es el único archivo de todo el backend que lo incumple, y ya fallaba en `babf7d3`, antes del frente.
+2. El workflow `Backend integration` falla en `main` desde antes del frente. Está sin diagnosticar: el log solo dice `exit code 1`.
+3. El job `compose` falla los contract tests del directorio de prevention —`TestUsersContractSuccessResponse`, `TestUsersContractUnauthorizedResponse`, `TestUsersContractForbiddenResponse`, `TestUsersContractDirectoryUnavailableResponse`, `TestUsersContractDirectoryUpstreamFailedResponse`, `TestDirectoryUserSchemaRejectsAnUndocumentedField`, `TestCreateActionContractAssignmentResponses` y `TestPreventiveActionSchemaDocumentsBothAssignments`— con `directory_not_configured` y `directory_read_failed`: el harness del stack no le pasa al servicio el endpoint del directorio de Keycloak. Vienen del trabajo del directorio (`ac2ce05`), no de TLS.
+
+**Consecuencia operativa.** Con `main` rojo, un fallo nuevo no se distingue de uno heredado sin mirar si ese workflow ya fallaba en un commit anterior. Cualquier lectura de CI sobre este frente empieza por la historia del workflow, no por el color del check.
+
+**L17 (2026-11-10) — los SHA que cita este documento no son los que viven en `main`: mapa de traducción.**
+
+**Qué pasó.** Las rebanadas 2, 3, 5, 6 y 7 se publicaron con `git cherry-pick` sobre `main` —así lo fija la mecanización de «Plan de entrega (stacked-to-main)»—, así que el commit que quedó en `main` es el mismo parche con SHA distinto del original que este documento cita. Las rebanadas 4 y 8 tampoco conservaron el suyo: cada una se repobló sobre su base real, la 4 sobre `eede268` y la 8 sobre `fcbabaf`, porque sus parches no aplicaban sobre `main`. La rebanada 1 se fusionó sin cherry-pick, así que sus SHA sí son los originales: `dd9a542`, `63a5124`, `51713e5`, `9ae67e1`, `7c94e02`, `54734c9`, `eede268`.
+
+**Consecuencia.** Quien busque en `main` un SHA citado en L13 —`b2af3b2`, `52e943a`—, en L15 —`9f225e2`, `bf6af99`, `73611a7`— o en la columna «Commits incluidos» de la tabla de entrega, no lo encuentra. Esas entradas y esa tabla se quedan como están: son registro histórico de lo que se publicó, no una descripción de `main`. La columna **Estado** de la tabla de tareas sí cita ya el SHA de `main` en T7.1–T7.6.
+
+**El mapa.** SHA citado en el documento → SHA que sí existe en `main`:
+
+- `74145c6` → `e1f36a0` (inference)
+- `069b418` → `300fa29` (gateway)
+- `9f225e2` → `fcbabaf` (certificado por servicio y entorno runtime)
+- `e8e085f` → `c42f254` (jobs)
+- `b2af3b2` → `4e4cd7b` (risk)
+- `52e943a` → `6662ac4` (prevention)
+- `bf6af99` → `d64e667` (cierre documental)
+- `73611a7` → `f2f695e` (plan de entrega)
+
+**Verificación.** `git merge-base --is-ancestor` sobre los dieciséis SHA del mapa: los ocho citados **no** son ancestros de `main` y los ocho reemplazos **sí**; los siete de la rebanada 1 también, que es lo que la mantiene fuera del mapa. Cada par da el mismo `git patch-id --stable`, así que el commit de `main` es el mismo parche y no un commit vecino.
+
 ## Plan de entrega (stacked-to-main)
 
-Ocho rebanadas **contiguas**, en este orden, cada una en su propio PR. No se reescribe historial: cada commit pertenece a una sola rebanada y la frontera entre dos rebanadas es un SHA existente. **Las ocho ya están publicadas** —la 1 es #57, la 2 #58, la 3 #59, la 4 #60, la 5 #61, la 6 #62, la 7 #63 y la 8 esta rama—, así que la 📍 que marcaba «la siguiente a publicar» desaparece: no hay siguiente. La columna **Base** dice la rama sobre la que cada rebanada aplica de verdad, que no es `main` en las dos que comparten archivos con una anterior.
+Ocho rebanadas **contiguas**, en este orden, cada una en su propio PR. **Las ocho están ya fusionadas en `main`, con la cabeza `c0eedd4`**, así que este plan describe historia consumada y no trabajo pendiente; el orden de fusión y lo que quedó abierto está en L16. No se reescribe historial: cada commit pertenece a una sola rebanada y la frontera entre dos rebanadas es un SHA existente. **Las ocho ya están publicadas** —la 1 es #57, la 2 #58, la 3 #59, la 4 #60, la 5 #61, la 6 #62, la 7 #63 y la 8 esta rama—, así que la 📍 que marcaba «la siguiente a publicar» desaparece: no hay siguiente. La columna **Base** dice la rama sobre la que cada rebanada aplica de verdad, que no es `main` en las dos que comparten archivos con una anterior.
 
 | PR | Base | Rango de commits | Commits incluidos | Líneas cambiadas | Unidad de comportamiento que entrega |
 | --- | --- | --- | --- | --- | --- |
@@ -215,3 +252,50 @@ main  babf7d3  (merge-base con el frente)
 - Cada rama encadenada se rebasa sobre `main` cuando la anterior se fusiona: la 4 queda en `main` tras el merge del PR 1 y la 8 tras el del PR 4.
 
 Nada se aplana ni se reordena: la frontera de cada PR sigue siendo un SHA existente. El diff publicado se comparó con el original rebanada por rebanada con `git patch-id --stable`, y las ocho dan el mismo id.
+
+**L18 (2026-11-10) — el defecto 2 de L16 queda diagnosticado y cerrado: no faltaban certificados, faltaba `APP_ENV` en un servicio.**
+
+**El diagnóstico que faltaba.** Los runs `42895529340` (push) y `42895560420` (PR) sobre `46e8ff1` dejan `Frontend`, `Risk` y `Prevention` en verde y solo `Backend integration` en rojo, y dentro de él un único job, `compose`. El paso que falla es `docker compose up -d --build`, y el mensaje es de Compose, no del servicio:
+
+```text
+dependency failed to start: container firewatch-inference-1 is unhealthy
+```
+
+La causa no está en ese mensaje sino en el log del contenedor, que solo imprime el paso `Migration diagnostics on failure`:
+
+```text
+{"level":"ERROR","msg":"service_stopped","error":"TLS_CERT_FILE is required outside development: set TLS_CERT_FILE and TLS_KEY_FILE, or run with APP_ENV=development for plaintext"}
+```
+
+**Por qué solo inference.** Cinco servicios tienen el guard de transporte —`gateway`, `jobs`, `prevention`, `risk` e `inference`— y los cinco exigen el literal `development` para aceptar texto plano. Cuatro de ellos fusionan el ancla `*oidc`, que declara `APP_ENV: development`; `inference` no toma OIDC, no fusiona el ancla, y era el único que nunca recibía la variable. El guard estaba escrito esperando que el stack local la declarara —su propio comentario dice "the literal value the local stack sets"—, así que el defecto fue una omisión de cableado en `docker-compose.yml`, no un certificado ausente.
+
+**La corrección.** `APP_ENV: development` en el bloque `environment` de `inference`, con el comentario que explica por qué lo declara sin heredar el ancla, para que nadie lo borre al limpiar. No se generan certificados en CI: el stack de desarrollo sirve texto plano a propósito, igual que los otros cuatro servicios, y el stack de producción es un archivo aparte que no incluye `inference`.
+
+**Por qué no lo cazó nada.** El defecto llegó a `main` porque ninguna prueba miraba el cableado de entorno de Compose: el guard tiene pruebas propias y el arranque tiene su smoke, pero ninguno nota que un servicio nunca recibe la variable. `backend/scripts/test_ci_migration.py` gana `TlsGuardEnvironmentTest`, que deriva del código la lista de servicios con el guard y exige que cada uno reciba `development`, sea en su propio bloque o por el ancla. Corre en el workflow antes de `docker compose up`, sin daemon. Se escribió primero y falló nombrando exactamente un servicio, `inference`.
+
+**Verificación.** `python3 -m unittest discover -s scripts -p test_ci_migration.py`: 18 pruebas, todas en verde. `docker compose config --quiet`: válido, y el bloque de `inference` muestra `APP_ENV: development`. El daemon de Docker no estaba corriendo en la máquina donde se hizo el arreglo, así que no hubo prueba con contenedores: la prueba de extremo a extremo es el run de CI sobre esta rama.
+
+**L19 (2026-11-10) — el cuarto rojo no era el mismo defecto: `broker-topology` pierde una carrera contra la API de administración.**
+
+**Lo que reveló el run.** `60befd0` corrige `inference` —el contenedor pasa a `Healthy`— y el mismo commit produce dos resultados: el run de `pull_request` (`42899423939`) en verde y el de `push` (`42899415104`) en rojo. No es una diferencia de código: los dos prueban el mismo árbol. El fallo es otro, y con la prueba de `inference` ya cerrada queda a la vista:
+
+```text
+Container firewatch-broker-topology-1 Error service "broker-topology" didn't complete successfully: exit 1
+```
+
+Su log, otra vez solo visible en `Migration diagnostics on failure`, dice:
+
+```text
+provisioning: exchanges
+provisioning: PUT /exchanges/firewatch/firewatch.jobs.events: request failed
+```
+
+**La carrera.** `request failed` es la rama de transporte, no un código HTTP: la primera petición murió sin respuesta. El healthcheck del broker contesta por el lado AMQP, así que `depends_on: rabbitmq: service_healthy` libera el aprovisionador mientras el plugin de administración todavía está abriendo el 15672. En el run que pasó, el aprovisionador arrancó con el broker ya asentado; en el que falló, arrancó 0,2 s después del verde y chocó. `set -eu` convertía ese tropiezo de arranque en un stack caído.
+
+**La corrección.** `request` reintenta solo el fallo de transporte, acotado a 30 intentos de un segundo, y escribe el motivo de curl una sola vez al agotarlos: un broker lento ya no tumba el `up`, y un broker que nunca responde falla con su razón en vez de con un contador. Un código HTTP no se reintenta nunca —un 409 que significa que el objeto existente discrepa, o un 401 de credenciales, deben fallar al primer intento—. El `DELETE` del exchange legado pasa por el mismo camino, porque corría al final sin red y un broker reiniciado a mitad lo habría tumbado sin decir nada.
+
+**Verificación.** Tres pruebas nuevas en `BrokerTopologyRetryTest`, con un `curl` falso que es el único del `PATH` del hijo y puede rechazar las primeras N conexiones: el reintento llega a buen término, el reintento se detiene en el límite y conserva el motivo, y un 409 falla al primer intento. Contra el script anterior las dos primeras fallan y la tercera pasa, que es lo que debe hacer: fija el comportamiento que ya existía. Las 21 pruebas del archivo quedan en verde.
+
+**Nota de plataforma.** MSYS/git-bash reescribe un valor de entorno que empieza por `/` como ruta de Windows antes de que lo vea el hijo, así que el patrón del 409 se nombra sin barra inicial. Es una trampa del harness, no del script.
+
+**Frontera de la rebanada.** Los cuatro commits de esta rama —`46e8ff1`, `cd10c4f`, `9f51b4f` y este— son una sola rebanada de revisión: la rama `fix/ci-green` y su PR #65. Supera el umbral de 400 líneas contando pruebas y documento, y no se parte porque los tres rojos y su causa comparten una sola verificación: el run de `Backend integration` sobre el mismo workflow. Partirla dejaría tramos cuyo verde no se puede leer sin el anterior.

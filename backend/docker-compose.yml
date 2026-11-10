@@ -190,6 +190,12 @@ services:
     <<: *hardened
     build: {context: ., dockerfile: services/inference/Dockerfile}
     environment:
+      # It takes no OIDC, so it never merges `*oidc` and would otherwise be the
+      # one service the local stack never tells it is in development. Without
+      # this its transport refuses plaintext and the container exits on boot,
+      # which Compose reports only as `container firewatch-inference-1 is
+      # unhealthy`.
+      APP_ENV: development
       FIREWATCH_MODEL_PATH: /models/logistic.json
     volumes:
       - ./services/inference/testdata/logistic.json:/models/logistic.json:ro

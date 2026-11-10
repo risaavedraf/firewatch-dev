@@ -43,9 +43,9 @@ export type PermissionRow = {
 //     line 49 answers a verified viewer with 403.
 //   backend/services/jobs/internal/handler/api.go:236 wraps the whole jobs mux:
 //     jobs status, job creation, job read and /v1/audit.
-//   backend/services/gateway/internal/handler/gateway.go:70 only proxies
-//     /v1/audit and adds no role of its own; line 153 answers /health/ready before
-//     any bearer check; lines 177-183 require a verifiable bearer with a subject
+//   backend/services/gateway/internal/handler/gateway.go:78 only proxies
+//     /v1/audit and adds no role of its own; line 166 answers /health/ready before
+//     any bearer check; lines 190-196 require a verifiable bearer with a subject
 //     but decide no role.
 // eslint-disable-next-line react-refresh/only-export-components
 export const PERMISSION_MATRIX: readonly PermissionRow[] = [
@@ -53,15 +53,15 @@ export const PERMISSION_MATRIX: readonly PermissionRow[] = [
     capability: 'Disponibilidad del gateway · GET /health/ready',
     viewer: 'Sí: responde 204 sin comprobar token ni rol',
     admin: 'Sí: responde 204 sin comprobar token ni rol',
-    guards: ['backend/services/gateway/internal/handler/gateway.go:153'],
+    guards: ['backend/services/gateway/internal/handler/gateway.go:166'],
   },
   {
     capability: 'Autenticación de cualquier ruta /v1/* · bearer verificado en el gateway',
     viewer: 'Sí: exige un bearer verificable con sujeto; no decide ningún rol',
     admin: 'Sí: exige un bearer verificable con sujeto; no decide ningún rol',
     guards: [
-      'backend/services/gateway/internal/handler/gateway.go:177',
-      'backend/services/gateway/internal/handler/gateway.go:183',
+      'backend/services/gateway/internal/handler/gateway.go:190',
+      'backend/services/gateway/internal/handler/gateway.go:196',
     ],
   },
   {
@@ -164,7 +164,7 @@ export const PERMISSION_MATRIX: readonly PermissionRow[] = [
     guards: [
       'backend/services/jobs/internal/handler/api.go:228',
       'backend/services/jobs/internal/handler/security.go:44',
-      'backend/services/gateway/internal/handler/gateway.go:70',
+      'backend/services/gateway/internal/handler/gateway.go:78',
     ],
   },
   {
@@ -309,7 +309,8 @@ export function SessionView() {
             fila cita la guarda por <code>ruta:línea</code>:{' '}
             <code>backend/services/risk/internal/handler/security.go:59</code> acepta <code>viewer</code> o{' '}
             <code>admin</code> y <code>backend/services/jobs/internal/handler/security.go:44</code> acepta solo{' '}
-            <code>admin</code>, con <code>api.go:89</code> y <code>api.go:160</code> envolviendo sus mux completos. Un
+            <code>admin</code>, con <code>backend/services/risk/internal/handler/api.go:112</code> y{' '}
+            <code>backend/services/jobs/internal/handler/api.go:236</code> envolviendo sus mux completos. Un
             token verificado sin ninguno de esos roles recibe 403; un token que no se puede verificar recibe 401.
           </p>
           <div className="table-wrap">
