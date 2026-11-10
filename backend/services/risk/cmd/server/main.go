@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"crypto/x509"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -119,6 +120,19 @@ func run() error {
 	if os.Getenv("DATABASE_URL") == "" || os.Getenv("AMQP_URL") == "" {
 		return errors.New("database and broker configuration required")
 	}
+	// The crossing contract's transport decisions are taken here: after the migrate
+	// branch, because a migration job holds only DATABASE_URL and never binds a port
+	// or dials the broker, and before any client is built, so a deployment with no
+	// key pair or with a CA bundle that cannot be loaded stops instead of running with
+	// trust it did not ask for.
+	certFile, keyFile, err := startupListenerTLS(os.Getenv("APP_ENV"))
+	if err != nil {
+		return err
+	}
+	rootCAs, err := startupRootCAs()
+	if err != nil {
+		return err
+	}
 	issuer, jwks := os.Getenv("OIDC_ISSUER"), os.Getenv("OIDC_JWKS_URL")
 	for _, value := range []string{issuer, jwks} {
 		u, err := url.Parse(value)
@@ -129,7 +143,9 @@ func run() error {
 	if os.Getenv("OIDC_AUDIENCE") == "" {
 		return errors.New("OIDC_AUDIENCE required")
 	}
-	keyCtx := oidc.ClientContext(ctx, &http.Client{Timeout: 5 * time.Second})
+	// The key-set client trusts the internal CA when TLS_CA_FILE is configured and
+	// stays the bare client with the system roots when it is not.
+	keyCtx := oidc.ClientContext(ctx, newJWKSClient(rootCAs))
 	verifier := oidc.NewVerifier(issuer, oidc.NewRemoteKeySet(keyCtx, jwks), &oidc.Config{ClientID: os.Getenv("OIDC_AUDIENCE"), SupportedSigningAlgs: []string{"RS256"}})
 	store := repository.Store{DB: db}
 	// The active classifier is chosen by configuration rather than by code. The
@@ -143,7 +159,7 @@ func run() error {
 	// registered when INFERENCE_URL is configured, and a MODEL_ID naming it
 	// without that address aborts startup here rather than at the first
 	// prediction. See classifierRegistry.
-	classifiers, activeModel, active, err := classifierRegistry(ctx, os.Getenv)
+	classifiers, activeModel, active, err := classifierRegistry(ctx, os.Getenv, rootCAs)
 	if err != nil {
 		return err
 	}
@@ -222,7 +238,7 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	broker := &messaging.Broker{DB: db, URL: amqpURL, Handle: publisher.Publish, ReportFailure: store.RecordJobFailure}
+	broker := &messaging.Broker{DB: db, URL: amqpURL, RootCAs: rootCAs, Handle: publisher.Publish, ReportFailure: store.RecordJobFailure}
 	workerDone := make(chan struct{})
 	go func() { defer close(workerDone); broker.Run(ctx) }()
 	defer func() { stop(); <-workerDone }()
@@ -276,7 +292,7 @@ func run() error {
 		defer cancel()
 		_ = srv.Shutdown(shutdown)
 	}()
-	err = srv.ListenAndServe()
+	err = listenAndServe(srv, certFile, keyFile)
 	if errors.Is(err, http.ErrServerClosed) {
 		return nil
 	}
@@ -319,15 +335,19 @@ func parseInferenceTimeout(raw string) (time.Duration, error) {
 // selection that has no address - can be exercised without a database or a
 // listener.
 //
+// rootCAs is the internal CA the model path verifies the inference service with: a
+// nil pool keeps the system roots, exactly like the other clients of this process.
+//
 // It returns the selected version identifier as well as the classifier, because
 // the startup check that follows reads the models registry row for that version.
 //
 // Registering the model path reads the inference service's model document
 // (GET /v1/model, once) because the artifact's declared feature list is what the
-// classifier sends. A service that is down, or that answers something which is not
-// a coherent model document, therefore fails startup here by name instead of at the
-// first prediction; ctx bounds that read.
-func classifierRegistry(ctx context.Context, getenv func(string) string) (*classify.Registry, string, classify.Classifier, error) {
+// classifier sends. A service that is down, that answers something which is not
+// a coherent model document, or that cannot be verified with the configured CA
+// therefore fails startup here by name instead of at the first prediction; ctx
+// bounds that read.
+func classifierRegistry(ctx context.Context, getenv func(string) string, rootCAs *x509.CertPool) (*classify.Registry, string, classify.Classifier, error) {
 	classifiers := classify.NewRegistry()
 	if err := classifiers.Register(classify.NewAcademicRuleV1()); err != nil {
 		return nil, "", nil, fmt.Errorf("register classifier: %w", err)
@@ -356,7 +376,7 @@ func classifierRegistry(ctx context.Context, getenv func(string) string) (*class
 		if err != nil {
 			return nil, "", nil, err
 		}
-		fixture, err := classify.NewMLFixtureV1(ctx, baseURL, timeout)
+		fixture, err := classify.NewMLFixtureV1WithRootCAs(ctx, baseURL, timeout, rootCAs)
 		if err != nil {
 			return nil, "", nil, fmt.Errorf("configure the inference classifier (check %s and that the inference service is up with its model document): %w", inferenceURLEnv, err)
 		}

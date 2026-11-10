@@ -215,7 +215,7 @@ func TestClassifierRegistryRefusesToStartWithoutTheModelDocument(t *testing.T) {
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			classifiers, selected, active, err := classifierRegistry(context.Background(), classifierEnvironment(tc.env))
+			classifiers, selected, active, err := classifierRegistry(context.Background(), classifierEnvironment(tc.env), nil)
 			if err == nil {
 				t.Fatalf("startup accepted %q as %q with %q registered", tc.env[inferenceURLEnv], selected, active.ID())
 			}
@@ -311,7 +311,7 @@ func TestClassifierRegistrySelection(t *testing.T) {
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			classifiers, selected, active, err := classifierRegistry(context.Background(), classifierEnvironment(tc.env))
+			classifiers, selected, active, err := classifierRegistry(context.Background(), classifierEnvironment(tc.env), nil)
 			if tc.wantErr != "" {
 				if err == nil {
 					t.Fatalf("the configuration was accepted and selected %q", selected)

@@ -3,6 +3,8 @@ package classify
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -169,6 +171,12 @@ type InferenceConfig struct {
 	// construction performs. A prediction that takes longer than this is a
 	// failure, not a slow success.
 	Timeout time.Duration
+	// RootCAs is the internal CA the confidence of this deployment rests on
+	// (odd/tasks/kubernetes-deployment.md, L10): when it is set, it is the only
+	// anchor the inference service's certificate is verified with. A nil pool keeps
+	// the system roots this client used before TLS_CA_FILE existed, so an unset
+	// variable cannot reshape the connection.
+	RootCAs *x509.CertPool
 	// Parameters describes the artifact this version executes. It is what the
 	// params hash fingerprints, so it must be a description of the artifact and
 	// not of the deployment: the URL and the timeout are configuration and
@@ -239,7 +247,9 @@ func NewInferenceClassifier(ctx context.Context, config InferenceConfig) (Infere
 	// The client's timeout and the per-request context carry the same bound. The
 	// context is what expresses the bound to the transport; the client timeout is
 	// the backstop that also covers a body that stalls after the headers arrived.
-	client := &http.Client{Timeout: config.Timeout}
+	// A nil pool leaves the client with no Transport at all, which is the bare
+	// client this process used before TLS_CA_FILE existed.
+	client := newInferenceClient(config.Timeout, config.RootCAs)
 	document, err := fetchModelDocument(ctx, client, base+modelDocumentPath, config.Timeout)
 	if err != nil {
 		return InferenceClassifier{}, fmt.Errorf("classify: the inference classifier for %q: %w", config.Version, err)
@@ -267,14 +277,38 @@ func NewInferenceClassifier(ctx context.Context, config InferenceConfig) (Infere
 }
 
 // NewMLFixtureV1 returns the fixture-backed model path: the registry version
-// that runs the committed logistic artifact while no trained model exists.
+// that runs the committed logistic artifact while no trained model exists. It
+// trusts the system roots; use NewMLFixtureV1WithRootCAs for a deployment that
+// reaches the inference service over TLS with the internal CA.
 func NewMLFixtureV1(ctx context.Context, baseURL string, timeout time.Duration) (InferenceClassifier, error) {
+	return NewMLFixtureV1WithRootCAs(ctx, baseURL, timeout, nil)
+}
+
+// NewMLFixtureV1WithRootCAs is NewMLFixtureV1 with the internal CA of the
+// deployment: rootCAs becomes the only anchor the inference service is verified
+// with, in the model-document read at construction and in every prediction. A nil
+// pool is exactly NewMLFixtureV1, so the caller does not need a branch when
+// TLS_CA_FILE is unset.
+func NewMLFixtureV1WithRootCAs(ctx context.Context, baseURL string, timeout time.Duration, rootCAs *x509.CertPool) (InferenceClassifier, error) {
 	return NewInferenceClassifier(ctx, InferenceConfig{
 		Version:    MLFixtureV1ID,
 		BaseURL:    baseURL,
 		Timeout:    timeout,
 		Parameters: MLFixtureV1Params(),
+		RootCAs:    rootCAs,
 	})
+}
+
+// newInferenceClient is the client every call to the inference service goes
+// through. A configured pool replaces the system roots, so the service is reached
+// only through a certificate the internal CA vouches for; without one the client
+// carries no Transport at all, which is the bare client this package always used.
+func newInferenceClient(timeout time.Duration, rootCAs *x509.CertPool) *http.Client {
+	client := &http.Client{Timeout: timeout}
+	if rootCAs != nil {
+		client.Transport = &http.Transport{TLSClientConfig: &tls.Config{RootCAs: rootCAs}}
+	}
+	return client
 }
 
 // serviceBaseURL validates the configured address and returns it without a

@@ -2,10 +2,13 @@ package messaging
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/url"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -39,6 +42,12 @@ const deadLetterRefreshInterval = 3 * time.Second
 type Broker struct {
 	DB  *pgxpool.Pool
 	URL string
+	// RootCAs is the internal CA the broker handshake verifies with, loaded once at
+	// startup from TLS_CA_FILE. A nil pool is the configuration this broker dialed
+	// before the internal CA existed: no TLSClientConfig at all, so the library keeps
+	// deriving the whole TLS configuration from the URL and the system roots answer
+	// for the certificate.
+	RootCAs *x509.CertPool
 	// Ready is the connection signal; HTTP uses the coherent Snapshot instead.
 	Ready         atomic.Bool
 	Published     atomic.Uint64
@@ -117,8 +126,42 @@ func (b *Broker) Run(ctx context.Context) {
 	}
 }
 
+// dialConfig builds the connection configuration the worker dials with. It is a
+// method so the broker's own field is what the dial uses, and no caller can hand
+// the worker a configuration this broker was not built with.
+func (b *Broker) dialConfig() amqp.Config {
+	return amqpConfig(b.URL, b.RootCAs)
+}
+
+// amqpConfig is the configuration of one dial. A configured pool becomes the only
+// root the TLS handshake trusts and the URL's own host becomes the ServerName, so
+// the certificate is checked against the name the deployment dialed instead of a
+// literal baked into the binary. Without a pool the configuration is exactly the
+// one this broker dialed before TLS_CA_FILE existed - same heartbeat, same
+// five-second dial, no TLSClientConfig - so an unset variable cannot reshape the
+// connection.
+func amqpConfig(raw string, rootCAs *x509.CertPool) amqp.Config {
+	config := amqp.Config{Heartbeat: 10 * time.Second, Dial: amqp.DefaultDial(5 * time.Second)}
+	if rootCAs == nil {
+		return config
+	}
+	config.TLSClientConfig = &tls.Config{RootCAs: rootCAs, ServerName: brokerServerName(raw)}
+	return config
+}
+
+// brokerServerName takes the name the certificate must match from the broker URL.
+// An empty result leaves the library to derive it from the same URL, so an
+// unparsable value keeps its existing error instead of gaining a new one here.
+func brokerServerName(raw string) string {
+	parsed, err := url.Parse(raw)
+	if err != nil {
+		return ""
+	}
+	return parsed.Hostname()
+}
+
 func (b *Broker) session(ctx context.Context) error {
-	conn, err := amqp.DialConfig(b.URL, amqp.Config{Heartbeat: 10 * time.Second, Dial: amqp.DefaultDial(5 * time.Second)})
+	conn, err := amqp.DialConfig(b.URL, b.dialConfig())
 	if err != nil {
 		return err
 	}
