@@ -118,3 +118,14 @@ Requisito externo nuevo: la entrega se monta en Kubernetes. Sustituye el sustrat
 **Paridad del Compose de producción, verificada.** `backend/docker-compose.prod.yml:35` declara `APP_ENV: production` con `AMQP_URL: amqp://` (`:193`, `:205`) y DSN `sslmode=disable` (`:192`, `:204`), es decir, el Compose de producción tampoco pasaría esas guardas. No se corrige en T7; se registra como pendiente para T10.
 
 **Límite de tamaño por unidad.** Cada unidad debe caber en un candidato de revisión de unas 400 líneas autoradas, porque el relay de revisión corta alrededor de 16 minutos por lente.
+
+**L11 (2026-11-10) — límite de entrega.** La rama `feat/k8s-bootstrap-jobs` acumula **634 líneas autoradas en 6 commits** desde `main` (`babf7d3`), medidas con los archivos de bloqueo excluidos. Eso pasa la rebanada de revisión de ~400 líneas que fija el protocolo.
+
+**La entrega va en dos rebanadas encadenadas, decidida.** No hay ningún PR abierto todavía, así que se escribe como:
+
+- **Rebanada A — sustrato de arranque:** `babf7d3..7c94e02`, cinco commits: el plano de datos y los dos Jobs de arranque con su contrato de render.
+- **Rebanada B — cargas de trabajo con TLS:** `54734c9` en adelante, el bloque T7 completo.
+
+La B se apila sobre la A: un PR para la A y otro para la B, y la B no se abre hasta que la A esté aceptada. Ninguna se abre todavía: abrir PR es decisión del responsable, no de esta sesión.
+
+**El motivo.** El relay de revisión nativa corta alrededor de 16 minutos por lente —lo que ya ocurrió en el linaje abandonado—, así que un candidato de la rama entera no es revisable; cada rebanada y cada unidad de T7 se revisa sobre su propio commit.
