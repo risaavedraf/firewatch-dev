@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"crypto/rand"
+	"crypto/x509"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -41,6 +42,13 @@ type Verifier interface {
 }
 
 func New(verifier Verifier, jobs, risk, prevention *url.URL, webOrigin string) http.Handler {
+	return NewWithRootCAs(verifier, jobs, risk, prevention, webOrigin, nil)
+}
+
+// NewWithRootCAs is New with the internal CA the proxy trusts for its https
+// upstreams. A nil pool is the system roots, so every caller that has no
+// TLS_CA_FILE keeps the behaviour it had before this parameter existed.
+func NewWithRootCAs(verifier Verifier, jobs, risk, prevention *url.URL, webOrigin string, rootCAs *x509.CertPool) http.Handler {
 	mux := http.NewServeMux()
 	proxy := func(target *url.URL) http.Handler {
 		return &httputil.ReverseProxy{
@@ -61,7 +69,7 @@ func New(verifier Verifier, jobs, risk, prevention *url.URL, webOrigin string) h
 				res.Header.Del("X-Request-ID")
 				return nil
 			},
-			Transport:    &http.Transport{MaxIdleConns: 100, MaxIdleConnsPerHost: 20, IdleConnTimeout: 60 * time.Second, ResponseHeaderTimeout: 10 * time.Second},
+			Transport:    newUpstreamTransport(rootCAs),
 			ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) { failure(w, 502, "upstream_unavailable") },
 		}
 	}

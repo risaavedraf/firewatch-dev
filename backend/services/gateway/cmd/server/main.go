@@ -44,7 +44,14 @@ func run() error {
 	if os.Getenv("APP_ENV") != "development" && (issuer.Scheme != "https" || jwks.Scheme != "https") {
 		return errors.New("OIDC requires HTTPS outside development")
 	}
-	keyCtx := oidc.ClientContext(ctx, &http.Client{Timeout: 5 * time.Second})
+	// The internal CA is loaded before any outbound client is built, so the key-set
+	// fetch and the proxy share one pool and a bundle that cannot be loaded stops
+	// startup instead of leaving a client with roots it was not configured with.
+	rootCAs, err := startupRootCAs()
+	if err != nil {
+		return err
+	}
+	keyCtx := oidc.ClientContext(ctx, newJWKSClient(rootCAs))
 	verifier := oidc.NewVerifier(issuer.String(), oidc.NewRemoteKeySet(keyCtx, jwks.String()), &oidc.Config{ClientID: required("OIDC_AUDIENCE"), SupportedSigningAlgs: []string{"RS256"}})
 	// WEB_ORIGIN is optional on purpose: an unset value disables CORS entirely.
 	webOrigin := os.Getenv("WEB_ORIGIN")
@@ -55,14 +62,21 @@ func run() error {
 	if err := startupTransport(os.Getenv("APP_ENV")); err != nil {
 		return err
 	}
-	srv := &http.Server{Addr: ":8080", Handler: handler.New(verifier, jobsURL, riskURL, preventionURL, webOrigin), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 10 * time.Second, WriteTimeout: 15 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 16384}
+	// The listener's transport is decided before the server is built, so a
+	// deployment with no key pair stops here instead of binding a plaintext port
+	// nobody notices.
+	certFile, keyFile, err := startupListenerTLS(os.Getenv("APP_ENV"))
+	if err != nil {
+		return err
+	}
+	srv := &http.Server{Addr: ":8080", Handler: handler.NewWithRootCAs(verifier, jobsURL, riskURL, preventionURL, webOrigin, rootCAs), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 10 * time.Second, WriteTimeout: 15 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 16384}
 	go func() {
 		<-ctx.Done()
 		shutdown, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 		_ = srv.Shutdown(shutdown)
 	}()
-	err := srv.ListenAndServe()
+	err = listenAndServe(srv, certFile, keyFile)
 	if errors.Is(err, http.ErrServerClosed) {
 		return nil
 	}
