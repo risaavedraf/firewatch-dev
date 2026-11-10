@@ -20,6 +20,8 @@
 
 **Ninguna rama se fusiona sin decisión humana.**
 
+**Sobre el límite de 80 columnas.** `yamllint` corre aquí con sus valores por defecto y sin configuración en el repositorio, así que marca líneas que ya existen en `main`. Nueve de ellas son comentarios y continuaciones de shell en `training.yml` y se podrían reflowar; las dos de `_go-service.yml` no: fijan `aquasec/trivy:0.69.3@sha256:<64 hex>` dentro de una continuación de shell, y una línea que pinnea un digest de 64 caracteres no baja de 80 columnas en ninguna forma. Reflowar las nueve dejaría las dos imposibles en rojo igual, así que no se toca ninguna: `.yamllint.yml` declara la política real (120 columnas, aviso) para quien corra `yamllint` a mano, y las líneas quedan como están.
+
 ## Log
 
 **L1 (2026-11-10) — autorización.** «puedes hacer todo en diferentes ramas porfa».

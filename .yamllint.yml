@@ -1,0 +1,14 @@
+---
+# yamllint's defaults cap a line at 80 columns. The CI workflows keep pinned
+# action commit SHAs and shell continuations that cannot be wrapped without
+# changing what executes, and the repository already carries such lines on
+# main. This file states the policy the repository actually needs instead of
+# leaving every editor to guess, or to flag lines it cannot fix.
+extends: default
+
+rules:
+  # 120 columns fits a 40-character action SHA plus its indentation and the
+  # major-version comment, which is the widest construct here.
+  line-length:
+    max: 120
+    level: warning
