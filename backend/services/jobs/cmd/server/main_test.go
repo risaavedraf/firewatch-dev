@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -311,5 +312,40 @@ func TestStatusRecorderReportsTheCodeNetHTTPSends(t *testing.T) {
 				t.Fatalf("recorded status %d want %d", status, tc.want)
 			}
 		})
+	}
+}
+
+// TestRunRefusesMissingListenerTLSOutsideDevelopment pins the process-level wiring
+// of T7.2's inbound half: outside development a start with no key pair stops before
+// anything is built or bound, and the message names the variable, so the refusal is
+// not something an operator has to infer from a plaintext listener.
+func TestRunRefusesMissingListenerTLSOutsideDevelopment(t *testing.T) {
+	t.Setenv("APP_ENV", "production")
+	t.Setenv("DATABASE_URL", encryptedDatabaseURL)
+	t.Setenv("AMQP_URL", encryptedBrokerURL)
+	t.Setenv(tlsCertFileEnv, "")
+	t.Setenv(tlsKeyFileEnv, "")
+	err := run()
+	if err == nil || !strings.Contains(err.Error(), tlsCertFileEnv) {
+		t.Fatalf("run() = %v, want a refusal naming %s", err, tlsCertFileEnv)
+	}
+}
+
+// TestRunMigrateDoesNotRequireListenerTLS keeps the migration job of T5 working:
+// it holds only DATABASE_URL, never binds a port and never dials, so it must not
+// be asked for the server key pair. The database is a closed loopback port, so the
+// run fails immediately on the connection instead of reaching a real server.
+func TestRunMigrateDoesNotRequireListenerTLS(t *testing.T) {
+	args := os.Args
+	t.Cleanup(func() { os.Args = args })
+	os.Args = []string{"server", "migrate"}
+	t.Setenv("APP_ENV", "staging")
+	t.Setenv("DATABASE_URL", "postgres://user:pass@127.0.0.1:1/x?sslmode=verify-full")
+	t.Setenv("AMQP_URL", encryptedBrokerURL)
+	t.Setenv(tlsCertFileEnv, "")
+	t.Setenv(tlsKeyFileEnv, "")
+	err := run()
+	if err == nil || strings.Contains(err.Error(), tlsCertFileEnv) {
+		t.Fatalf("run(migrate) = %v, want the migration connection failure and no key-pair requirement", err)
 	}
 }
