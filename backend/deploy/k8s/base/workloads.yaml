@@ -1,3 +1,36 @@
+# The application Deployments, with the transport the crossing contract fixes
+# (odd/tasks/kubernetes-deployment.md, L10): every service terminates TLS on
+# its own port and trusts the internal CA for whatever it calls outbound.
+#
+# Each pod mounts exactly one Secret, `<service>-tls`, which
+# deploy/k8s/bootstrap-secrets.sh issues from the internal CA with three keys
+# — `tls.crt`, `tls.key` and `ca.crt` — at the three paths the services read
+# and the runtime DSNs already name: /etc/tls/tls.crt, /etc/tls/tls.key and
+# /etc/tls/ca.crt. One mount and not two, because those three files are one
+# certificate's material: splitting the CA out would let a pod serve a
+# certificate issued by a CA it does not trust, and the DSN's `sslrootcert`
+# names that same path.
+#
+# `TLS_CERT_FILE` and `TLS_KEY_FILE` turn the listener into TLS. A pod that
+# finds neither refuses to start outside `APP_ENV=development`, so these
+# manifests cannot serve in the clear by omission: with `APP_ENV: staging`
+# in config.yaml, a missing mount is a crash-loop that names the missing
+# variable, not a silent plaintext port. `TLS_CA_FILE` is the outbound
+# half: the proxy, the key-set fetch, the broker client and the directory
+# client verify the internal services against that bundle instead of the
+# public roots. inference has no Deployment in this file — T7.8 adds it — and
+# it declares no outbound client, so it takes two of these variables and not
+# three.
+#
+# The mount is a volume, not the container filesystem, so
+# `readOnlyRootFilesystem` stays true: the kubelet assembles volume mounts
+# before the root filesystem is remade read-only, and nothing here writes
+# anywhere either way. `fsGroup` is what makes the material readable at
+# all — the pod runs as 65532 and the Secret is mounted 0440, so the group
+# is the only permission bit that applies. Without it the files would stay
+# root-owned and the private key would be unreadable, which is a crash-loop
+# whose message names the key file rather than the ownership.
+---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -16,6 +49,7 @@ spec:
         runAsNonRoot: true
         runAsUser: 65532
         runAsGroup: 65532
+        fsGroup: 65532
         seccompProfile: {type: RuntimeDefault}
       topologySpreadConstraints:
         - maxSkew: 1
@@ -26,8 +60,28 @@ spec:
       containers:
         - name: gateway
           image: firewatch/gateway:replace-before-deploy
-          ports: [{name: http, containerPort: 8080}]
+          # The name is `https` because that is what crosses the wire, and
+          # the Service and the probes address the port by this name. The
+          # number is the contract's 8080, unchanged.
+          ports: [{name: https, containerPort: 8080}]
           envFrom: [{configMapRef: {name: firewatch-config}}]
+          env:
+            # The listener's key pair. The gateway is the only service the
+            # ingress reaches, so it is the only one whose certificate the
+            # public path depends on; behind it, every hop is this CA's.
+            - name: TLS_CERT_FILE
+              value: /etc/tls/tls.crt
+            - name: TLS_KEY_FILE
+              value: /etc/tls/tls.key
+            # The CA the proxy and the key-set fetch verify: the `https://`
+            # upstreams in config.yaml are reachable because this pool
+            # trusts the internal CA those services serve with.
+            - name: TLS_CA_FILE
+              value: /etc/tls/ca.crt
+          volumeMounts:
+            - name: tls
+              mountPath: /etc/tls
+              readOnly: true
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
@@ -35,10 +89,20 @@ spec:
           resources:
             requests: {cpu: 100m, memory: 64Mi}
             limits: {cpu: '1', memory: 256Mi}
+          # Both probes speak TLS. The kubelet's HTTP prober does not verify
+          # the server certificate, so the certificate's SANs — which name
+          # the Service and not the pod IP — are no obstacle here.
           readinessProbe:
-            httpGet: {path: /health/ready, port: http}
+            httpGet: {path: /health/ready, port: https, scheme: HTTPS}
           livenessProbe:
-            httpGet: {path: /health/live, port: http}
+            httpGet: {path: /health/live, port: https, scheme: HTTPS}
+      volumes:
+        - name: tls
+          secret:
+            secretName: gateway-tls
+            # Read-only for the group and nobody else: the private key is
+            # the one file here that must not be world-readable in the pod.
+            defaultMode: 0440
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -58,6 +122,7 @@ spec:
         runAsNonRoot: true
         runAsUser: 65532
         runAsGroup: 65532
+        fsGroup: 65532
         seccompProfile: {type: RuntimeDefault}
       topologySpreadConstraints:
         - maxSkew: 1
@@ -68,10 +133,26 @@ spec:
       containers:
         - name: jobs
           image: firewatch/jobs:replace-before-deploy
-          ports: [{name: http, containerPort: 8080}]
+          ports: [{name: https, containerPort: 8080}]
           envFrom:
             - configMapRef: {name: firewatch-config}
+            # DATABASE_URL and AMQP_URL, both already demanding TLS: the DSN
+            # carries sslmode=verify-full&sslrootcert=/etc/tls/ca.crt and the
+            # broker URL is amqps:// on 5671. This file supplies exactly the
+            # material those two name.
             - secretRef: {name: jobs-runtime}
+          env:
+            - name: TLS_CERT_FILE
+              value: /etc/tls/tls.crt
+            - name: TLS_KEY_FILE
+              value: /etc/tls/tls.key
+            # Trust for the broker handshake and for the key-set fetch.
+            - name: TLS_CA_FILE
+              value: /etc/tls/ca.crt
+          volumeMounts:
+            - name: tls
+              mountPath: /etc/tls
+              readOnly: true
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
@@ -80,9 +161,14 @@ spec:
             requests: {cpu: 100m, memory: 64Mi}
             limits: {cpu: '1', memory: 256Mi}
           readinessProbe:
-            httpGet: {path: /health/ready, port: http}
+            httpGet: {path: /health/ready, port: https, scheme: HTTPS}
           livenessProbe:
-            httpGet: {path: /health/live, port: http}
+            httpGet: {path: /health/live, port: https, scheme: HTTPS}
+      volumes:
+        - name: tls
+          secret:
+            secretName: jobs-tls
+            defaultMode: 0440
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -102,6 +188,7 @@ spec:
         runAsNonRoot: true
         runAsUser: 65532
         runAsGroup: 65532
+        fsGroup: 65532
         seccompProfile: {type: RuntimeDefault}
       topologySpreadConstraints:
         - maxSkew: 1
@@ -112,10 +199,23 @@ spec:
       containers:
         - name: risk
           image: firewatch/risk:replace-before-deploy
-          ports: [{name: http, containerPort: 8080}]
+          ports: [{name: https, containerPort: 8080}]
           envFrom:
             - configMapRef: {name: firewatch-config}
             - secretRef: {name: risk-runtime}
+          env:
+            - name: TLS_CERT_FILE
+              value: /etc/tls/tls.crt
+            - name: TLS_KEY_FILE
+              value: /etc/tls/tls.key
+            # The broker handshake, the key-set fetch and the inference
+            # client: all three verify against this one bundle.
+            - name: TLS_CA_FILE
+              value: /etc/tls/ca.crt
+          volumeMounts:
+            - name: tls
+              mountPath: /etc/tls
+              readOnly: true
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
@@ -124,9 +224,14 @@ spec:
             requests: {cpu: 100m, memory: 64Mi}
             limits: {cpu: '1', memory: 256Mi}
           readinessProbe:
-            httpGet: {path: /health/ready, port: http}
+            httpGet: {path: /health/ready, port: https, scheme: HTTPS}
           livenessProbe:
-            httpGet: {path: /health/live, port: http}
+            httpGet: {path: /health/live, port: https, scheme: HTTPS}
+      volumes:
+        - name: tls
+          secret:
+            secretName: risk-tls
+            defaultMode: 0440
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -146,6 +251,7 @@ spec:
         runAsNonRoot: true
         runAsUser: 65532
         runAsGroup: 65532
+        fsGroup: 65532
         seccompProfile: {type: RuntimeDefault}
       topologySpreadConstraints:
         - maxSkew: 1
@@ -157,10 +263,25 @@ spec:
         - name: prevention
           image: firewatch/prevention:replace-before-deploy
           # The contract fixes this service's own port; it is not 8080.
-          ports: [{name: http, containerPort: 8084}]
+          ports: [{name: https, containerPort: 8084}]
           envFrom:
             - configMapRef: {name: firewatch-config}
+            # DATABASE_URL only: prevention owns no queue and holds no broker
+            # client, so it has no AMQP_URL to spend.
             - secretRef: {name: prevention-runtime}
+          env:
+            - name: TLS_CERT_FILE
+              value: /etc/tls/tls.crt
+            - name: TLS_KEY_FILE
+              value: /etc/tls/tls.key
+            # The key-set fetch and the directory client of the identity
+            # provider.
+            - name: TLS_CA_FILE
+              value: /etc/tls/ca.crt
+          volumeMounts:
+            - name: tls
+              mountPath: /etc/tls
+              readOnly: true
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
@@ -169,37 +290,46 @@ spec:
             requests: {cpu: 100m, memory: 64Mi}
             limits: {cpu: '1', memory: 256Mi}
           readinessProbe:
-            httpGet: {path: /health/ready, port: http}
+            httpGet: {path: /health/ready, port: https, scheme: HTTPS}
           livenessProbe:
-            httpGet: {path: /health/live, port: http}
+            httpGet: {path: /health/live, port: https, scheme: HTTPS}
+      volumes:
+        - name: tls
+          secret:
+            secretName: prevention-tls
+            defaultMode: 0440
 ---
 apiVersion: v1
 kind: Service
 metadata: {name: gateway}
 spec:
   selector: {app: gateway}
-  ports: [{name: http, port: 8080, targetPort: http}]
+  # The port name is `https` and so is the hop: behind this Service the
+  # gateway speaks TLS only. The ingress addresses the port by number and
+  # tells its controller that the backend speaks TLS (`backend-protocol:
+  # HTTPS` on ingress.yaml), so the edge never reaches this pod in clear.
+  ports: [{name: https, port: 8080, targetPort: https}]
 ---
 apiVersion: v1
 kind: Service
 metadata: {name: jobs}
 spec:
   selector: {app: jobs}
-  ports: [{name: http, port: 8080, targetPort: http}]
+  ports: [{name: https, port: 8080, targetPort: https}]
 ---
 apiVersion: v1
 kind: Service
 metadata: {name: risk}
 spec:
   selector: {app: risk}
-  ports: [{name: http, port: 8080, targetPort: http}]
+  ports: [{name: https, port: 8080, targetPort: https}]
 ---
 apiVersion: v1
 kind: Service
 metadata: {name: prevention}
 spec:
   selector: {app: prevention}
-  ports: [{name: http, port: 8084, targetPort: http}]
+  ports: [{name: https, port: 8084, targetPort: https}]
 ---
 apiVersion: policy/v1
 kind: PodDisruptionBudget

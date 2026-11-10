@@ -74,6 +74,42 @@ spec:
             matchLabels: {app.kubernetes.io/name: rabbitmq}
       ports: [{protocol: TCP, port: 5671}]
 ---
+# The model service. One caller, no outbound client: inference's transport
+# declares only the listener's key pair, so the ingress below is the whole of
+# its exposure and there is no egress rule to write for it.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: {name: risk-to-inference}
+spec:
+  podSelector:
+    matchLabels: {app: risk}
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - podSelector:
+            matchLabels: {app: inference}
+      ports: [{protocol: TCP, port: 8080}]
+---
+# The ingress half of that edge, and the reason it is a separate policy: a rule
+# that only opens egress leaves the destination shut, which is the defect L6
+# found in the data plane.
+#
+# This one is its own policy rather than a rule inside `service-entry-and-data`
+# because that policy selects jobs as well as risk, and no code path of jobs
+# calls the model service.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: {name: inference-entry}
+spec:
+  podSelector:
+    matchLabels: {app: inference}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels: {app: risk}
+      ports: [{protocol: TCP, port: 8080}]
+---
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata: {name: prevention-entry-and-data}
@@ -95,6 +131,48 @@ spec:
             matchLabels: {app.kubernetes.io/name: postgres}
       ports: [{protocol: TCP, port: 5432}]
 ---
+# The identity provider. Four services verify a bearer token and therefore
+# fetch the key set; the provider itself reads its database and calls nothing.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: {name: identity-entry-and-data}
+spec:
+  podSelector:
+    matchLabels: {app: keycloak}
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from:
+        - podSelector:
+            matchExpressions:
+              - key: app
+                operator: In
+                values: [gateway, jobs, risk, prevention]
+      ports: [{protocol: TCP, port: 8443}]
+  egress:
+    - to:
+        - podSelector:
+            matchLabels: {app.kubernetes.io/name: postgres}
+      ports: [{protocol: TCP, port: 5432}]
+---
+# The client half of that edge. One flow with exactly four sources is one policy
+# instead of four copies, and Kubernetes unions every policy that selects a pod,
+# so this adds a rule to each of those pods instead of replacing the ones above.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: {name: oidc-egress}
+spec:
+  podSelector:
+    matchExpressions:
+      - key: app
+        operator: In
+        values: [gateway, jobs, risk, prevention]
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - podSelector:
+            matchLabels: {app: keycloak}
+      ports: [{protocol: TCP, port: 8443}]
+---
 # Ingress back into the data plane. `default-deny` closes every pod in the
 # namespace, and a policy that only opens egress leaves the destination shut: the
 # store and the broker were reachable by nothing.
@@ -104,7 +182,9 @@ spec:
 # carry. The sources are the application Deployments by their `app` label, plus
 # the migration Job, which is named here instead of borrowing an application's
 # label: a Job that pretends to be `risk` would be admitted everywhere `risk`
-# is, which is more than a migration needs.
+# is, which is more than a migration needs. Keycloak is the fifth source and not
+# an application: its database is the `identity` one on this same server, and it
+# opens it directly instead of through an application DSN.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata: {name: postgres-entry}
@@ -115,7 +195,10 @@ spec:
   ingress:
     - from:
         - podSelector:
-            matchExpressions: [{key: app, operator: In, values: [jobs, risk, prevention, migrate]}]
+            matchExpressions:
+              - key: app
+                operator: In
+                values: [jobs, risk, prevention, keycloak, migrate]
       ports: [{protocol: TCP, port: 5432}]
 ---
 # The broker is reached by the two services that publish or consume; prevention

@@ -239,13 +239,30 @@ apply_generic risk-runtime \
 apply_generic prevention-runtime \
 	"DATABASE_URL=postgres://risk_app:$risk_db_password@postgres:5432/risk$tls_suffix"
 
-# --- shared scripts, as ConfigMaps -----------------------------------------
-# The PostgreSQL role/database script, the broker plugin list and the broker
-# topology script already exist in deploy/local and are the single description of
-# what those things are. They are loaded from there rather than copied into the
-# Kubernetes tree, so the base cannot drift from the Compose stack. apply -f -
-# makes a re-run update them, which is safe: none of them is mounted by a running
-# container's decision logic, they are read at container start.
+# The identity provider's first administrator. Keycloak reads these two variables
+# only on a first start against an empty database; from then on the account lives
+# in the `identity` database and the Secret is never read again. Without it no
+# administrator exists, so no realm can be created at all and the provider serves
+# an empty server - the state base/keycloak.yaml would otherwise start into.
+#
+# Both values are generated, username included, for the same two reasons as every
+# other credential here: neither is written into the repository, and apply_generic
+# leaves an existing Secret untouched, so a re-run cannot replace the account an
+# operator is already using. Read them back with
+#   kubectl --namespace <ns> get secret keycloak-bootstrap-admin -o yaml
+# and sign in as that user to create the realm.
+apply_generic keycloak-bootstrap-admin \
+	"KC_BOOTSTRAP_ADMIN_USERNAME=admin_$(random_hex)" \
+	"KC_BOOTSTRAP_ADMIN_PASSWORD=$(random_hex)"
+
+# --- shared scripts and the model artifact, as ConfigMaps -------------------
+# The PostgreSQL role/database script, the broker plugin list, the broker
+# topology script, the development realm and the inference model already exist in
+# the repository and are the single description of what those things are. They are
+# loaded from there rather than copied into the Kubernetes tree, so the base cannot
+# drift from the Compose stack. apply -f - makes a re-run update them, which is
+# safe: none of them is mounted by a running container's decision logic, they are
+# read at container start.
 # The ConfigMap key is the file name the container reads, not the repository file
 # name: rabbitmq.yaml mounts subPath `enabled_plugins`, which is also what
 # RABBITMQ_ENABLED_PLUGINS_FILE names. Declaring the key here, per entry, keeps the
@@ -253,15 +270,26 @@ apply_generic prevention-runtime \
 # basename.
 # `rabbitmq-topology` is mounted by the broker-provision Job as /topology and run
 # as that Job's entrypoint, so the Job declares no topology of its own.
-# `keycloak-realm` is the realm the identity provider imports. The file carries
-# ${...} placeholders that Keycloak expands from the container's environment
+# `keycloak-realm` is the development realm. The file carries ${...} placeholders
+# that Keycloak expands from the container's environment
 # (docs/keycloak-realm-setup.md): what lands in the cluster is the shape of the
-# realm, never a password.
+# realm, never a password. Nothing mounts it - base/keycloak.yaml imports no realm
+# (see its header and deploy/k8s/README.md), because the placeholders
+# DEMO_ADMIN_PASSWORD, DEMO_VIEWER_PASSWORD and DIRECTORY_CLIENT_SECRET are supplied
+# by no Secret here. It stays a ConfigMap so the shape of the realm an operator
+# provisions out of band is readable from the cluster, not imported.
+# `inference-model` is the model artifact: services/inference/testdata/logistic.json,
+# byte for byte the file the Compose stack mounts. base/inference.yaml mounts this
+# ConfigMap at /models and names /models/logistic.json in FIREWATCH_MODEL_PATH, so a
+# pod that starts without it stops at startup naming that variable instead of serving
+# a zero model. It cannot be a kustomize configMapGenerator: the base's load
+# restrictor refuses a generator file outside the kustomization root.
 for entry in \
 	"postgres-init:deploy/local/postgres-init.sh:postgres-init.sh" \
 	"rabbitmq-plugins:deploy/local/rabbitmq-plugins:enabled_plugins" \
 	"rabbitmq-topology:deploy/local/rabbitmq-topology.sh:rabbitmq-topology.sh" \
-	"keycloak-realm:deploy/local/firewatch-realm.json:firewatch-realm.json"; do
+	"keycloak-realm:deploy/local/firewatch-realm.json:firewatch-realm.json" \
+	"inference-model:services/inference/testdata/logistic.json:logistic.json"; do
 	configmap_name="${entry%%:*}"
 	rest="${entry#*:}"
 	source_file="$repo_root/${rest%%:*}"

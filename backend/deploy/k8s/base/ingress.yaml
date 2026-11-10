@@ -3,9 +3,27 @@ kind: Ingress
 metadata:
   name: firewatch
   annotations:
+    # The gateway Service is HTTPS-only: its port is named `https` and the
+    # pod behind it serves TLS with the gateway-tls Secret (workloads.yaml).
+    # NGINX proxies every backend in plaintext unless it is told otherwise,
+    # and this is the hop it would get wrong, because the gateway's own
+    # guard sits on the other side of it: plaintext into a TLS listener
+    # fails each request instead of failing the rollout, so the symptom
+    # would be a 502 per request rather than a deployment that will not
+    # come up.
+    nginx.ingress.kubernetes.io/backend-protocol: 'HTTPS'
+    # Edge TLS is the one boundary where traffic still arrives in clear, so
+    # the redirect is what keeps http:// from being served at all. The
+    # certificate is the operator-supplied `firewatch-tls` Secret named
+    # below: it certifies the public DNS name, which this repository does
+    # not own, and bootstrap-secrets.sh deliberately does not create it.
     nginx.ingress.kubernetes.io/ssl-redirect: 'true'
     nginx.ingress.kubernetes.io/proxy-body-size: 8k
 spec:
+  # The class a controller installs as `nginx`. `gateway-entry` (network.yaml)
+  # admits only the `ingress-nginx` namespace into the gateway pod, so a
+  # controller installed under another namespace label is denied there rather
+  # than quietly allowed.
   ingressClassName: nginx
   tls:
     - hosts: [firewatch.example.invalid]
@@ -18,5 +36,9 @@ spec:
             pathType: Prefix
             backend:
               service:
+                # Port by number: 8080 is the gateway Service port and its
+                # target port is the container's `https` port. What decides
+                # the scheme of this hop is the backend-protocol annotation
+                # above, not the port name.
                 name: gateway
                 port: {number: 8080}

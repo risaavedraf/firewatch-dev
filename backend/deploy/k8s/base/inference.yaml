@@ -1,0 +1,141 @@
+# The model service, as a workload of this cluster (T7.8).
+#
+# It belongs here and not in workloads.yaml because it is the one service the
+# application does not reach through the gateway: `risk` is its only caller, and
+# the ingress never routes to it. Publishing no port outside the cluster is the
+# point, not an omission: `/predict` would let any caller generate load against
+# the model and probe its behaviour, and no client needs it - the frontend reads
+# published batches from PostgreSQL.
+#
+# The certificate mount is the crossing contract's three keys minus the outbound
+# half: `services/inference/cmd/server/transport.go` declares `TLS_CERT_FILE`
+# and `TLS_KEY_FILE` and no CA variable at all, because this process calls
+# nothing outbound. Setting a `TLS_CA_FILE` here would name a variable the
+# binary never reads and would imply a client this service does not have.
+#
+# The port is the contract's 8080, named `https` in the pod, the Service and the
+# probes, exactly like `gateway`, `jobs` and `risk`: the number is unchanged,
+# the name says what crosses the wire.
+#
+# MODEL ARTIFACT - the one input this Deployment does not build.
+# `FIREWATCH_MODEL_PATH` has no default on purpose (a default would let a
+# deployment that forgot the artifact serve whatever happened to be in the
+# image), and the image does not bake it in either: the artifact is a file of
+# this repository, mounted. In Compose that file is
+# services/inference/testdata/logistic.json; here it is the same file,
+# carried by the `inference-model` ConfigMap and mounted read-only at /models,
+# so its single key `logistic.json` lands at /models/logistic.json - the path
+# named below. `deploy/k8s/bootstrap-secrets.sh` renders that ConfigMap from the
+# repository file, the same anti-drift rule every other shared artifact follows;
+# a kustomize configMapGenerator cannot, because the base's load restrictor
+# refuses a generator file outside the kustomization root.
+# A pod that finds no file at that path stops at startup naming
+# FIREWATCH_MODEL_PATH - the fail-closed branch - instead of serving a zero
+# model that answers 0.5 for every input and looks healthy from the outside.
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: inference
+spec:
+  replicas: 2
+  selector:
+    matchLabels: {app: inference}
+  template:
+    metadata:
+      labels: {app: inference}
+    spec:
+      serviceAccountName: firewatch-app
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        fsGroup: 65532
+        seccompProfile: {type: RuntimeDefault}
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels: {app: inference}
+      containers:
+        - name: inference
+          image: firewatch/inference:replace-before-deploy
+          ports: [{name: https, containerPort: 8080}]
+          envFrom: [{configMapRef: {name: firewatch-config}}]
+          env:
+            # Where the artifact must appear; see the header. No value is a
+            # valid deployment, so this one is not defaulted anywhere else.
+            - name: FIREWATCH_MODEL_PATH
+              value: /models/logistic.json
+            # The listener's key pair. Two variables, not three: this binary has
+            # no outbound client and therefore no CA to name.
+            - name: TLS_CERT_FILE
+              value: /etc/tls/tls.crt
+            - name: TLS_KEY_FILE
+              value: /etc/tls/tls.key
+          volumeMounts:
+            - name: tls
+              mountPath: /etc/tls
+              readOnly: true
+            # The artifact directory. One key, `logistic.json`, becomes
+            # /models/logistic.json: a ConfigMap volume prefixes nothing, so the
+            # mount path and the key are exactly the two halves of the path
+            # FIREWATCH_MODEL_PATH names above.
+            - name: model
+              mountPath: /models
+              readOnly: true
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: [ALL]}
+          resources:
+            # The model is executed in Go and the artifact is small; the
+            # memory request covers the process, not a runtime this image does
+            # not have.
+            requests: {cpu: 100m, memory: 128Mi}
+            limits: {cpu: '1', memory: 512Mi}
+          # `GET /health` is the route the handler registers next to /predict
+          # and /v1/model, and it answers readiness of the loaded artifact.
+          # Liveness is the same route on purpose: the artifact is loaded once
+          # and never swapped, so there is no failure it could report that a
+          # restart would repair differently.
+          readinessProbe:
+            httpGet: {path: /health, port: https, scheme: HTTPS}
+          livenessProbe:
+            httpGet: {path: /health, port: https, scheme: HTTPS}
+      volumes:
+        - name: tls
+          secret:
+            secretName: inference-tls
+            defaultMode: 0440
+        # Not `optional`: a missing ConfigMap must hold the pod in
+        # CreateContainerConfigError rather than let it start and discover the
+        # absent artifact only at startup.
+        - name: model
+          configMap:
+            name: inference-model
+            # A published model artifact, not material a process may rewrite:
+            # world-readable and never writable.
+            defaultMode: 0444
+---
+apiVersion: v1
+kind: Service
+metadata: {name: inference}
+spec:
+  selector: {app: inference}
+  # ClusterIP, which is the default and the statement: no type here publishes
+  # this Service outside the cluster, and `config.yaml` names it only as
+  # `https://inference:8080`.
+  ports: [{name: https, port: 8080, targetPort: https}]
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata: {name: inference}
+spec:
+  # Two replicas and one available, the same budget the four application
+  # services carry: a drain may take one model pod at a time, not the service.
+  minAvailable: 1
+  selector:
+    matchLabels: {app: inference}

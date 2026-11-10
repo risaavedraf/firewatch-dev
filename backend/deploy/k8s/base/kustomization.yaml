@@ -9,6 +9,12 @@ resources:
   # guarantee kustomize offers.
   - postgres.yaml
   - rabbitmq.yaml
+  # The identity provider and the model service come next: `config.yaml` names
+  # both by Service (`https://identity:8443`, `https://inference:8080`), so a
+  # render that lists them before the Deployments that spend those addresses
+  # reads in the order the flows run.
+  - keycloak.yaml
+  - inference.yaml
   # The two bootstrap Jobs come before any replica: migrating a database that has
   # no schema only works if it runs first, and provisioning the broker before the
   # services dial it is what keeps their first reconnection from being a failure.

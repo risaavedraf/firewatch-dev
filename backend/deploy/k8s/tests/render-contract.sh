@@ -4,36 +4,126 @@
 # What this checks and what it does not: it renders the base with kustomize and
 # asserts the properties the bootstrap Jobs depend on — migration order, the DSN
 # keys they read, the CA both of them need, the network ports that were opened
-# for them, and the Pod Security fields admission will require. It cannot check
-# admission, scheduling, CNI enforcement or any actual migration: that starts with
-# T9, on a cluster. Everything here is a property of the manifests, so it fails
-# when a manifest drifts and stays silent when a cluster would.
+# for them, and the Pod Security fields admission will require — and then the
+# properties the application workloads depend on, which is the crossing contract
+# of odd/tasks/kubernetes-deployment.md (L10) as manifests: the three TLS
+# variables and the `<service>-tls` Secret each Deployment mounts, the `https`
+# name on every port and probe, the `https://` upstreams in config.yaml, the
+# identity provider and the model service, and the ingress hop. It cannot check
+# admission, scheduling, CNI enforcement or any actual handshake: that starts
+# with T9, on a cluster. Everything here is a property of the manifests, so it
+# fails when a manifest drifts and stays silent when a cluster would.
 #
 #   sh backend/deploy/k8s/tests/render-contract.sh
 #
 # KUBECTL overrides the binary. On Windows, kubectl ships inside Docker Desktop
 # and is not on PATH by default, so the usual value is
 #   KUBECTL="/c/Program Files/Docker/Docker/resources/bin/kubectl.exe"
+#
+# RENDER_FROM replaces the render: a file path, or `-` for stdin. It exists so
+# this contract can be put through its own assertions against a deliberately
+# broken copy without a manifest being edited:
+#   kubectl kustomize base | sed 's/name: https/name: http/' |
+#       RENDER_FROM=- sh backend/deploy/k8s/tests/render-contract.sh
+# The greps that read base/*.yaml directly are unaffected by it; every check
+# added for the application workloads reads the render.
 set -eu
 
 cd "$(dirname "$0")/.."
-
-K=${KUBECTL:-kubectl}
-if ! command -v "$K" >/dev/null 2>&1; then
-	if [ -x "/c/Program Files/Docker/Docker/resources/bin/kubectl.exe" ]; then
-		K="/c/Program Files/Docker/Docker/resources/bin/kubectl.exe"
-	else
-		echo "FAIL: no kubectl. Set KUBECTL to its path." >&2
-		exit 1
-	fi
-fi
 
 fail() {
 	echo "FAIL: $1" >&2
 	exit 1
 }
 
-render=$("$K" kustomize base) || fail "kustomize render"
+if [ -n "${RENDER_FROM:-}" ]; then
+	# A caller-supplied render. `cat -` reads stdin, which is the `-` case.
+	render=$(cat "$RENDER_FROM") || fail "cannot read RENDER_FROM=$RENDER_FROM"
+else
+	K=${KUBECTL:-kubectl}
+	if ! command -v "$K" >/dev/null 2>&1; then
+		if [ -x "/c/Program Files/Docker/Docker/resources/bin/kubectl.exe" ]; then
+			K="/c/Program Files/Docker/Docker/resources/bin/kubectl.exe"
+		else
+			echo "FAIL: no kubectl. Set KUBECTL to its path." >&2
+			exit 1
+		fi
+	fi
+
+	render=$("$K" kustomize base) || fail "kustomize render"
+fi
+
+# One rendered document, by kind and name. The assertions below hold over a
+# named object, because "somewhere in the render" is not that claim: the four
+# services carry the same three variables and the same port name, so a check
+# that scanned the whole render would pass with one of them gone.
+doc() {
+	printf '%s\n' "$render" | awk -v kind="$1" -v name="$2" '
+		function emit() {
+			if (dkind == kind && dname == name) printf "%s", buf
+			buf = ""; dkind = ""; dname = ""; named = 0
+		}
+		/^---$/ { emit(); next }
+		{ buf = buf $0 "\n" }
+		/^kind: / { dkind = $2 }
+		/^  name: / && !named { dname = $2; named = 1 }
+		END { emit() }
+	'
+}
+
+# The literal a container env var carries. Empty for a valueFrom reference,
+# which is the other assertion's business.
+value_of() {
+	printf '%s\n' "$1" | awk -v want="$2" '
+		/^ *- +name: / { if (found) exit; if ($3 == want) found = 1; next }
+		found && /^ +value: / { print $2; exit }
+	'
+}
+
+# The name bound to a container port, as the Service and the probes spell it.
+port_name() {
+	printf '%s\n' "$1" | awk -v want="$2" '
+		/^ *- +containerPort: / { p = $3 }
+		p == want && /^ +name: / { print $2; exit }
+	'
+}
+
+# The port each probe addresses, one per line.
+probe_ports() {
+	printf '%s\n' "$1" | awk '
+		/^ *(readinessProbe|livenessProbe|startupProbe):$/ { p = 1; next }
+		p && /^ *port: / { print $2; p = 0 }
+	'
+}
+
+# A Service's `name port targetPort`, which is one claim and not three.
+service_port() {
+	printf '%s\n' "$1" | awk '
+		/^ *- +name: / { n = $3 }
+		/^ +port: / { p = $2 }
+		/^ +targetPort: / { t = $2 }
+		END { print n, p, t }
+	'
+}
+
+# The shape all six TLS pods share: the container port is named `https`, no
+# probe addresses another port in clear, and the certificate directory is
+# mounted where the variables point. Six call sites, one failure to name.
+tls_pod() {
+	[ "$(port_name "$2" "$3")" = https ] ||
+		fail "$1's container port $3 is not named https: the Service targetPort and the probes address it by that name"
+	probes=$(probe_ports "$2")
+	[ -n "$probes" ] ||
+		fail "$1 declares no probe that addresses a port: nothing would take a replica out of the Service"
+	offport=$(printf '%s\n' "$probes" | grep -vx https | tr '\n' ' ')
+	[ -z "$offport" ] ||
+		fail "$1 probes ports '$offport', want 'https': a plaintext probe never gets a 200 from a TLS listener"
+	if printf '%s\n' "$2" | grep -q '^ *scheme: HTTP$'; then
+		fail "$1 probes its TLS listener with scheme: HTTP"
+	fi
+	printf '%s\n' "$2" | grep -q '^ *- mountPath: /etc/tls$' ||
+		fail "$1 does not mount its certificate directory at /etc/tls: the paths its variables name are relative to it"
+}
 
 # --- the two Jobs exist, by the names the documentation uses ------------------
 printf '%s\n' "$render" | grep -q 'name: broker-provision' ||
@@ -105,19 +195,194 @@ done
 # The pod spec is rejected at admission when a volumeMount names a volume that
 # does not exist, and kustomize renders that happily. This check exists because
 # exactly that got through once: the CA mount was added without its volume, and
-# the broker Job would never have started.
-for f in base/jobs-migrate.yaml base/broker-provision.yaml; do
-	mounted=$(awk '/- name: /{name=$3; getline nxt; if (nxt ~ /mountPath:/) print name}' "$f" | sort -u)
-	declared=$(awk '/^      volumes:/{v=1;next} v&&/^      [a-z]/{v=0} v&&/^        - name:/{print $3}' "$f" | sort -u)
-	for m in $mounted; do
-		printf '%s\n' "$declared" | grep -qx "$m" ||
-			fail "$f mounts volume '$m' but never declares it"
-	done
-done
+# the broker Job would never have started. It reads the render and every pod in
+# it, not the two Job files: T7.7 added mounts to five more workloads, and the
+# version that only read the Job files could not see them. A name in
+# `volumeClaimTemplates` counts as declared, because that is where a StatefulSet
+# pod's claim volume comes from.
+unpinned=$(printf '%s\n' "$render" | awk '
+	function indent(s) { match(s, /^ */); return RLENGTH }
+	function clear(a,   k) { for (k in a) delete a[k] }
+	function reset() { vm = -1; vo = -1; vt = -1; clear(mounted); clear(declared) }
+	function report(   m) {
+		for (m in mounted)
+			if (!(m in declared)) {
+				bad = bad (bad == "" ? "" : "; ") who ": mounts volume \"" m "\" but never declares it"
+			}
+	}
+	/^---$/ { report(); reset(); who = ""; named = 0; next }
+	/^  name: / && !named { who = $2; named = 1 }
+	/^ *volumeMounts:[ ]*$/ { vm = indent($0); next }
+	/^ *volumes:[ ]*$/ { vo = indent($0); next }
+	/^ *volumeClaimTemplates:[ ]*$/ { vt = indent($0); next }
+	{
+		i = indent($0)
+		if (vm >= 0 && i < vm) vm = -1
+		if (vo >= 0 && i < vo) vo = -1
+		if (vt >= 0 && i < vt) vt = -1
+		if (vm >= 0) {
+			if (i == vm && $0 !~ /^ *- /) vm = -1
+			else if (i == vm && $0 ~ /- name: /) { split($0, f, "- name: "); mounted[f[2]] = 1 }
+			else if (i == vm + 2 && $0 ~ /^ *name: /) mounted[$2] = 1
+		}
+		if (vo >= 0) {
+			if (i == vo && $0 !~ /^ *- /) vo = -1
+			else if (i == vo && $0 ~ /- name: /) { split($0, f, "- name: "); declared[f[2]] = 1 }
+			else if (i == vo + 2 && $0 ~ /^ *name: /) declared[$2] = 1
+		}
+		if (vt >= 0 && i > vt && $0 ~ /^ *name: /) declared[$2] = 1
+	}
+	END { report(); if (bad != "") print bad }')
+[ -z "$unpinned" ] || fail "$unpinned"
 
 # --- the two volumes that carry trust and topology are sourced, not empty ----
 grep -q 'secretName: firewatch-ca' base/broker-provision.yaml ||
 	fail "broker-provision must source its CA from the firewatch-ca Secret"
+
+# --- every application Deployment serves TLS on a port named `https` ---------
+# The crossing contract fixes one shape for all four services: the key pair at
+# the two paths the runtime reads, the internal CA at the third for everything
+# they call outbound, the pod's own `<service>-tls` Secret at /etc/tls, and the
+# port named `https` in the container, the Service and both probes.
+# bootstrap-secrets.sh issues exactly `<service>-tls`, so a rename on either
+# side leaves a pod unable to read its certificate; with APP_ENV=staging that
+# is a crash-loop at rollout, not a test that failed earlier.
+for pair in gateway:8080 jobs:8080 risk:8080 prevention:8084; do
+	svc=${pair%%:*}
+	port=${pair#*:}
+	d=$(doc Deployment "$svc")
+	[ -n "$d" ] || fail "Deployment $svc is missing from the render"
+
+	for tls in TLS_CERT_FILE=/etc/tls/tls.crt \
+		TLS_KEY_FILE=/etc/tls/tls.key \
+		TLS_CA_FILE=/etc/tls/ca.crt; do
+		var=${tls%%=*}
+		want=${tls#*=}
+		got=$(value_of "$d" "$var")
+		[ "$got" = "$want" ] ||
+			fail "$svc sets $var to '$got', want $want: a listener or a client that reads a path nothing is mounted at stops at startup"
+	done
+	printf '%s\n' "$d" | grep -q "^ *secretName: $svc-tls\$" ||
+		fail "$svc does not mount the $svc-tls Secret: that is the name bootstrap-secrets.sh issues, and no other one is rotated with it"
+
+	tls_pod "$svc" "$d" "$port"
+
+	s=$(doc Service "$svc")
+	[ -n "$s" ] || fail "Service $svc is missing from the render"
+	[ "$(service_port "$s")" = "https $port https" ] ||
+		fail "Service $svc publishes '$(service_port "$s")', want 'https $port https': a plaintext targetPort is the hop the contract forbids"
+done
+# The other half of that name, because a Secret nothing issues renders exactly
+# like one the bootstrap script creates. inference is on this list too: its pod
+# mounts the same shape (inference.yaml).
+for svc in gateway jobs risk prevention inference; do
+	grep -q "issue_certificate $svc\$" bootstrap-secrets.sh ||
+		fail "bootstrap-secrets.sh does not issue the $svc-tls Secret the $svc pod mounts"
+done
+
+# --- the shared config names no plaintext hop --------------------------------
+# APP_ENV=staging is what keeps the guards armed: it is the reason a missing
+# certificate variable is a refusal at startup and not a plaintext fallback.
+# Every URL below is the contract's, and `requireSecureUpstreams` refuses a
+# plaintext one, so a scheme that drifts to http:// is a gateway that will not
+# start and a host or port that drifts is one that starts and reaches nothing.
+cfg=$(doc ConfigMap firewatch-config)
+[ -n "$cfg" ] || fail "the firewatch-config ConfigMap is missing from the render"
+printf '%s\n' "$cfg" | grep -q '^  APP_ENV: staging$' ||
+	fail "APP_ENV is not staging: outside development the TLS guards apply, and this contract assumes they do"
+for url in \
+	JOBS_URL=https://jobs:8080 \
+	RISK_URL=https://risk:8080 \
+	PREVENTION_URL=https://prevention:8084 \
+	INFERENCE_URL=https://inference:8080 \
+	OIDC_ISSUER=https://identity:8443/realms/firewatch \
+	OIDC_JWKS_URL=https://identity:8443/realms/firewatch/protocol/openid-connect/certs; do
+	key=${url%%=*}
+	want=${url#*=}
+	printf '%s\n' "$cfg" | grep -q "^  $key: $want\$" ||
+		fail "$key is not $want: the client that reads it either refuses the hop or cannot resolve it"
+done
+plain=$(printf '%s\n' "$cfg" | grep -E '^  [A-Z_]+: http://' | tr '\n' ' ')
+[ -z "$plain" ] || fail "a plaintext URL is back in the shared config: $plain"
+
+# --- the identity provider and the model service are objects in the base ----
+# config.yaml names both by Service. Without these two objects, OIDC_ISSUER and
+# INFERENCE_URL name hosts nothing answers for: every key-set fetch fails in
+# DNS, and risk stops before its first prediction because registering the model
+# classifier reads /v1/model at startup.
+kc=$(doc Deployment keycloak)
+[ -n "$kc" ] || fail "the keycloak Deployment is missing: every OIDC URL in firewatch-config would name a host nothing answers for"
+printf '%s\n' "$kc" | grep -q '^ *secretName: keycloak-tls$' ||
+	fail "keycloak does not mount the keycloak-tls Secret: it would start with no certificate to serve"
+grep -q 'issue_certificate keycloak identity' bootstrap-secrets.sh ||
+	fail "bootstrap-secrets.sh issues keycloak-tls without the identity SAN: clients dial https://identity:8443 and the name would not be covered"
+grep -q 'apply_generic keycloak-bootstrap-admin' bootstrap-secrets.sh ||
+	fail "bootstrap-secrets.sh no longer creates the keycloak-bootstrap-admin Secret the Deployment reads"
+for tls in KC_HTTPS_CERTIFICATE_FILE=/etc/tls/tls.crt \
+	KC_HTTPS_CERTIFICATE_KEY_FILE=/etc/tls/tls.key; do
+	var=${tls%%=*}
+	want=${tls#*=}
+	got=$(value_of "$kc" "$var")
+	[ "$got" = "$want" ] || fail "keycloak sets $var to '$got', want $want"
+done
+# Both administrator keys, by reference and never baked in: on a first start
+# against an empty `identity` database, a provider with no administrator can
+# never have a realm created in it.
+[ "$(printf '%s\n' "$kc" | grep -c '^ *name: keycloak-bootstrap-admin$')" = 2 ] ||
+	fail "keycloak must take both administrator keys by secretKeyRef from keycloak-bootstrap-admin: one reference is half an account"
+for var in KC_BOOTSTRAP_ADMIN_USERNAME KC_BOOTSTRAP_ADMIN_PASSWORD; do
+	printf '%s\n' "$kc" | grep -q "^ *- name: $var\$" ||
+		fail "keycloak no longer reads $var: the Secret can be mounted and the variable gone, and a first start then has no administrator"
+done
+tls_pod keycloak "$kc" 8443
+ident=$(doc Service identity)
+[ -n "$ident" ] || fail "Service identity is missing: every issuer and key-set URL in firewatch-config names it"
+[ "$(service_port "$ident")" = "https 8443 https" ] ||
+	fail "Service identity publishes '$(service_port "$ident")', want 'https 8443 https': the contract fixes 8443 and every client dials it by name"
+
+inf=$(doc Deployment inference)
+[ -n "$inf" ] || fail "the inference Deployment is missing: INFERENCE_URL would name a host nothing answers for"
+model_path=$(value_of "$inf" FIREWATCH_MODEL_PATH)
+[ "$model_path" = /models/logistic.json ] ||
+	fail "inference serves the model at '$model_path', want /models/logistic.json: the artifact has no default and a pod without it stops at startup"
+for tls in TLS_CERT_FILE=/etc/tls/tls.crt TLS_KEY_FILE=/etc/tls/tls.key; do
+	var=${tls%%=*}
+	want=${tls#*=}
+	got=$(value_of "$inf" "$var")
+	[ "$got" = "$want" ] || fail "inference sets $var to '$got', want $want: it terminates TLS on 8080 like the other four"
+done
+printf '%s\n' "$inf" | grep -q '^ *secretName: inference-tls$' ||
+	fail "inference does not mount the inference-tls Secret"
+printf '%s\n' "$inf" | grep -q '^ *- mountPath: /models$' ||
+	fail "inference does not mount the artifact directory at /models: the path FIREWATCH_MODEL_PATH names would be absent from the pod"
+printf '%s\n' "$inf" | grep -q '^ *name: inference-model$' ||
+	fail "inference no longer mounts the inference-model ConfigMap: the pod would wait for an artifact nothing supplies"
+tls_pod inference "$inf" 8080
+isvc=$(doc Service inference)
+[ -n "$isvc" ] || fail "Service inference is missing: INFERENCE_URL names it"
+[ "$(service_port "$isvc")" = "https 8080 https" ] ||
+	fail "Service inference publishes '$(service_port "$isvc")', want 'https 8080 https'"
+grep -q 'inference-model:services/inference/testdata/logistic.json:logistic.json' bootstrap-secrets.sh ||
+	fail "bootstrap-secrets.sh no longer renders inference-model from services/inference/testdata/logistic.json"
+
+# --- the edge tells NGINX the gateway speaks TLS -----------------------------
+# NGINX proxies every backend in plaintext unless the annotation says otherwise,
+# and this is the hop where the mistake hides: plaintext into a TLS listener
+# fails each request with a 502, not the rollout.
+ing=$(doc Ingress firewatch)
+[ -n "$ing" ] || fail "the Ingress is missing from the render"
+printf '%s\n' "$ing" | grep -q '^ *nginx.ingress.kubernetes.io/backend-protocol: HTTPS$' ||
+	fail "the Ingress does not declare backend-protocol HTTPS: NGINX would proxy the gateway's TLS port in plaintext"
+
+# --- the two new flows are open on both halves -------------------------------
+# default-deny closes every pod, and a policy that opens only egress leaves the
+# destination shut, which is the defect L6 found in the data plane. The model
+# and the identity provider each need an entry rule as well as their clients'
+# egress rule; drop either half and the flow renders and never passes a byte.
+for policy in risk-to-inference inference-entry oidc-egress identity-entry-and-data; do
+	[ -n "$(doc NetworkPolicy "$policy")" ] ||
+		fail "NetworkPolicy $policy is missing from the render: one half of the model or the identity flow is closed"
+done
 
 # --- no credential lives in a manifest ---------------------------------------
 if grep -nEi 'pass(word)?[:=] *[a-z0-9]{6,}|BEGIN ([A-Z]+ )?PRIVATE KEY' \
@@ -125,4 +390,4 @@ if grep -nEi 'pass(word)?[:=] *[a-z0-9]{6,}|BEGIN ([A-Z]+ )?PRIVATE KEY' \
 	fail "a literal credential appears in a manifest"
 fi
 
-echo "PASS: render contract holds for the bootstrap Jobs"
+echo "PASS: render contract holds for the bootstrap Jobs and the application workloads"

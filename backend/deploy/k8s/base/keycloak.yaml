@@ -1,0 +1,195 @@
+# The identity provider, as a workload of this cluster (T7.8).
+#
+# Two names, deliberately different. The Deployment is `keycloak`, the product,
+# and its Secret is `keycloak-tls`; the Service is `identity`, because that is
+# the name `config.yaml` puts in every issuer and key-set URL and the name the
+# certificate carries as a SAN (`bootstrap-secrets.sh` issues it with
+# `issue_certificate keycloak identity`). A Service named after the product
+# would leave those URLs naming a host nothing answers for.
+#
+# 8443 with the internal CA's certificate, because the crossing contract puts
+# TLS on every service port and this provider carries bearer tokens and the
+# directory client's secret. `KC_HTTP_ENABLED=false` turns the plaintext
+# listener off rather than leaving it idle: an identity provider that accepts a
+# plaintext token request is the downgrade the contract forbids outside
+# development.
+#
+# The database is the `identity` one `deploy/local/postgres-init.sh` creates,
+# owned by `identity_app`, and the password is the key `bootstrap-secrets.sh`
+# already keeps in `postgres-credentials`. The JDBC URL names the CA the pod
+# mounts, with the same two settings the application DSNs carry: `verify-full`
+# plus an explicit root certificate, so a certificate for another hostname is
+# refused.
+#
+# TWO DELIBERATE DECISIONS HERE, and the reason for each:
+#
+#   - No realm import, and that is a decision rather than a gap. The only realm
+#     file in the repository is the development one
+#     (`deploy/local/firewatch-realm.json`): demo accounts, `localhost` redirect
+#     URIs, and three `${...}` values - `DEMO_ADMIN_PASSWORD`,
+#     `DEMO_VIEWER_PASSWORD`, `DIRECTORY_CLIENT_SECRET` - that Keycloak expands
+#     from its own environment. No Secret carries those keys, so
+#     `--import-realm` would import demo credentials or resolve the three to
+#     empty strings.
+#     `bootstrap-secrets.sh` still renders the file as the `keycloak-realm`
+#     ConfigMap, and this Deployment deliberately does not mount it. The target
+#     environment provisions the realm out of band, as `deploy/k8s/README.md`
+#     records: a provider that answers with no `firewatch` realm after this pod
+#     starts is the expected state, not a silent failure.
+#   - The bootstrap administrator is not absent: both keys arrive by reference
+#     from the `keycloak-bootstrap-admin` Secret that `bootstrap-secrets.sh`
+#     creates. Keycloak reads `KC_BOOTSTRAP_ADMIN_USERNAME` and
+#     `KC_BOOTSTRAP_ADMIN_PASSWORD` only on a first start against an empty
+#     `identity` database; afterwards the account lives in that database and the
+#     Secret is never read again, which is why the script generates it once and
+#     never rewrites it. Without an administrator no realm can be created at
+#     all, so this reference is what makes the provider startable and not merely
+#     renderable.
+#
+# One replica. Keycloak clusters across replicas to share its caches, and on the
+# one node this base targets a second replica would add a distributed cache and
+# buy no availability: the database is the durable state. For the same reason
+# there is no PodDisruptionBudget: `minAvailable: 1` over one replica forbids
+# every voluntary disruption, which stops a node drain instead of protecting
+# anything.
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: keycloak
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: keycloak}
+  template:
+    metadata:
+      labels: {app: keycloak}
+    spec:
+      serviceAccountName: firewatch-app
+      automountServiceAccountToken: false
+      # uid/gid 1000 is the user the Keycloak image is built around. The group
+      # is the same number rather than 0 so the pod proves it needs nothing
+      # from root, and `fsGroup` is what makes the mounted key pair readable by
+      # that group at all. NOT CONFIRMED ON A CLUSTER YET: nothing has applied
+      # this manifest, and the first apply has to show the container running as
+      # 1000 with the PEM files readable and the server answering 8443.
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        seccompProfile: {type: RuntimeDefault}
+      containers:
+        - name: keycloak
+          image: quay.io/keycloak/keycloak:26.5.7
+          # `start` is production mode, the command the production Compose file
+          # uses: it refuses a development hostname and requires the database.
+          # `start-dev` would serve plaintext over an in-memory store.
+          #
+          # It is an `arg`, not a `command`: the image's ENTRYPOINT is already
+          # /opt/keycloak/bin/kc.sh, and `command: [start]` replaced it, so the
+          # container died with `exec: "start": executable file not found in
+          # $PATH` and the pod sat in CrashLoopBackOff. Rendering the manifest
+          # cannot catch that; only starting the container does.
+          args: [start]
+          ports: [{name: https, containerPort: 8443}]
+          env:
+            - name: KC_DB
+              value: postgres
+            - name: KC_DB_URL
+              value: 'jdbc:postgresql://postgres:5432/identity?sslmode=verify-full&sslrootcert=/etc/tls/ca.crt'
+            - name: KC_DB_USERNAME
+              value: identity_app
+            # The password only through the reference: the same key the
+            # PostgreSQL entrypoint read when it created the role.
+            - name: KC_DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-credentials
+                  key: KEYCLOAK_DB_PASSWORD
+            # The first administrator, both halves by reference. Read only on a
+            # first start against an empty `identity` database: the account then
+            # lives in the database, and this Secret is not consulted again.
+            # `bootstrap-secrets.sh` creates it once and never rewrites it.
+            - name: KC_BOOTSTRAP_ADMIN_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: keycloak-bootstrap-admin
+                  key: KC_BOOTSTRAP_ADMIN_USERNAME
+            - name: KC_BOOTSTRAP_ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: keycloak-bootstrap-admin
+                  key: KC_BOOTSTRAP_ADMIN_PASSWORD
+            # No plaintext listener at all. One boolean, and the one that
+            # decides whether a token request can cross the cluster in clear.
+            - name: KC_HTTP_ENABLED
+              value: 'false'
+            - name: KC_HTTPS_PORT
+              value: '8443'
+            # The contract's two file variables, at the contract's two paths.
+            - name: KC_HTTPS_CERTIFICATE_FILE
+              value: /etc/tls/tls.crt
+            - name: KC_HTTPS_CERTIFICATE_KEY_FILE
+              value: /etc/tls/tls.key
+            # The name the issuer is built from, which has to be the name the
+            # clients dial: the Service, not a pod and not a public host.
+            - name: KC_HOSTNAME
+              value: https://identity:8443
+            - name: KC_HEALTH_ENABLED
+              value: 'true'
+          volumeMounts:
+            - name: tls
+              mountPath: /etc/tls
+              readOnly: true
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities: {drop: [ALL]}
+            # `readOnlyRootFilesystem` is deliberately absent, as it already is
+            # on the PostgreSQL and RabbitMQ containers. The published image is
+            # built for the `dev-file` database, so `start` with
+            # `KC_DB=postgres` re-augments the Quarkus application on first
+            # start and writes under /opt/keycloak/lib/quarkus. An image built
+            # with `kc.sh build --db=postgres` and run with `--optimized` is
+            # what makes this field true, and the repository does not ship one.
+            # Pod Security `restricted` does not require the field, so admission
+            # is unaffected.
+          resources:
+            requests: {cpu: 200m, memory: 512Mi}
+            limits: {cpu: '2', memory: 1Gi}
+          # A socket probe, not an HTTP path. Keycloak exposes its health
+          # endpoints on the management interface it opens on its own port, and
+          # this base neither publishes nor admits that port; asserting a path
+          # on 8443 would claim a route without verifying which interface
+          # serves it. A TLS listener that accepts a connection is what this
+          # pod can be judged on without a cluster to confirm the routes.
+          readinessProbe:
+            tcpSocket: {port: https}
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          # More forgiving than readiness, like the database: killing a
+          # provider that is merely slow to answer would invalidate the sessions
+          # it holds.
+          livenessProbe:
+            tcpSocket: {port: https}
+            initialDelaySeconds: 60
+            periodSeconds: 20
+            failureThreshold: 6
+      volumes:
+        - name: tls
+          secret:
+            secretName: keycloak-tls
+            # 0440, the mode every other service uses: the private key stays
+            # out of the world-readable bits, and the group bit is what lets
+            # uid 1000 read it through fsGroup.
+            defaultMode: 0440
+---
+apiVersion: v1
+kind: Service
+metadata: {name: identity}
+spec:
+  selector: {app: keycloak}
+  # 8443 is the contract's number for this provider, and `https` is the name
+  # the clients' issuers carry. No other port is published: the management
+  # interface stays inside the pod.
+  ports: [{name: https, port: 8443, targetPort: https}]
