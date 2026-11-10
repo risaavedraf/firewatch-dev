@@ -305,9 +305,9 @@ metadata: {name: gateway}
 spec:
   selector: {app: gateway}
   # The port name is `https` and so is the hop: behind this Service the
-  # gateway speaks TLS only. The ingress still addresses the port by number,
-  # and pointing the controller's own hop at TLS is T8's to wire
-  # (`backend-protocol: HTTPS` on ingress.yaml).
+  # gateway speaks TLS only. The ingress addresses the port by number and
+  # tells its controller that the backend speaks TLS (`backend-protocol:
+  # HTTPS` on ingress.yaml), so the edge never reaches this pod in clear.
   ports: [{name: https, port: 8080, targetPort: https}]
 ---
 apiVersion: v1
