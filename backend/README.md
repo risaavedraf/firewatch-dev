@@ -25,7 +25,7 @@ python scripts/smoke.py
 | `http://localhost:9090` | Prometheus, when the observability profile is enabled |
 | `http://localhost:3000` | Grafana, when the observability profile is enabled (`admin`; password in `.env`) |
 
-The endpoints bind only to host loopback. HTTP/password grants and the shared RabbitMQ development credential are local-only choices. PostgreSQL and the service APIs have no published host ports.
+The endpoints bind only to host loopback. HTTP/password grants and the local RabbitMQ credentials are local-only choices: one required secret backs three identities — `firewatch` for provisioning and the management UI, and `firewatch-jobs`/`firewatch-risk` for the two services, which hold no management tag. PostgreSQL and the service APIs have no published host ports.
 
 ### Classifier selection and activation
 

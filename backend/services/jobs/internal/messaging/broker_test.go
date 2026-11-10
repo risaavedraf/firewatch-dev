@@ -647,19 +647,37 @@ func TestConsumerDispatchesByEventType(t *testing.T) {
 	}
 }
 
-// TestTopologyBindsTheJobsQueueToBothKeys protects the additive routing
-// contract: jobs' queue accepts both the batch result and the cross-service
-// failure report, while risk's queue keeps its single key. The declaration is a
-// slice, not a map, because a map cannot express two keys on one queue.
-func TestTopologyBindsTheJobsQueueToBothKeys(t *testing.T) {
-	want := []struct {
-		queue string
-		keys  []string
-	}{
-		{queue: v1.RiskQueue, keys: []string{v1.JobRequestedType}},
-		{queue: v1.JobsQueue, keys: []string{v1.BatchPublishedType, v1.JobFailedType}},
+// TestPublishesOnItsOwnExchange protects the isolation this task introduced.
+// The publish exchange must be the jobs one: falling back to a shared exchange
+// would restore the arrangement where the broker cannot deny a forged peer
+// event, because broker permissions match resource names and never routing
+// keys. The distinctness check also catches a copy-paste of the peer constant.
+// TestServiceUsesOnlyItsOwnResourceNames pins the names this service is allowed
+// to touch. The broker grants configure, write and read by name, so a renamed
+// constant here would be refused at runtime with an error that says nothing about
+// the cause. It also catches a copied peer constant, which is how the shared
+// exchange crept in the first time.
+func TestServiceUsesOnlyItsOwnResourceNames(t *testing.T) {
+	if publishExchange != v1.JobsExchange {
+		t.Fatalf("publishExchange=%q want %q", publishExchange, v1.JobsExchange)
 	}
-	if !reflect.DeepEqual(queueTopology, want) {
-		t.Fatalf("queueTopology=%v want=%v", queueTopology, want)
+	if deadLetterQueue != v1.JobsQueue+".dead" {
+		t.Fatalf("deadLetterQueue=%q want %q", deadLetterQueue, v1.JobsQueue+".dead")
+	}
+	if publishExchange == v1.RiskExchange || publishExchange == v1.DeadExchange {
+		t.Fatalf("publishExchange=%q must not be the peer or dead exchange", publishExchange)
+	}
+}
+
+
+func TestPublishesOnItsOwnExchange(t *testing.T) {
+	if publishExchange != v1.JobsExchange {
+		t.Fatalf("publishExchange=%q want %q", publishExchange, v1.JobsExchange)
+	}
+	if v1.JobsExchange == v1.RiskExchange || v1.JobsExchange == v1.DeadExchange || v1.RiskExchange == v1.DeadExchange {
+		t.Fatalf("exchanges must be distinct: jobs=%q risk=%q dead=%q", v1.JobsExchange, v1.RiskExchange, v1.DeadExchange)
+	}
+	if publishExchange == v1.RiskExchange || publishExchange == v1.DeadExchange {
+		t.Fatalf("publishExchange=%q must not be the peer or dead exchange", publishExchange)
 	}
 }

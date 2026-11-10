@@ -68,6 +68,34 @@ services:
       retries: 30
     restart: unless-stopped
 
+  # Owns the broker topology and the per-service identities (BH-04). The services
+  # verify their resources passively instead of declaring them: binding a queue to
+  # another service's exchange requires write permission there, and holding it
+  # would let one service publish as its peer. Credentials are read from the
+  # environment and never printed.
+  broker-topology:
+    image: curlimages/curl:8.12.1
+    entrypoint: [sh, /rabbitmq-topology.sh]
+    environment:
+      RABBITMQ_MANAGEMENT_URL: http://rabbitmq:15672
+      ADMIN_USER: firewatch
+      ADMIN_PASS: ${RABBITMQ_PASSWORD:?required}
+      # Development convenience: the two identities derive distinct passwords from
+      # the one secret this file already requires, so a fresh clone boots without
+      # new variables. Production demands a secret per identity instead.
+      JOBS_PASSWORD: ${RABBITMQ_PASSWORD:?required}-jobs
+      RISK_PASSWORD: ${RABBITMQ_PASSWORD:?required}-risk
+    volumes:
+      - ./deploy/local/rabbitmq-topology.sh:/rabbitmq-topology.sh:ro
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    networks: [backend]
+    depends_on:
+      rabbitmq: {condition: service_healthy}
+    restart: 'no'
+
+
   identity:
     image: quay.io/keycloak/keycloak:26.5.7
     command: [start-dev, --import-realm]
@@ -131,9 +159,10 @@ services:
     environment:
       <<: *oidc
       DATABASE_URL: postgres://jobs_app:${JOBS_DB_PASSWORD:?required}@postgres:5432/jobs?sslmode=disable
-      AMQP_URL: amqp://firewatch:${RABBITMQ_PASSWORD:?required}@rabbitmq:5672/firewatch
+      AMQP_URL: amqp://firewatch-jobs:${RABBITMQ_PASSWORD:?required}-jobs@rabbitmq:5672/firewatch
     depends_on:
       jobs-migrate: {condition: service_completed_successfully}
+      broker-topology: {condition: service_completed_successfully}
       rabbitmq: {condition: service_healthy}
 
   # The model service. It publishes no host port on purpose (S3): it is
@@ -171,7 +200,7 @@ services:
     environment:
       <<: *oidc
       DATABASE_URL: postgres://risk_app:${RISK_DB_PASSWORD:?required}@postgres:5432/risk?sslmode=disable
-      AMQP_URL: amqp://firewatch:${RABBITMQ_PASSWORD:?required}@rabbitmq:5672/firewatch
+      AMQP_URL: amqp://firewatch-risk:${RABBITMQ_PASSWORD:?required}-risk@rabbitmq:5672/firewatch
       # The classifier the service runs is chosen at startup, not by the registry's
       # `active` row. The local stack selects v2 so the demo classifies with it;
       # set MODEL_ID in .env to run another registered version instead.
@@ -186,6 +215,7 @@ services:
       INFERENCE_TIMEOUT: ${INFERENCE_TIMEOUT:-5s}
     depends_on:
       risk-migrate: {condition: service_completed_successfully}
+      broker-topology: {condition: service_completed_successfully}
       rabbitmq: {condition: service_healthy}
       inference: {condition: service_healthy}
 

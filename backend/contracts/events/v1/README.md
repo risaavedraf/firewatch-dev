@@ -1,12 +1,15 @@
 # Event contract v1
 
-Transport: persistent JSON messages on the durable `firewatch.events` topic exchange.
+Transport: persistent JSON messages on two durable topic exchanges, one per producing service: `firewatch.jobs.events` for `jobs` and `firewatch.risk.events` for `risk`. They are split because the broker authorises by resource name and never by routing key: on a single shared topic exchange, a service able to publish could forge its peer's events. Exhausted messages move to the shared `firewatch.dead` direct exchange, which no service may write to; the broker performs that move itself.
 The Go wire types are maintained in `contracts/gen/events/v1/events.go` (currently handwritten).
 
-| Routing key | Producer | Subscriber queue | Meaning |
-|---|---|---|---|
-| `jobs.requested.v1` | jobs outbox | `risk.jobs.v1` | An authenticated admin requested a synthetic demonstration batch. |
-| `risk.batch.published.v1` | risk outbox | `jobs.results.v1` | The complete batch committed and is queryable. |
+| Routing key | Exchange | Producer | Subscriber queue | Meaning |
+|---|---|---|---|---|
+| `jobs.requested.v1` | `firewatch.jobs.events` | jobs outbox | `risk.jobs.v1` | An authenticated admin requested a synthetic demonstration batch. |
+| `risk.batch.published.v1` | `firewatch.risk.events` | risk outbox | `jobs.results.v1` | The complete batch committed and is queryable. |
+| `risk.job.failed.v1` | `firewatch.risk.events` | risk outbox | `jobs.results.v1` | The risk consumer exhausted its attempts on a request; jobs records the terminal failure on the job row and publishes no batch. |
+
+Exchanges, queue arguments and the five bindings these keys imply belong to the provisioner (`deploy/local/rabbitmq-topology.sh`), not to the services. Each service only verifies its own exchange and queues passively at startup and holds permissions for its own resources, so this table is intent, not enforcement.
 
 Each envelope includes UUID `id`, `job_id`, `trace_id`, subject `actor_id`, `zone_id`, UTC `occurred_at`, UTC `requested_at`, and `demo: true`. Published events also include UUID `batch_id`.
 

@@ -17,7 +17,7 @@ What runs where: `caddy` publishes **80** and **443** and nothing else does. The
 
 ## 2. Variables
 
-Compose reads `backend/.env` on the VM (write it there, `chmod 600`, never commit it). `python scripts/init_env.py` generates the random credentials and refuses to overwrite an existing file; the four variables marked *manual* below are not generated, so add them yourself.
+Compose reads `backend/.env` on the VM (write it there, `chmod 600`, never commit it). `python scripts/init_env.py` generates the random credentials and refuses to overwrite an existing file; the five variables marked *manual* below are not generated, so add them yourself.
 
 | Variable | Example | Meaning |
 |---|---|---|
@@ -30,7 +30,9 @@ Compose reads `backend/.env` on the VM (write it there, `chmod 600`, never commi
 | `JOBS_DB_PASSWORD` | 48 hex chars | `jobs_app` role. |
 | `RISK_DB_PASSWORD` | 48 hex chars | `risk_app` role (risk and prevention schemas). |
 | `KEYCLOAK_DB_PASSWORD` | 48 hex chars | `identity_app` role. |
-| `RABBITMQ_PASSWORD` | 48 hex chars | Broker user `firewatch`. |
+| `RABBITMQ_PASSWORD` | 48 hex chars | Broker administrator `firewatch`. It provisions the topology and it is the only identity that may use the management API; no service connects as it. |
+| `RABBITMQ_JOBS_PASSWORD` | 48 hex chars | Broker identity `firewatch-jobs`, used by the `jobs` service. Manual, and distinct from the risk one. |
+| `RABBITMQ_RISK_PASSWORD` | 48 hex chars | Broker identity `firewatch-risk`, used by the `risk` service. Manual, and distinct from the jobs one. |
 | `KEYCLOAK_ADMIN_PASSWORD` | strong password | Bootstrap administrator password. |
 | `DEMO_ADMIN_PASSWORD`, `DEMO_VIEWER_PASSWORD` | strong password | Realm users imported from the development realm. |
 | `GRAFANA_ADMIN_PASSWORD` | strong password | Grafana `admin`. |

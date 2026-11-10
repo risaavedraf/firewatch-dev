@@ -17,7 +17,7 @@ Priority denotes suggested sequencing, not a confirmed vulnerability rating: P1 
 | [ ] | BH-01 | [Compatible toolchain and baseline](backend-hardening/01-toolchain-baseline.md) | P1 | pending | None |
 | [x] | BH-02 | [Fresh vulnerability and image scans](backend-hardening/02-vulnerability-scans.md) | P1 | done | BH-01 for Go scanning |
 | [ ] | BH-03 | [Gateway quota isolation](backend-hardening/03-gateway-rate-limits.md) | P1 | pending | BH-01 |
-| [ ] | BH-04 | [Broker identities and least privilege](backend-hardening/04-broker-least-privilege.md) | P1 | pending | Target-environment authorization |
+| [x] | BH-04 | [Broker identities and least privilege](backend-hardening/04-broker-least-privilege.md) | P1 | implemented | Target-environment authorization |
 | [ ] | BH-05 | [Transport security enforcement](backend-hardening/05-transport-security.md) | P1 | pending | BH-01; coordinate BH-04 |
 | [ ] | BH-06 | [Kubernetes egress restriction](backend-hardening/06-kubernetes-egress.md) | P1 | pending | Environment routing/plugin decision |
 | [ ] | BH-07 | [Consumer retry and job recovery](backend-hardening/07-job-recovery.md) | P1 | pending | BH-01; recovery-policy decision |

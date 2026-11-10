@@ -1,28 +1,28 @@
 # Contratos: separar el formato compartido del comportamiento
 **Re-derivado el 2026-10-20 contra el código de `267a4bb`.**
 
-Los servicios comparten un envelope JSON, un contrato de observaciones y una especificación HTTP, no repositorios ni reglas de negocio. Aunque vive en `contracts/gen`, el tipo Go está **escrito a mano**; no se presupone un generador ni correspondencia automática entre OpenAPI y handlers. El envelope declara hoy seis constantes —tres routing keys— y catorce campos.
+Los servicios comparten un envelope JSON, un contrato de observaciones y una especificación HTTP, no repositorios ni reglas de negocio. Aunque vive en `contracts/gen`, el tipo Go está **escrito a mano**; no se presupone un generador ni correspondencia automática entre OpenAPI y handlers. El envelope declara hoy ocho constantes —dos exchanges de publicación, el exchange muerto compartido, tres routing keys y dos colas— y catorce campos.
 
 [Índice e instantánea](README.md) · [Mensajería](04-messaging.md) · [Siguiente: persistencia](06-database.md)
 
 ## Alcance y evidencia
 
-Lecturas completas: [events.go](../../contracts/gen/events/v1/events.go):1-58 y contracts/gen/events/v1/events_test.go:1-138; [contrato de eventos](../../contracts/events/v1/README.md):1-26; [OpenAPI](../../contracts/openapi/firewatch-v1.yaml):1-2125; [observaciones](../../contracts/gen/observations/v1/observations.go):1-176. Snapshot: [índice](README.md). El módulo de tres líneas (`contracts/gen/go.mod`) se explica en [despliegue](07-deployment.md). No se ejecutó validación OpenAPI, generación ni petición a un servidor: **nada de lo que sigue está verificado contra un proceso en ejecución**. Las referencias `$ref` son contratos declarativos, no llamadas Go.
+Lecturas completas: [events.go](../../contracts/gen/events/v1/events.go):1-70 y contracts/gen/events/v1/events_test.go:1-138; [contrato de eventos](../../contracts/events/v1/README.md):1-29; [OpenAPI](../../contracts/openapi/firewatch-v1.yaml):1-2125; [observaciones](../../contracts/gen/observations/v1/observations.go):1-176. Snapshot: [índice](README.md). El módulo de tres líneas (`contracts/gen/go.mod`) se explica en [despliegue](07-deployment.md). No se ejecutó validación OpenAPI, generación ni petición a un servidor: **nada de lo que sigue está verificado contra un proceso en ejecución**. Las referencias `$ref` son contratos declarativos, no llamadas Go.
 
 ## Envelope y direcciones
 
 | Declaración / líneas de `contracts/gen/events/v1/events.go` | Valor o interfaz | Uso comprobado |
 | --- | --- | --- |
 | 1-5 | Comentario handwritten; paquete v1; import time | No lógica de dominio compartida |
-| 7-21 | Exchange `firewatch.events`; tipos `jobs.requested.v1`, `risk.batch.published.v1`, `risk.job.failed.v1`; colas `risk.jobs.v1` / `jobs.results.v1` | Bindings en ambos `topology`; `jobs.results.v1` recibe dos claves (`services/jobs/internal/messaging/broker.go:516-517`); los relays toman routing_key del outbox |
-| 23-33 | ID, Type, OccurredAt, TraceID, JobID, ActorID, ZoneID, BatchID omitempty, RequestedAt, Demo | Correlación, validación y match contra trabajo |
-| 34-37 | `scenario_id` omitempty y `evaluated_at *time.Time` omitempty | Par opcional pero acoplado: el consumidor rechaza medio par (`services/jobs/internal/messaging/broker.go:289-299`) |
-| 38-50 | `failure_reason` y `attempts` omitempty, presentes sólo en `risk.job.failed.v1` | Reporte terminal entre servicios; los vocabularios se duplican en cada adaptador local, no hay SDK |
-| 53-58 | `SyntheticScenarioIDs()`: seis perfiles, devuelve copia | Vocabulario de escenarios; el transporte de jobs compara igualdad exacta (`services/jobs/internal/handler/api.go:71-78`) |
+| 7-33 | Exchanges `firewatch.jobs.events` y `firewatch.risk.events`, más el exchange muerto compartido `firewatch.dead`; tipos `jobs.requested.v1`, `risk.batch.published.v1`, `risk.job.failed.v1`; colas `risk.jobs.v1` / `jobs.results.v1` | Cada relay publica en el exchange de su propio servicio; ninguno declara topología, los cinco bindings son del aprovisionador; `jobs.results.v1` recibe dos claves |
+| 35-45 | ID, Type, OccurredAt, TraceID, JobID, ActorID, ZoneID, BatchID omitempty, RequestedAt, Demo | Correlación, validación y match contra trabajo |
+| 46-49 | `scenario_id` omitempty y `evaluated_at *time.Time` omitempty | Par opcional pero acoplado: el consumidor rechaza medio par (`services/jobs/internal/messaging/broker.go:299-304`) |
+| 50-62 | `failure_reason` y `attempts` omitempty, presentes sólo en `risk.job.failed.v1` | Reporte terminal entre servicios; los vocabularios se duplican en cada adaptador local, no hay SDK |
+| 65-70 | `SyntheticScenarioIDs()`: seis perfiles, devuelve copia | Vocabulario de escenarios; el transporte de jobs compara igualdad exacta (`services/jobs/internal/handler/api.go:71-78`) |
 
 Los strings Go no imponen UUID ni tamaño por sí solos; las restricciones vienen de handlers/consumidores/SQL. `omitempty` sólo afecta a la serialización: `batch_id`, `scenario_id`, `evaluated_at`, `failure_reason` y `attempts` pueden faltar sin que la deserialización los exija. `Demo` no es puerta de validez —describe el origen de la solicitud—, mientras que fechas cero y UUID nulos sí hacen fallar `valid` (`services/jobs/internal/messaging/broker.go:285-307`).
 
-`contracts/events/v1/README.md:3-9` documenta transporte y una tabla de dos routing keys: **no incluye `risk.job.failed.v1`**, que existe sólo en el código. Líneas 11-13 especifican UUIDs, fechas UTC, deduplicación transaccional, Ack después de commit y versionado de cambios incompatibles; línea 15 prohíbe datasets/modelos en bodies. Líneas 17-24 añaden la metadata de escenario opcional y la línea 26 limita la extensión a servicios locales actualizados juntos. Es **intención**, no enforcement. La producción de solicitudes usa fecha DB y `Demo=true` (`services/jobs/internal/repository/store.go:62-77`); risk copia y transforma el envelope (`services/risk/internal/repository/store.go:269-281`).
+`contracts/events/v1/README.md:3-12` documenta transporte, los dos exchanges de publicación, el exchange muerto compartido y una tabla de tres routing keys que ya incluye `risk.job.failed.v1` y nombra el exchange de cada evento. Líneas 14-16 especifican UUIDs, fechas UTC, deduplicación transaccional, Ack después de commit y versionado de cambios incompatibles; línea 18 prohíbe datasets/modelos en bodies. Líneas 20-27 añaden la metadata de escenario opcional y la línea 29 limita la extensión a servicios locales actualizados juntos. Es **intención**, no enforcement. La producción de solicitudes usa fecha DB y `Demo=true` (`services/jobs/internal/repository/store.go:62-77`); risk copia y transforma el envelope (`services/risk/internal/repository/store.go:269-281`).
 
 ## OpenAPI: mapa completo de declaraciones
 
@@ -73,15 +73,15 @@ Supuestos: aceptación transaccional con IDs válidos y fixture demo.
 | Publication event | `services/risk/internal/repository/store.go:269-281` | Copia E; nuevo ID E2, tipo publicado, BatchID B, OccurredAt now -> JSON de resultado con la metadata de escenario intacta |
 | Completion | `services/jobs/internal/messaging/broker.go:229-233,285-307`; `services/jobs/internal/repository/store.go:172-198` | `valid` exige cuatro UUID y par de escenario coherente; `Complete` compara actor y zona contra la fila y escribe inbox/audit -> J published |
 
-**Alternativa:** un envelope con Type publicado pero BatchID vacío pasa el decode Go, pero `valid` devuelve false y el consumidor lo rechaza sin publicar (`services/jobs/internal/messaging/broker.go:229-233,300-305`); un `risk.job.failed.v1` mal formado sigue el mismo camino (`services/jobs/internal/messaging/broker.go:262-273`). Un schema Go compartido no sustituye validación semántica. Cambiar una routing key sin migrar bindings produce `message unroutable` en el relay —publica con mandatory y escucha los returns (`services/jobs/internal/messaging/broker.go:584-600`)—, no un error de compilación.
+**Alternativa:** un envelope con Type publicado pero BatchID vacío pasa el decode Go, pero `valid` devuelve false y el consumidor lo rechaza sin publicar (`services/jobs/internal/messaging/broker.go:229-233,299-310`); un `risk.job.failed.v1` mal formado sigue el mismo camino (`services/jobs/internal/messaging/broker.go:267-278`). Un schema Go compartido no sustituye validación semántica. Cambiar una routing key sin migrar bindings produce `message unroutable` en el relay —publica con mandatory y escucha los returns (`services/jobs/internal/messaging/broker.go:567-582`)—, no un error de compilación.
 
 ## Cobertura y límites
 
 | Archivo / unidades | Estado / hueco |
 | --- | --- |
-| `events.go:1-58`: comment/paquete/import, seis constantes, catorce campos, `SyntheticScenarioIDs` | Explicado; sin branches ejecutables propias |
-| `contracts/events/v1/README.md:1-26`: transporte, tabla, envelope, garantías, metadata de escenario, límite de versiones | Explicado como intención; su tabla de routing keys omite `risk.job.failed.v1` |
+| `events.go:1-70`: comment/paquete/import, ocho constantes, catorce campos, `SyntheticScenarioIDs` | Explicado; sin branches ejecutables propias |
+| `contracts/events/v1/README.md:1-29`: transporte, exchanges, tabla de tres routing keys, envelope, garantías, metadata de escenario, límite de versiones | Explicado como intención; coincide con el código en los tres eventos y en el exchange de cada uno |
 | `firewatch-v1.yaml:1-2125`: metadata, 21 rutas y 22 operaciones, componentes, refs y propiedades | Explicado por bloques declarativos; no se validó parser ni generación |
 | contracts/gen/observations/v1/observations.go:122-142 frente a `risk_input` de `contracts/openapi/firewatch-v1.yaml`:392-423 | Parcial: `SourceDescriptor` y el schema coinciden en catorce campos, pero el YAML no fija los enums `kind`/`origin` ni valida el resto del paquete |
 
-No se afirma que contrato y código sean idénticos: este documento declara lo que el texto dice, no lo que un servidor hace, y la instantánea de la colección no se regeneró en esta re-derivación. Próxima revisión propuesta: validar el YAML con un parser autorizado, comprobar que el cliente cubre los estados y códigos nuevos (`failed`, 409/422 de prevention, `queued_may_be_in_flight`) y añadir `risk.job.failed.v1` a la tabla de `contracts/events/v1/README.md`.
+No se afirma que contrato y código sean idénticos: este documento declara lo que el texto dice, no lo que un servidor hace, y la instantánea de la colección no se regeneró en esta re-derivación. Próxima revisión propuesta: validar el YAML con un parser autorizado y comprobar que el cliente cubre los estados y códigos nuevos (`failed`, 409/422 de prevention, `queued_may_be_in_flight`).

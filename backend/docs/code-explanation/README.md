@@ -60,9 +60,9 @@ Lo que **no** cambió y no debe leerse como resuelto: nada de esto se ejecutó. 
 Authorization: Bearer ...
   -> gateway: verificación, límite local, proxy
   -> jobs: rol admin, validación, transacción job + audit + outbox
-  -> relay jobs -> firewatch.events / jobs.requested.v1
+  -> relay jobs -> firewatch.jobs.events / jobs.requested.v1
   -> consumidor risk -> inbox + batch sintético + outbox
-  -> relay risk -> firewatch.events / risk.batch.published.v1
+  -> relay risk -> firewatch.risk.events / risk.batch.published.v1 y risk.job.failed.v1
   -> consumidor jobs -> inbox + estado published + audit
 
 viewer/admin -> gateway -> risk latest/history -> batches + frescura calculada
@@ -100,7 +100,7 @@ Las rutas siguientes son relativas a `backend/`. Los intervalos son inclusivos y
 | `services/jobs/internal/handler/security.go` | 1-62 | Explicado | [Jobs](02-jobs.md) |
 | `services/jobs/internal/handler/auth_negative_test.go` | 1-164 | Parcial | Inventariado y con hash; no analizado en detalle por esta colección |
 | `services/jobs/internal/handler/api_test.go` | 1-554 | Explicado | [Tests](08-tests-tools.md#jobs-fakes-preparación-y-dieciséis-casos) |
-| `services/jobs/internal/messaging/broker.go` | 1-620 | Explicado | [Mensajería](04-messaging.md) |
+| `services/jobs/internal/messaging/broker.go` | 1-602 | Explicado | [Mensajería](04-messaging.md) |
 | `services/jobs/internal/handler/status.go` | 1-52 | Parcial | Tipos del estado operativo que sirve `/health/ready`; no analizados en detalle |
 | `services/jobs/internal/handler/synthetic_scenarios_test.go` | 1-154 | Parcial | Inventariado y con hash; no analizado en detalle por esta colección |
 | `services/jobs/internal/messaging/broker_test.go` | 1-665 | Parcial | Inventariado y con hash; no analizado en detalle por esta colección |
@@ -127,9 +127,9 @@ Las rutas siguientes son relativas a `backend/`. Los intervalos son inclusivos y
 | `services/jobs/go.mod` | 1-23 | Explicado | [Despliegue](07-deployment.md) |
 | `services/jobs/go.sum` | — | Excluido | Lock/checksums de dependencias |
 | `services/jobs/.env.example` | — | Excluido | Política de no lectura de archivos `.env` y variantes |
-| `services/risk/cmd/server/main.go` | 1-442 | Explicado | [Despliegue](07-deployment.md) y [Persistencia](06-database.md) |
+| `services/risk/cmd/server/main.go` | 1-536 | Explicado | [Despliegue](07-deployment.md) y [Persistencia](06-database.md) |
 | `services/prevention/Dockerfile` | 1-18 | Parcial | Imagen de tres etapas del servicio; no analizada en detalle |
-| `services/prevention/cmd/server/main.go` | 1-256 | Parcial | Arranque de `prevention`: pool, migraciones, OIDC y HTTP en `:8084`; no analizado en detalle |
+| `services/prevention/cmd/server/main.go` | 1-266 | Parcial | Arranque de `prevention`: pool, migraciones, OIDC y HTTP en `:8084`; no analizado en detalle |
 | `services/prevention/cmd/server/main_test.go` | 1-126 | Parcial | Inventariado y con hash; no analizado en detalle por esta colección |
 | `services/prevention/go.mod` | 1-19 | Parcial | Módulo `firewatch.local/prevention`; no analizado en detalle |
 | `services/prevention/go.sum` | — | Excluido | Lock/checksums de dependencias |
@@ -175,7 +175,7 @@ Las rutas siguientes son relativas a `backend/`. Los intervalos son inclusivos y
 | `services/risk/internal/handler/models.go` | 1-56 | Parcial | Listado y activación de versiones de modelo; no analizado en detalle |
 | `services/risk/internal/handler/models_test.go` | 1-149 | Parcial | Inventariado y con hash; no analizado en detalle por esta colección |
 | `services/risk/internal/handler/api_test.go` | 1-527 | Explicado | [Tests](08-tests-tools.md#risk-nueve-casos-no-matriz-criptográfica-completa) |
-| `services/risk/internal/messaging/broker.go` | 1-529 | Explicado | [Mensajería](04-messaging.md) |
+| `services/risk/internal/messaging/broker.go` | 1-511 | Explicado | [Mensajería](04-messaging.md) |
 | `services/risk/internal/handler/sources.go` | 1-124 | Parcial | Estado e integridad de las fuentes de datos; no analizado en detalle |
 | `services/risk/internal/handler/sources_test.go` | 1-138 | Parcial | Inventariado y con hash; no analizado en detalle por esta colección |
 | `services/risk/internal/handler/status.go` | 1-52 | Parcial | Tipos del estado operativo que sirve `/health/ready`; no analizados en detalle |
@@ -238,7 +238,7 @@ Las rutas siguientes son relativas a `backend/`. Los intervalos son inclusivos y
 | `contracts/gen/geo/valparaiso-comunas.provenance.json` | 1-25 | Parcial | Procedencia declarada de la capa de comunas; no verificada contra la fuente externa |
 | `contracts/gen/observations/v1/observations.go` | 1-176 | Parcial | Inventariado y con hash; no analizado en detalle por esta colección |
 | `contracts/gen/observations/v1/observations_test.go` | 1-118 | Parcial | Inventariado y con hash; no analizado en detalle por esta colección |
-| `contracts/events/v1/README.md` | 1-26 | Explicado | [Contratos](05-contracts.md), intención de transporte |
+| `contracts/events/v1/README.md` | 1-29 | Explicado | [Contratos](05-contracts.md), intención de transporte |
 | `contracts/openapi/firewatch-v1.yaml` | 1-2125 | Explicado | [Contratos](05-contracts.md), declaraciones agrupadas |
 | `deploy/local/postgres-init.sh` | 1-31 | Explicado | [Persistencia](06-database.md) |
 | `deploy/k8s/base/autoscaling.yaml` | 1-105 | Parcial | Un `HorizontalPodAutoscaler` por servicio, cuatro en total; escrito, no observado en clúster |
@@ -268,7 +268,7 @@ Las rutas siguientes son relativas a `backend/`. Los intervalos son inclusivos y
 | `scripts/verify_synthetic.py` | 1-1043 | Parcial | Arnés de verificación sintética en un compose desechable; no ejecutado |
 | `.env` | — | Excluido | Configuración sensible; no lectura ni reproducción |
 | `.env.example` | — | Excluido | Política de no lectura de archivos `.env` y variantes |
-| `docker-compose.yml` | 1-273 | Explicado | [Despliegue](07-deployment.md), referencias de variables, sin resolver valores |
+| `docker-compose.yml` | 1-354 | Explicado | [Despliegue](07-deployment.md), referencias de variables, sin resolver valores |
 | `go.work` | 1-9 | Explicado | [Despliegue](07-deployment.md) |
 | `go.work.sum` | — | Excluido | Lock/checksums del workspace; no se lee ni verifica integridad |
 | `Makefile` | 1-20 | Explicado | [Despliegue](07-deployment.md), comandos leídos, no ejecutados |

@@ -21,6 +21,11 @@ import (
 // declares as the consumed queue plus ".dead".
 const deadLetterQueue = v1.RiskQueue + ".dead"
 
+// publishExchange is the one exchange this service may write to. The peer's
+// exchange carries its contract; publishing there is refused by the broker, not
+// discouraged by convention.
+const publishExchange = v1.RiskExchange
+
 // DeadLetterDepthUnknown represents missing, failed, or expired observations. -1 is deliberately outside the range of a real depth
 // (>= 0) so an unreachable broker can never be reported as an empty, healthy
 // looking dead-letter queue. ReadyReason treats it as not-ready and /metrics
@@ -410,43 +415,20 @@ func (b *Broker) runSession(parent context.Context, query func() (int64, error),
 	return consume(ctx)
 }
 
-// queueTopology is the routing topology declared by BOTH consumers. It is a
-// slice of queues with their routing keys, not the map it used to be: a queue can
-// carry more than one key, and a map cannot express that. jobs.results.v1
-// accepts both the batch result and the cross-service failure report. The order
-// is fixed so the declaration is deterministic, and every other declaration
-// (exchange, quorum queue type, delivery limit, dead-letter companion) is
-// unchanged. Both services must declare the same topology or the broker refuses
-// one at declaration time.
-var queueTopology = []struct {
-	queue string
-	keys  []string
-}{
-	{queue: v1.RiskQueue, keys: []string{v1.JobRequestedType}},
-	{queue: v1.JobsQueue, keys: []string{v1.BatchPublishedType, v1.JobFailedType}},
-}
-
+// topology verifies the broker resources this consumer depends on instead of
+// declaring them. Declaring is not an option under least privilege: binding a
+// queue to another service's exchange requires write permission on that
+// exchange, and holding it would let this service publish as its peer, which is
+// exactly what the split exchanges exist to deny. The provisioner owns the
+// objects; every check here is passive, so a missing or mistyped resource fails
+// at startup naming it, rather than failing later in the middle of a delivery.
 func topology(ch *amqp.Channel) error {
-	if err := ch.ExchangeDeclare(v1.Exchange, "topic", true, false, false, false, nil); err != nil {
-		return err
+	if err := ch.ExchangeDeclarePassive(publishExchange, "topic", true, false, false, false, nil); err != nil {
+		return fmt.Errorf("exchange %q: %w", publishExchange, err)
 	}
-	if err := ch.ExchangeDeclare("firewatch.dead", "direct", true, false, false, false, nil); err != nil {
-		return err
-	}
-	for _, entry := range queueTopology {
-		if _, err := ch.QueueDeclare(entry.queue+".dead", true, false, false, false, amqp.Table{"x-queue-type": "quorum"}); err != nil {
-			return err
-		}
-		if err := ch.QueueBind(entry.queue+".dead", entry.queue, "firewatch.dead", false, nil); err != nil {
-			return err
-		}
-		if _, err := ch.QueueDeclare(entry.queue, true, false, false, false, amqp.Table{"x-queue-type": "quorum", "x-delivery-limit": int32(5), "x-dead-letter-exchange": "firewatch.dead", "x-dead-letter-routing-key": entry.queue, "x-overflow": "reject-publish", "x-dead-letter-strategy": "at-least-once"}); err != nil {
-			return err
-		}
-		for _, key := range entry.keys {
-			if err := ch.QueueBind(entry.queue, key, v1.Exchange, false, nil); err != nil {
-				return err
-			}
+	for _, queue := range []string{v1.RiskQueue, deadLetterQueue} {
+		if _, err := ch.QueueDeclarePassive(queue, true, false, false, false, nil); err != nil {
+			return fmt.Errorf("queue %q: %w", queue, err)
 		}
 	}
 	return nil
@@ -491,7 +473,7 @@ func (b *Broker) publishOne(ctx context.Context, conn *amqp.Connection) (bool, e
 		return false, err
 	}
 	returns := ch.NotifyReturn(make(chan amqp.Return, 1))
-	confirm, err := ch.PublishWithDeferredConfirmWithContext(ctx, v1.Exchange, key, true, false, amqp.Publishing{ContentType: "application/json", DeliveryMode: amqp.Persistent, MessageId: id, Type: key, Timestamp: time.Now().UTC(), Body: body})
+	confirm, err := ch.PublishWithDeferredConfirmWithContext(ctx, publishExchange, key, true, false, amqp.Publishing{ContentType: "application/json", DeliveryMode: amqp.Persistent, MessageId: id, Type: key, Timestamp: time.Now().UTC(), Body: body})
 	if err != nil {
 		return false, err
 	}

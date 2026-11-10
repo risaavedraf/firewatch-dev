@@ -5,16 +5,28 @@ package v1
 import "time"
 
 const (
-	Exchange           = "firewatch.events"
+	// JobsExchange and RiskExchange are the publish exchanges, one per producing
+	// service. They are separate because the broker authorises by resource name
+	// and never by routing key: on a single shared topic exchange a rule like
+	// "may publish only jobs.requested.v1" cannot be expressed, so any service
+	// able to publish could forge its peer's events. Splitting the exchange turns
+	// that rule into a permission on a name.
+	JobsExchange = "firewatch.jobs.events"
+	RiskExchange = "firewatch.risk.events"
+	// DeadExchange is shared, and no service holds write on it: the broker moves
+	// exhausted messages there itself, and each service only reads its own
+	// companion queue. Granting write would let one service inject a forged
+	// dead-letter into its peer's queue.
+	DeadExchange = "firewatch.dead"
+
 	JobRequestedType   = "jobs.requested.v1"
 	BatchPublishedType = "risk.batch.published.v1"
 	// JobFailedType is the cross-service terminal-failure report. A job can die
 	// in either consumer and the row must still reach its terminal state, but
 	// the risk consumer does not own the job row, so it reports the failure as
 	// this event and the jobs consumer applies it. It travels the same way as
-	// every other event: through the shared topic exchange, durably from the
-	// reporting service's own outbox, with publisher confirms and mandatory
-	// routing.
+	// every other event: through the producing service's own exchange, durably
+	// from its outbox, with publisher confirms and mandatory routing.
 	JobFailedType = "risk.job.failed.v1"
 	RiskQueue     = "risk.jobs.v1"
 	JobsQueue     = "jobs.results.v1"

@@ -141,6 +141,11 @@ def main():
         print("PASS: broker outage, durable outbox recovery, last-valid-batch reads and app restart persistence")
 
     # Invalid messages must be quarantined without mutating the published batch.
+    # The management API requires a user with a management tag, so the smoke test
+    # injects as the admin identity. That is the test acting as an operator, not a
+    # service: jobs and risk hold no management tag and cannot call this API at
+    # all, which is why their permission split is proven by the broker tests in
+    # services/jobs/internal/messaging instead.
     authorization = base64.b64encode(("firewatch:" + env["RABBITMQ_PASSWORD"]).encode()).decode()
     queue_url = "http://localhost:15672/api/queues/firewatch/risk.jobs.v1.dead"
     status, existing = request(queue_url, headers={"Authorization": "Basic " + authorization})
@@ -148,7 +153,7 @@ def main():
     previous_dead_letters = existing.get("messages_ready", 0)
     status, last_valid = request(API + "/v1/risk/latest?zone_id=valparaiso-demo", token=viewer)
     assert status == 200
-    status, result = request("http://localhost:15672/api/exchanges/firewatch/firewatch.events/publish", "POST",
+    status, result = request("http://localhost:15672/api/exchanges/firewatch/firewatch.jobs.events/publish", "POST",
                             body={"properties": {"delivery_mode": 2}, "routing_key": "jobs.requested.v1",
                                   "payload": "{invalid", "payload_encoding": "string"},
                             headers={"Authorization": "Basic " + authorization})

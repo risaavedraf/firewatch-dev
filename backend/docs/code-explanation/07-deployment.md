@@ -8,11 +8,11 @@ El código define cuatro ejecutables Go independientes (`gateway`, `jobs`, `risk
 
 ## Alcance y fronteras
 
-Todos los rangos completos están en el [registro](README.md): cuatro main gateway/jobs/risk/prevention:1-63/1-341/1-442/1-256; cuatro Dockerfile:1-16/17/24/18; cinco go.mod:1-23/23/34/19/3; go.work:1-9; Makefile:1-20; .dockerignore:1-8; Compose:1-273; siete YAML Kubernetes:1-6/19/10/22/234/105/99; Prometheus:1-32; reglas de alerta:1-104; plugins:1-1; provisioning de Grafana:1-16/17; panel:1-432. Lectura directa, sin builds, tests ni conexión a infraestructura; el render de la base se enumeró con `kubectl kustomize` y no se aplicó a ningún clúster. `.env` y variantes, `go.sum` y realm de cuentas excluidos; no se resuelven variables sensibles. Identidad por hashes de los bytes leídos, no revisión Git: [índice](README.md).
+Todos los rangos completos están en el [registro](README.md): cuatro main gateway/jobs/risk/prevention:1-63/1-341/1-536/1-266; cuatro Dockerfile:1-16/17/24/18; cinco go.mod:1-23/23/34/19/3; go.work:1-10; Makefile:1-20; .dockerignore:1-8; Compose:1-354; siete YAML Kubernetes:1-6/19/10/22/234/105/99; Prometheus:1-32; reglas de alerta:1-104; plugins:1-1; provisioning de Grafana:1-16/17; panel:1-432. Lectura directa, sin builds, tests ni conexión a infraestructura; el render de la base se enumeró con `kubectl kustomize` y no se aplicó a ningún clúster. `.env` y variantes, `go.sum` y realm de cuentas excluidos; no se resuelven variables sensibles. Identidad por hashes de los bytes leídos, no revisión Git: [índice](README.md).
 
 ## Main jobs/risk: unidades y ramas compartidas
 
-Los imports de ambos `cmd/server/main.go` conectan módulos propios, migraciones, OIDC, UUID, pgxpool, atomic y HTTP (`services/jobs/cmd/server/main.go:3-27`; `services/risk/cmd/server/main.go:3-32`). La diferencia funcional de los callbacks es `Handle: store.Complete` con `Fail: store.Fail` en jobs (`services/jobs/cmd/server/main.go:130`) frente a `Handle: publisher.Publish` con `ReportFailure` en risk (`services/risk/cmd/server/main.go:209`). Cada celda de líneas cita jobs primero y risk después para el mismo comportamiento. Prevention no comparte esa tabla: su arranque vive en `services/prevention/cmd/server/main.go:39-123` (pool, rama migrate, OIDC y HTTP en 8084) y su readiness responde 200/503 con cuerpo JSON desde `services/prevention/cmd/server/main.go:200-222`.
+Los imports de ambos `cmd/server/main.go` conectan módulos propios, migraciones, OIDC, UUID, pgxpool, atomic y HTTP (`services/jobs/cmd/server/main.go:3-27`; `services/risk/cmd/server/main.go:3-33`). La diferencia funcional de los callbacks es `Handle: store.Complete` con `Fail: store.Fail` en jobs (`services/jobs/cmd/server/main.go:130`) frente a `Handle: publisher.Publish` con `ReportFailure` en risk (`services/risk/cmd/server/main.go:215`). Cada celda de líneas cita jobs primero y risk después para el mismo comportamiento. Prevention no comparte esa tabla: su arranque vive en `services/prevention/cmd/server/main.go:39-123` (pool, rama migrate, OIDC y HTTP en 8084) y su readiness responde 200/503 con cuerpo JSON desde `services/prevention/cmd/server/main.go:200-222`.
 
 | Unidad / líneas (jobs / risk) | Secuencia y ramas | Efecto / error |
 | --- | --- | --- |
@@ -27,6 +27,8 @@ Los imports de ambos `cmd/server/main.go` conectan módulos propios, migraciones
 | contadores/metrics, 140-146 / 227-234 | atomic requests; MetricsText de entrega y dead-letter; bloques HTTP y de proceso | risk añade resultados de modelo y pool; errores Fprintf ignorados; métricas por proceso, no persistidas |
 | outer, 147-167 / 235-255 | Incrementa contador para toda petición; parse ID o nuevo; ambas cabeceras; contexto 10 s; registra estado y latencia | ID válido incluye forma aceptada por uuid.Parse; no exige no Nil; no log HTTP por solicitud aquí |
 | server/shutdown, 168-179 / 256-267 | 8080; límites 5/10/15/60 s y 16384 bytes; goroutine espera señales, Shutdown 10 s | Error shutdown ignorado; ErrServerClosed ->nil; otros errors devueltos |
+
+Aviso de rango: `services/risk/cmd/server/main.go` tiene hoy 536 líneas, no las 442 de `267a4bb`, porque después se le añadieron `classifierRegistry`, `parseInferenceTimeout` y el cliente del servicio de inferencia. Los rangos de risk en este documento **ya no aterrizan** salvo donde se cita una línea suelta verificada, y no se re-derivaron en esta corrección. Los de `jobs` siguen vigentes: el archivo conserva sus 341 líneas.
 
 El contexto de 10 s del wrapper no mata mágicamente un handler que ignore cancelación; lo entrega a llamadas cooperativas, entre ellas SQL. La disponibilidad HTTP y la capacidad de procesar mensajes se separan: el código de `/health/ready` depende solo del ping a la base (`services/jobs/cmd/server/main.go:256-265`; `services/risk/cmd/server/main.go:429-441`), mientras el cuerpo informa broker y dead-letter y esas señales quedan en métricas. `204` es la respuesta de `/health/live` y la que el gateway devuelve estáticamente para sus dos rutas de salud (`services/gateway/internal/handler/gateway.go:153-155`). Si ListenAndServe falla antes de recibir señal, el defer stop cancela worker; la goroutine de shutdown observa esa cancelación. No se prueba el comportamiento temporal real del cierre.
 
@@ -66,7 +68,7 @@ Los [Dockerfile gateway](../../services/gateway/Dockerfile):1-16, [jobs](../../s
 
 ## Compose: grafo de servicios y alternativas
 
-[docker-compose.yml](../../docker-compose.yml):1-273 declara el proyecto `firewatch` y dos anchors. Su interpretación real depende de Compose y variables externas, no leídas.
+[docker-compose.yml](../../docker-compose.yml):1-354 declara el proyecto `firewatch` y dos anchors. Su interpretación real depende de Compose y variables externas, no leídas.
 
 | Bloque / líneas | Responsabilidad / conexiones | Condición o límite |
 | --- | --- | --- |
@@ -74,16 +76,17 @@ Los [Dockerfile gateway](../../services/gateway/Dockerfile):1-16, [jobs](../../s
 | hardened, 9-19 | read-only, cap_drop ALL, no-new-privileges, usuario65532, init, pids100, mem256m, cpu1, backend, restart | Anchor aplicado a aplicaciones y migradores; migradores sobrescriben restart |
 | postgres, 22-50 | PostGIS17-3.5; variables de passwords; volumen datos/init; health `pg_isready -h 127.0.0.1` | Sin host port; el health exige TCP real, no solo el socket de inicialización; no prueba permisos app |
 | rabbitmq, 52-69 | 4.1.8-management; vhost; volumen y plugins; health; management loopback15672 | Nodo único; contraseña variable; backend+edge |
-| identity, 71-91 | Keycloak26.5.2 start-dev/import-realm, base identity, hostname localhost, mount realm | Espera postgres healthy; puerto loopback8081; realm excluido, claims/cuentas no comprobados |
-| migradores, 93-121 | Tres imágenes app con argumento migrate; owner DB; postgres healthy; restart no; prevention migra la base risk | No AMQP/OIDC necesarios por rama migrate |
-| jobs/risk, 123-147 | Roles DB separados, URL AMQP local; anchor OIDC; risk fija `MODEL_ID` por defecto; esperan migrate completed y rabbit healthy | No host ports; protocolos DB/AMQP locales sin TLS en variables declaradas |
-| prevention, 149-157 | Base risk con esquema propio, anchor OIDC, espera prevention-migrate | Sin AMQP ni broker: no depende de rabbitmq |
-| gateway, 159-170 | JOBS_URL/RISK_URL/PREVENTION_URL internos, WEB_ORIGIN, puerto loopback8080, backend+edge | depends_on simple no comprueba readiness identity/jobs/risk/prevention |
-| prometheus, 172-180 | Perfil observability; mount config, alertas y datos; loopback9090 | Opcional, no parte de startup por defecto |
-| grafana, 182-200 | Perfil observability; datasource y panel por archivo; loopback3000; password admin requerido | Sin Alertmanager: las alertas se ven en Prometheus, no se enrutan |
-| tests, 202-229 | Perfil test; target Docker test; bases separadas; esperan test migrations | No ejecución autorizada aquí |
-| test migradores, 231-262 | migrate en jobs_test/risk_test con owner | Ejecutables app, no lógica distinta de migración |
-| redes/volúmenes, 264-273 | edge, backend internal true; postgres/rabbit/prometheus/grafana data | Declaración de persistencia, no verificación de backups ni credenciales ya inicializadas |
+| broker-topology, 76-96 | Imagen `curl` de un solo uso: ejecuta `deploy/local/rabbitmq-topology.sh` contra la API de management; recibe la contraseña admin y las dos contraseñas de servicio; `restart: 'no'` | Crea exchanges, colas, los cinco bindings, identidades y permisos; si falla, `jobs`/`risk` no arrancan |
+| identity, 99-124 | Keycloak26.5.2 start-dev/import-realm, base identity, hostname localhost, mount realm | Espera postgres healthy; puerto loopback8081; realm excluido, claims/cuentas no comprobados |
+| migradores, 126-154 | Tres imágenes app con argumento migrate; owner DB; postgres healthy; restart no; prevention migra la base risk | No AMQP/OIDC necesarios por rama migrate |
+| jobs, 156-166; risk, 197-220 | Roles DB separados; `AMQP_URL` propio de cada identidad (`firewatch-jobs` / `firewatch-risk`) cuya contraseña se deriva del único secreto de RabbitMQ; anchor OIDC; risk fija `MODEL_ID` por defecto | Esperan migrate, `broker-topology` completed y rabbit healthy; sin host ports; protocolos DB/AMQP locales sin TLS en variables declaradas |
+| prevention, 222-238 | Base risk con esquema propio, anchor OIDC, espera prevention-migrate | Sin AMQP ni broker: no depende de rabbitmq |
+| gateway, 240-251 | JOBS_URL/RISK_URL/PREVENTION_URL internos, WEB_ORIGIN, puerto loopback8080, backend+edge | depends_on simple no comprueba readiness identity/jobs/risk/prevention |
+| prometheus, 253-261 | Perfil observability; mount config, alertas y datos; loopback9090 | Opcional, no parte de startup por defecto |
+| grafana, 268-281 | Perfil observability; datasource y panel por archivo; loopback3000; password admin requerido | Sin Alertmanager: las alertas se ven en Prometheus, no se enrutan |
+| tests, 283-310 | Perfil test; target Docker test; bases separadas; esperan test migrations | No ejecución autorizada aquí |
+| test migradores, 312-343 | migrate en jobs_test/risk_test con owner | Ejecutables app, no lógica distinta de migración |
+| redes/volúmenes, 345-354 | edge, backend internal true; postgres/rabbit/prometheus/grafana data | Declaración de persistencia, no verificación de backups ni credenciales ya inicializadas |
 
 Interpolaciones `${...:?required}` requieren variables; los mensajes indican prerequisitos, no contienen passwords resueltos. El grafo inicial espera RabbitMQ healthy, pero después de iniciar, `Broker.Run` gestiona caída y read API puede seguir disponible. No se equipara restart a disponibilidad medible.
 
@@ -127,8 +130,9 @@ Supuestos: variables externas presentes, volumen local inicializable, builds cor
 
 | Paso | Cita | Cambio razonado |
 | --- | --- | --- |
-| Base | `docker-compose.yml:22-50,93-121` | postgres healthy -> los tres migradores aplican su esquema; jobs y risk además siembran zonas |
-| App | `docker-compose.yml:123-147`; `services/jobs/cmd/server/main.go:105-133`; `services/risk/cmd/server/main.go:115-220` | Migrate completed + rabbit healthy -> pools, verifier, workers y, en risk, ciclo |
+| Base | `docker-compose.yml:22-50,126-154` | postgres healthy -> los tres migradores aplican su esquema; jobs y risk además siembran zonas |
+| Broker | `docker-compose.yml:76-96`; `deploy/local/rabbitmq-topology.sh:32-141` | rabbit healthy -> el aprovisionador crea exchanges, colas, bindings y las dos identidades; `jobs`/`risk` esperan su salida con código 0 |
+| App | `docker-compose.yml:156-166,197-220`; `services/jobs/cmd/server/main.go:105,130`; `services/risk/cmd/server/main.go:116,215` | Migrate completed + broker-topology completed + rabbit healthy -> pools, verifier, workers y, en risk, ciclo |
 | HTTP | `services/jobs/cmd/server/main.go:134-167`; `services/risk/cmd/server/main.go:222-255` | Handlers y probes disponibles; wrapper asigna request ID/timeout |
 | Ready | `services/jobs/cmd/server/main.go:250-265`; `services/risk/cmd/server/main.go:429-441` | Ping DB nil ->200 con cuerpo JSON, independientemente de Broker.Ready |
 | Caída broker | `services/jobs/internal/messaging/broker.go:102-124`; `services/risk/internal/messaging/broker.go:91-113` | Ready broker false, reconexión; DB/read handlers no se eliminan |
@@ -137,6 +141,6 @@ Supuestos: variables externas presentes, volumen local inicializable, builds cor
 
 ## Cobertura y límites
 
-Los 33 archivos explicados de esta parte cubren main runtime de los cuatro servicios, declaraciones de módulos, tres etapas de cada imagen, anchors/servicios/redes/volúmenes Compose, los siete YAML de Kubernetes con sus HPAs, scrape y alertas, provisioning de Grafana y targets del Makefile. Las ramas migrate se remiten a [persistencia](06-database.md); los rangos completos reconciliados están en el índice. `deploy/k8s/README.md:3-30` aporta intención y prerequisitos, no cobertura de código adicional ni ejecución.
+Los 33 archivos explicados de esta parte cubren main runtime de los cuatro servicios, declaraciones de módulos, tres etapas de cada imagen, anchors/servicios/redes/volúmenes Compose, los siete YAML de Kubernetes con sus HPAs, scrape y alertas, provisioning de Grafana y targets del Makefile. Las ramas migrate se remiten a [persistencia](06-database.md); los rangos completos reconciliados están en el índice. `deploy/k8s/README.md:3-32` aporta intención y prerequisitos, no cobertura de código adicional ni ejecución.
 
 No se acredita compatibilidad de imágenes, render aplicado de 25 objetos, TLS real, backups, SLA, CI remoto, seguridad de dependencias o roles del realm. Las verificaciones históricas se separan en [tests y herramientas](08-tests-tools.md). Antes de desplegar se necesitarían decisiones de DNS, registry, infraestructura y secrets por su propietario, no cambios implícitos de este análisis.

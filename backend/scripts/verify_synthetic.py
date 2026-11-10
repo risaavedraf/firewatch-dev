@@ -52,6 +52,10 @@ ROOT = Path(__file__).resolve().parent.parent
 
 POSTGIS_IMAGE = "postgis/postgis:17-3.5"
 RABBIT_IMAGE = "rabbitmq:4.1.8-management"
+# The same image the compose stack uses to provision the broker identities and
+# topology. Both must stay the same version so the harness and the stack cannot
+# drift apart.
+TOPOLOGY_IMAGE = "curlimages/curl:8.12.1"
 KEYCLOAK_IMAGE = "quay.io/keycloak/keycloak:26.5.2"
 
 SERVICES = {
@@ -417,7 +421,7 @@ class Harness:
         code, output = self._docker(["info"], timeout=30)
         if code != 0:
             raise HarnessError("Docker daemon is not reachable: " + output.strip()[-500:])
-        for image in (POSTGIS_IMAGE, RABBIT_IMAGE, KEYCLOAK_IMAGE):
+        for image in (POSTGIS_IMAGE, RABBIT_IMAGE, KEYCLOAK_IMAGE, TOPOLOGY_IMAGE):
             code, _ = self._docker(["image", "inspect", image])
             if code != 0:
                 raise HarnessError(f"required image {image} is not present locally; pull it before running this harness")
@@ -493,7 +497,7 @@ class Harness:
         self.owned_container_ids.append(container_id)
         return container_id
 
-    def _run_owned_container(self, name, image, *, env=None, command=None):
+    def _run_owned_container(self, name, image, *, env=None, command=None, mounts=()):
         """Create, record ownership, then run one short-lived container to completion.
 
         The container is named and labelled before it starts, and it is recorded
@@ -513,6 +517,8 @@ class Harness:
         ]
         for variable in (env or {}):
             argv += ["-e", variable]
+        for host, container in mounts:
+            argv += ["-v", f"{host}:{container}"]
         argv.append(image)
         if command:
             argv += list(command)
@@ -623,6 +629,37 @@ class Harness:
             f"Keycloak realm discovery at {keycloak_discovery_url(self.identity_port)}",
         )
 
+    def provision_broker(self):
+        """Create the per-service broker identities and the topology.
+
+        The services verify their broker resources passively at startup instead of
+        declaring them: declaring a peer's queue requires write permission on the
+        peer's exchange, which is exactly what the split exchanges deny. Nothing
+        exists on the broker before this step runs, so without it the services
+        never become ready.
+        """
+        # The development derivation the compose file also applies: the two
+        # identities get distinct passwords from the single required secret.
+        derived = self.secrets["RABBITMQ_PASSWORD"]
+        self._run_owned_container(
+            self.prefix + "-broker-topology",
+            TOPOLOGY_IMAGE,
+            env={
+                "RABBITMQ_MANAGEMENT_URL": "http://rabbitmq:15672",
+                "ADMIN_USER": "firewatch",
+                "ADMIN_PASS": derived,
+                "JOBS_PASSWORD": derived + "-jobs",
+                "RISK_PASSWORD": derived + "-risk",
+            },
+            mounts=[
+                (
+                    _container_path(ROOT / "deploy" / "local" / "rabbitmq-topology.sh"),
+                    "/rabbitmq-topology.sh:ro",
+                ),
+            ],
+            command=["sh", "/rabbitmq-topology.sh"],
+        )
+
     def run_migrations(self):
         for database in ("jobs", "risk"):
             url = (
@@ -644,7 +681,10 @@ class Harness:
             "OIDC_JWKS_URL": f"http://identity:8080/realms/{REALM}/protocol/openid-connect/certs",
             "OIDC_AUDIENCE": AUDIENCE,
         }
-        amqp = f"amqp://firewatch:{self.secrets['RABBITMQ_PASSWORD']}@rabbitmq:5672/firewatch"
+        # Each service authenticates as itself: the broker denies a forged peer
+        # event, so the harness exercises the same permission split the stack does.
+        jobs_amqp = f"amqp://firewatch-jobs:{self.secrets['RABBITMQ_PASSWORD']}-jobs@rabbitmq:5672/firewatch"
+        risk_amqp = f"amqp://firewatch-risk:{self.secrets['RABBITMQ_PASSWORD']}-risk@rabbitmq:5672/firewatch"
         self._start_container(
             self.prefix + "-jobs",
             f"{self.prefix}-jobs:latest",
@@ -652,7 +692,7 @@ class Harness:
             env={
                 **common,
                 "DATABASE_URL": f"postgres://jobs_app:{self.secrets['JOBS_DB_PASSWORD']}@postgres:5432/jobs?sslmode=disable",
-                "AMQP_URL": amqp,
+                "AMQP_URL": jobs_amqp,
             },
         )
         self._start_container(
@@ -662,7 +702,7 @@ class Harness:
             env={
                 **common,
                 "DATABASE_URL": f"postgres://risk_app:{self.secrets['RISK_DB_PASSWORD']}@postgres:5432/risk?sslmode=disable",
-                "AMQP_URL": amqp,
+                "AMQP_URL": risk_amqp,
             },
         )
         self._start_container(
@@ -981,6 +1021,7 @@ class Harness:
             self.start_infrastructure()
             self.wait_for_postgres()
             self.wait_for_rabbitmq()
+            self.provision_broker()
             self.start_identity()
             self.run_migrations()
             self.start_services()
