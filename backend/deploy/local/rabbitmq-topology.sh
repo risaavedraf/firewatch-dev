@@ -45,6 +45,45 @@ curl_auth() {
 	printf 'user = "%s:%s"\n' "$admin_user" "$admin_pass" | curl --config - "$@"
 }
 
+# How many times one request may be attempted before the provisioning fails.
+#
+# The broker's own healthcheck answers on the AMQP side, so `depends_on` releases
+# this script while the management plugin is still binding its listener. The
+# first request then dies on a refused connection and takes the whole `docker
+# compose up` with it: a startup race, not a disagreement about the topology.
+# Thirty attempts at one second each cover a slow broker and still fail the step
+# well inside the job's time budget.
+provision_attempts="${RABBITMQ_PROVISION_ATTEMPTS:-30}"
+
+# request METHOD PATH BODY
+#
+# Retries only a transport failure, which is exactly the window described above:
+# curl exits non-zero and leaves the HTTP code empty. An HTTP status is returned
+# to the caller on the first attempt, because a 409 that means an existing object
+# disagrees, or a 401 on the credentials, must fail loudly instead of being
+# retried into a green run. The error text is printed once, when the attempts run
+# out, so a slow broker does not fill the log.
+request() {
+	method=$1
+	path=$2
+	body=$3
+	attempt=1
+	while :; do
+		if response=$(curl_auth -sS --connect-timeout 5 --max-time 15 -X "$method" \
+			-H 'content-type: application/json' --data "$body" \
+			-w '\n%{http_code}' "$api$path" 2>&1); then
+			printf '%s' "$response"
+			return 0
+		fi
+		if [ "$attempt" -ge "$provision_attempts" ]; then
+			printf '%s\n' "$response" >&2
+			return 1
+		fi
+		attempt=$((attempt + 1))
+		sleep 1
+	done
+}
+
 # call METHOD PATH BODY [allow_conflict]
 #
 # A 2xx is success. A 409 counts as success only where it means "already there",
@@ -56,9 +95,7 @@ call() {
 	body=$3
 	allow_conflict=${4:-no}
 
-	response=$(curl_auth -sS --connect-timeout 5 --max-time 15 -X "$method" \
-		-H 'content-type: application/json' --data "$body" \
-		-w '\n%{http_code}' "$api$path") || {
+	response=$(request "$method" "$path" "$body") || {
 		echo "provisioning: $method $path: request failed" >&2
 		exit 1
 	}
@@ -121,8 +158,13 @@ call POST "/bindings/$vhost/e/$dead_exchange/q/$jobs_queue.dead" \
 # duplicate into the same queues for anything publishing to it. A 404 means a
 # previous run already retired it. Queue messages are untouched by this.
 echo "provisioning: retiring the legacy exchange"
-code=$(curl_auth -sS --connect-timeout 5 --max-time 15 -o /dev/null -w '%{http_code}' \
-	-X DELETE "$api/exchanges/$vhost/$legacy_exchange")
+# Retired through the same bounded retry: the DELETE runs late, but a broker that
+# restarted mid-run would otherwise fail the stack without a word.
+response=$(request DELETE "/exchanges/$vhost/$legacy_exchange" '') || {
+	echo "provisioning: retiring $legacy_exchange: request failed" >&2
+	exit 1
+}
+code=$(printf '%s\n' "$response" | tail -n 1)
 case "$code" in
 204 | 404) : ;;
 *)
