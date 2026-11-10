@@ -3,10 +3,13 @@ package directory
 import (
 	"context"
 	"encoding/json"
+	"encoding/pem"
 	"errors"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -808,6 +811,79 @@ func TestDirectoryUserReadDoesNotUseTheUserList(t *testing.T) {
 	}
 	if _, listReads := fake.counts(); listReads != 0 {
 		t.Fatalf("the by-identifier read performed %d list reads, want 0", listReads)
+	}
+}
+
+// tlsCABundle writes the certificate a test server presents as the PEM bundle
+// TLS_CA_FILE names, inside a fresh temp dir.
+func tlsCABundle(t *testing.T, server *httptest.Server) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "ca.crt")
+	bundle := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: server.Certificate().Raw})
+	if err := os.WriteFile(path, bundle, 0o600); err != nil {
+		t.Fatalf("write the CA bundle: %v", err)
+	}
+	return path
+}
+
+// TestTLSCAFileFeedsTheAdminClient pins T7.4's trust side for the administrative
+// client: with TLS_CA_FILE the admin API is verified against that pool only,
+// which is what lets KEYCLOAK_ADMIN_URL be https inside a deployment where the
+// identity provider presents a certificate no public root vouches for.
+func TestTLSCAFileFeedsTheAdminClient(t *testing.T) {
+	fake := newTLSFakeKeycloak(t)
+	t.Setenv(tlsCAFileEnv, tlsCABundle(t, fake.server))
+	client := fake.clientIn("production")
+	transport, ok := client.httpClient.Transport.(*http.Transport)
+	if !ok || transport.TLSClientConfig == nil || transport.TLSClientConfig.RootCAs == nil {
+		t.Fatalf("the admin client does not carry the configured CA: %#v", client.httpClient.Transport)
+	}
+	// The read is the proof, not the field: the https fake is reachable only
+	// through the pool the bundle built, because the system roots never vouch for
+	// the certificate it presents.
+	users, err := client.Users(context.Background())
+	if err != nil || len(users) != 2 {
+		t.Fatalf("https admin read with the internal CA = %+v, %v", users, err)
+	}
+}
+
+// TestNoTLSCAFileKeepsTheBareAdminClient pins the behaviour that must not
+// change: without TLS_CA_FILE the admin client keeps no Transport at all, so the
+// system roots and the 5s bound it always had stay in effect, and the plaintext
+// local stack keeps reading the directory.
+func TestNoTLSCAFileKeepsTheBareAdminClient(t *testing.T) {
+	fake := newFakeKeycloak(t)
+	t.Setenv(tlsCAFileEnv, "")
+	client := fake.clientIn("development")
+	if client.httpClient.Transport != nil {
+		t.Fatalf("without TLS_CA_FILE the admin client must keep no Transport, got %#v", client.httpClient.Transport)
+	}
+	if client.httpClient.Timeout != requestTimeout {
+		t.Fatalf("timeout %v, want the %v bound it always had", client.httpClient.Timeout, requestTimeout)
+	}
+	if _, err := client.Users(context.Background()); err != nil {
+		t.Fatalf("plaintext development read = %v, want it accepted", err)
+	}
+}
+
+// TestAnUnloadableTLSCAFileDoesNotBecomeATrustAnchor pins the refusal: a bundle
+// that cannot be read, or holds no certificate, never becomes an empty pool or a
+// silent fall back presented as the internal CA. Startup reads the same path and
+// stops there; a client built anyway keeps the bare client, so the handshake
+// fails closed instead of trusting something nobody configured.
+func TestAnUnloadableTLSCAFileDoesNotBecomeATrustAnchor(t *testing.T) {
+	dir := t.TempDir()
+	blank := filepath.Join(dir, "blank.crt")
+	if err := os.WriteFile(blank, []byte("not a certificate"), 0o600); err != nil {
+		t.Fatalf("write the unusable bundle: %v", err)
+	}
+	for _, path := range []string{filepath.Join(dir, "absent.crt"), blank} {
+		t.Run(filepath.Base(path), func(t *testing.T) {
+			t.Setenv(tlsCAFileEnv, path)
+			if client := newFakeKeycloak(t).client(); client.httpClient.Transport != nil {
+				t.Fatalf("TLS_CA_FILE=%s built a trust anchor: %#v", path, client.httpClient.Transport)
+			}
+		})
 	}
 }
 

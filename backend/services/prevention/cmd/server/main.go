@@ -61,6 +61,19 @@ func run() error {
 	if len(os.Args) == 2 && os.Args[1] == "migrate" {
 		return migrate(ctx, db)
 	}
+	// The crossing contract's transport decisions are taken here: after the migrate
+	// branch, because a migration job holds only DATABASE_URL and never binds a port,
+	// and before any client is built, so a deployment with no key pair or with a CA
+	// bundle that cannot be loaded stops instead of running with trust it did not ask
+	// for. The directory client reads TLS_CA_FILE itself, through the same loader.
+	certFile, keyFile, err := startupListenerTLS(os.Getenv("APP_ENV"))
+	if err != nil {
+		return err
+	}
+	rootCAs, err := startupRootCAs()
+	if err != nil {
+		return err
+	}
 	issuer, jwks := os.Getenv("OIDC_ISSUER"), os.Getenv("OIDC_JWKS_URL")
 	for _, value := range []string{issuer, jwks} {
 		u, err := url.Parse(value)
@@ -71,7 +84,9 @@ func run() error {
 	if os.Getenv("OIDC_AUDIENCE") == "" {
 		return errors.New("OIDC_AUDIENCE required")
 	}
-	keyCtx := oidc.ClientContext(ctx, &http.Client{Timeout: 5 * time.Second})
+	// The key-set client trusts the internal CA when TLS_CA_FILE is configured and
+	// stays the bare client with the system roots when it is not.
+	keyCtx := oidc.ClientContext(ctx, newJWKSClient(rootCAs))
 	verifier := oidc.NewVerifier(issuer, oidc.NewRemoteKeySet(keyCtx, jwks), &oidc.Config{ClientID: os.Getenv("OIDC_AUDIENCE"), SupportedSigningAlgs: []string{"RS256"}})
 	store := repository.Store{DB: db}
 	// The user directory is built even when it is not configured: the route then
@@ -128,7 +143,7 @@ func run() error {
 		_ = srv.Shutdown(shutdown)
 	}()
 	slog.Info("listening", "addr", listenAddr)
-	err = srv.ListenAndServe()
+	err = listenAndServe(srv, certFile, keyFile)
 	if errors.Is(err, http.ErrServerClosed) {
 		return nil
 	}
