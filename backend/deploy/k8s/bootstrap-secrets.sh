@@ -156,19 +156,21 @@ apply_generic migration-credentials \
 	"RISK_DATABASE_URL=postgres://postgres:$postgres_password@postgres:5432/risk$migration_suffix"
 
 # --- shared scripts, as ConfigMaps -----------------------------------------
-# The PostgreSQL role/database script and the broker plugin list already exist in
-# deploy/local and are the single description of what those things are. They are
-# loaded from there rather than copied into the Kubernetes tree, so the base
-# cannot drift from the Compose stack. apply -f - makes a re-run update them,
-# which is safe: neither is mounted by a running container's decision logic, they
-# are read at container start.
+# The PostgreSQL role/database script, the broker plugin list and the broker
+# topology script already exist in deploy/local and are the single description of
+# what those things are. They are loaded from there rather than copied into the
+# Kubernetes tree, so the base cannot drift from the Compose stack. apply -f -
+# makes a re-run update them, which is safe: none of them is mounted by a running
+# container's decision logic, they are read at container start.
 repo_root="$(cd "$(dirname "$0")/../.." && pwd)"
 # The ConfigMap key is the file name the container reads, not the repository file
 # name: rabbitmq.yaml mounts subPath `enabled_plugins`, which is also what
 # RABBITMQ_ENABLED_PLUGINS_FILE names. Declaring the key here, per entry, keeps the
 # two sides of that contract visible in one place instead of deriving it from a
 # basename.
-for entry in "postgres-init:deploy/local/postgres-init.sh:postgres-init.sh" "rabbitmq-plugins:deploy/local/rabbitmq-plugins:enabled_plugins"; do
+# `rabbitmq-topology` is mounted by the broker-provision Job as /topology and run
+# as that Job's entrypoint, so the Job declares no topology of its own.
+for entry in "postgres-init:deploy/local/postgres-init.sh:postgres-init.sh" "rabbitmq-plugins:deploy/local/rabbitmq-plugins:enabled_plugins" "rabbitmq-topology:deploy/local/rabbitmq-topology.sh:rabbitmq-topology.sh"; do
 	configmap_name="${entry%%:*}"
 	rest="${entry#*:}"
 	source_file="$repo_root/${rest%%:*}"

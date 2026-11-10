@@ -1,0 +1,189 @@
+# Database migrations for the Kubernetes delivery, in the order the shared ledger
+# requires.
+#
+# Why risk -> prevention -> jobs: `risk` and `prevention` write into the same
+# database ("risk") and the same `schema_migrations` table, and that ledger's key
+# is the version number alone — it stores no filename, no owner and no sender. A
+# version claimed by both services makes whichever migrator runs second skip its
+# own migration in silence, which surfaces later as a missing table rather than
+# as an error (backend/docs/migration-ledger.md). The ledger records which
+# versions are present, never in which order they arrived, so the order has to be
+# enforced outside it. `jobs` owns a separate database and its own ledger, so its
+# versions cannot collide; it still runs last, which keeps one pod responsible
+# for every database before any application replica starts.
+#
+# Why one Job with initContainers instead of three Jobs: Kubernetes starts a
+# pod's initContainers strictly one at a time and starts the next one only after
+# the previous exited 0, so this order is a guarantee the API server enforces for
+# every apply. Three separate Jobs would carry no ordering at all and would race
+# the shared ledger on a fresh volume, and neither sleeps nor polling nor
+# `kubectl wait` inside a manifest makes that better. The main container is the
+# last step for the same reason: it is reached only when both initContainers
+# succeeded.
+#
+# The pod carries `app: migrate`, a label no Deployment uses. network.yaml admits
+# that exact label to postgres:5432, so this Job reaches the database it migrates
+# without inheriting any application's network rights. It does inherit the
+# namespace-wide rule that allows DNS and outbound 443 to every pod; that rule
+# exists for the identity provider, and narrowing it belongs to an overlay.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: migrate
+  namespace: firewatch
+  labels:
+    app.kubernetes.io/name: migrate
+    app.kubernetes.io/part-of: firewatch
+spec:
+  # A retry is safe: each service applies its migrations inside one transaction
+  # under the shared advisory lock, and a version already recorded in the ledger
+  # is skipped, so a re-run from the top is a no-op for what already applied.
+  # Nothing in a Job can wait for the StatefulSet to be ready: there is no
+  # readiness gate between them, so the first attempts may land before Postgres
+  # answers. Kubernetes backs off exponentially between attempts; six of them
+  # cover a cold start, and a later failure is a schema or credential problem a
+  # human has to read, not a transient one worth retrying.
+  backoffLimit: 6
+  # Each migrate run bounds its own work to 30 seconds of database time, so a pod
+  # still alive after ten minutes is stuck in scheduling or image pull, not
+  # migrating. The deadline fails it instead of leaving a hung pod behind.
+  activeDeadlineSeconds: 600
+  # The Job's only output is its pod log. An hour keeps that log readable for the
+  # operator applying the base, then the Job and its pod are removed; the durable
+  # record of what was applied is the ledger in the database, not the log.
+  ttlSecondsAfterFinished: 3600
+  template:
+    metadata:
+      labels:
+        app: migrate
+        app.kubernetes.io/name: migrate
+        app.kubernetes.io/part-of: firewatch
+    spec:
+      # Never, not OnFailure: a restarted container overwrites the log that
+      # explains why the migration stopped, and that log is exactly what an
+      # operator has to read.
+      restartPolicy: Never
+      # The account the Deployments use; it carries no RBAC grant, and its token
+      # is not mounted because a migration reads no cluster state.
+      serviceAccountName: firewatch-app
+      automountServiceAccountToken: false
+      # Pod Security `restricted`: these images already run as 65532 (distroless
+      # nonroot) and the pod declares it, so no container can start as root.
+      # NOT CONFIRMED ON A CLUSTER YET: nothing has applied this manifest.
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      initContainers:
+        # Step 1 of 3. The migrations are a positional subcommand of the service
+        # server binary, not a separate migrate image or entrypoint: `/server
+        # migrate` applies this service's list to the database its DATABASE_URL
+        # names.
+        - name: migrate-risk
+          image: firewatch/risk:replace-before-deploy
+          command: ["/server", "migrate"]
+          env:
+            # Not a credential and not a development switch: it makes explicit
+            # that the TLS guard below cannot take its development exception
+            # here. What the guard actually checks is the DSN's
+            # sslmode=verify-full, which the Secret already carries.
+            - name: APP_ENV
+              value: staging
+            # The binary reads DATABASE_URL; the Secret key names the database
+            # that DSN points at. Both DSNs already require verify-full against
+            # the CA staged at /etc/tls/ca.crt, so no connection from this pod can
+            # fall back to plaintext.
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: migration-credentials
+                  key: RISK_DATABASE_URL
+          volumeMounts:
+            # Mounted at /etc/tls rather than with a subPath so the file lands
+            # exactly at the path the DSN's sslrootcert names.
+            - name: ca
+              mountPath: /etc/tls
+              readOnly: true
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          resources:
+            requests:
+              cpu: 100m
+              memory: 64Mi
+            limits:
+              cpu: '1'
+              memory: 256Mi
+        # Step 2 of 3. The prevention schema lives inside the risk database and
+        # takes the next versions of that same ledger, so this step reads the same
+        # Secret key. It runs second because the ledger is shared and the order
+        # above is the only thing that keeps the two version lists in their
+        # documented sequence.
+        - name: migrate-prevention
+          image: firewatch/prevention:replace-before-deploy
+          command: ["/server", "migrate"]
+          env:
+            - name: APP_ENV
+              value: staging
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: migration-credentials
+                  key: RISK_DATABASE_URL
+          volumeMounts:
+            - name: ca
+              mountPath: /etc/tls
+              readOnly: true
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          resources:
+            requests:
+              cpu: 100m
+              memory: 64Mi
+            limits:
+              cpu: '1'
+              memory: 256Mi
+      containers:
+        # Step 3 of 3. `jobs` migrates its own database with its own ledger, so it
+        # uses the other Secret key. It starts only after both initContainers
+        # exited 0, which is the whole reason this is one Job and not three.
+        - name: migrate-jobs
+          image: firewatch/jobs:replace-before-deploy
+          command: ["/server", "migrate"]
+          env:
+            - name: APP_ENV
+              value: staging
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: migration-credentials
+                  key: JOBS_DATABASE_URL
+          volumeMounts:
+            - name: ca
+              mountPath: /etc/tls
+              readOnly: true
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          resources:
+            requests:
+              cpu: 100m
+              memory: 64Mi
+            limits:
+              cpu: '1'
+              memory: 256Mi
+      volumes:
+        # Only the CA is needed: sslmode=verify-full authenticates the server, and
+        # the client presents no certificate.
+        - name: ca
+          secret:
+            secretName: firewatch-ca
