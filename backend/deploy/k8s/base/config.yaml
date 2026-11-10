@@ -7,10 +7,19 @@ data:
   OIDC_ISSUER: https://identity.example.invalid/realms/firewatch
   OIDC_JWKS_URL: https://identity.example.invalid/realms/firewatch/protocol/openid-connect/certs
   OIDC_AUDIENCE: firewatch-api
-  JOBS_URL: http://jobs:8080
-  RISK_URL: http://risk:8080
+  # The three upstream hops are https, and the gateway verifies them with the
+  # internal CA it mounts at /etc/tls/ca.crt (workloads.yaml): with APP_ENV
+  # outside development, `requireSecureUpstreams` refuses a plaintext upstream
+  # rather than proxying it, so a scheme that drifts back to http here is a
+  # gateway that will not start rather than one that silently downgrades.
+  # INFERENCE_URL is deliberately absent: risk reads it at startup and refuses
+  # to run when the address it names has no answer (the inference Service
+  # arrives with T7.8), so naming it before that Service exists would crash
+  # every risk replica. The classifier default needs no inference address.
+  JOBS_URL: https://jobs:8080
+  RISK_URL: https://risk:8080
   # prevention listens on its own port (8084), not 8080.
-  PREVENTION_URL: http://prevention:8084
+  PREVENTION_URL: https://prevention:8084
 ---
 apiVersion: v1
 kind: ServiceAccount
