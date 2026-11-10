@@ -85,7 +85,13 @@ spec:
           # `start` is production mode, the command the production Compose file
           # uses: it refuses a development hostname and requires the database.
           # `start-dev` would serve plaintext over an in-memory store.
-          command: [start]
+          #
+          # It is an `arg`, not a `command`: the image's ENTRYPOINT is already
+          # /opt/keycloak/bin/kc.sh, and `command: [start]` replaced it, so the
+          # container died with `exec: "start": executable file not found in
+          # $PATH` and the pod sat in CrashLoopBackOff. Rendering the manifest
+          # cannot catch that; only starting the container does.
+          args: [start]
           ports: [{name: https, containerPort: 8443}]
           env:
             - name: KC_DB
