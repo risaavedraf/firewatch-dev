@@ -47,6 +47,9 @@ func run() error {
 	if err != nil {
 		return errors.New("invalid DATABASE_URL")
 	}
+	if err = requireTLSOutsideDevelopment(config, os.Getenv("APP_ENV")); err != nil {
+		return err
+	}
 	config.MaxConns = 10
 	config.MinConns = 1
 	config.ConnConfig.ConnectTimeout = 5 * time.Second

@@ -48,7 +48,14 @@ func run() error {
 	verifier := oidc.NewVerifier(issuer.String(), oidc.NewRemoteKeySet(keyCtx, jwks.String()), &oidc.Config{ClientID: required("OIDC_AUDIENCE"), SupportedSigningAlgs: []string{"RS256"}})
 	// WEB_ORIGIN is optional on purpose: an unset value disables CORS entirely.
 	webOrigin := os.Getenv("WEB_ORIGIN")
-	srv := &http.Server{Addr: ":8080", Handler: handler.New(verifier, parse("JOBS_URL"), parse("RISK_URL"), parse("PREVENTION_URL"), webOrigin), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 10 * time.Second, WriteTimeout: 15 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 16384}
+	// The upstreams are parsed before the guard, so a missing or malformed address
+	// keeps the startup refusal it has today. The guard then decides whether the
+	// addresses it just accepted are encrypted.
+	jobsURL, riskURL, preventionURL := parse("JOBS_URL"), parse("RISK_URL"), parse("PREVENTION_URL")
+	if err := startupTransport(os.Getenv("APP_ENV")); err != nil {
+		return err
+	}
+	srv := &http.Server{Addr: ":8080", Handler: handler.New(verifier, jobsURL, riskURL, preventionURL, webOrigin), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 10 * time.Second, WriteTimeout: 15 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 16384}
 	go func() {
 		<-ctx.Done()
 		shutdown, cancel := context.WithTimeout(context.Background(), 10*time.Second)

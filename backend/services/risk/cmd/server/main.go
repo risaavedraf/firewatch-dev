@@ -47,6 +47,9 @@ func run() error {
 	if err != nil {
 		return errors.New("invalid DATABASE_URL")
 	}
+	if err = requireTLSOutsideDevelopment(config, os.Getenv("APP_ENV")); err != nil {
+		return err
+	}
 	config.MaxConns = 10
 	config.MinConns = 1
 	config.ConnConfig.ConnectTimeout = 5 * time.Second
@@ -212,7 +215,14 @@ func run() error {
 	// ReportFailure records a give-up in this service's outbox so the jobs
 	// consumer can write the terminal state on the job's own row, which risk does
 	// not own. It reuses the store's outbox path; nothing is published here.
-	broker := &messaging.Broker{DB: db, URL: os.Getenv("AMQP_URL"), Handle: publisher.Publish, ReportFailure: store.RecordJobFailure}
+	// The broker URL is read and guarded here, after the migrate branch: a
+	// migration job holds only DATABASE_URL and never dials the broker, so it must
+	// not be asked for amqps. The guard still runs before the worker connects.
+	amqpURL, err := startupBrokerURL(os.Getenv("APP_ENV"))
+	if err != nil {
+		return err
+	}
+	broker := &messaging.Broker{DB: db, URL: amqpURL, Handle: publisher.Publish, ReportFailure: store.RecordJobFailure}
 	workerDone := make(chan struct{})
 	go func() { defer close(workerDone); broker.Run(ctx) }()
 	defer func() { stop(); <-workerDone }()
