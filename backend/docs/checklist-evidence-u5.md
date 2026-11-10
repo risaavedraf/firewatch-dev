@@ -5,18 +5,19 @@ Scope: unit **U5** of `Referencias/tareas_verificacion_implementacion_IA.md`, se
 practical activity). That document is the authoritative criterion source; this file references its IDs and
 does not replace or restate them.
 
-**No ID in this file is closed and no checklist box is marked — 0 checkboxes marked.** A passing test, a
-green workflow run and a recorded check are three different objects from a marked box: a recorded check
-observes one bounded behaviour that ran at one moment, while a marked box requires the ID's closing
-criterion — reproducible evidence, thresholds agreed with the team, a named responsible person and, where
-the criterion says so, real data. The source's five approval boxes (`GNG-V1` to `GNG-V5`) stay literally
-unmarked below for that reason.
+**One ID in this file is closed — `GNG-I1` — and no checklist box is marked: 0 checkboxes marked.** A
+passing test, a green workflow run and a recorded check are three different objects from a marked box: a
+recorded check observes one bounded behaviour that ran at one moment, while a marked box requires the ID's
+closing criterion — reproducible evidence, thresholds agreed with the team, a named responsible person
+and, where the criterion says so, real data. The source's five approval boxes (`GNG-V1` to `GNG-V5`) stay
+literally unmarked below for that reason.
 
 States used below are the ones the tracking document requires (implemented, partial, proposed, justified
 N/A, pending):
 
 | State | Meaning here |
 |---|---|
+| **Implemented** | The ID's closing artifact exists in this repository and the row cites it. Marking a row implemented does not mark a checklist box. |
 | **Partial** | An executable in-repository artifact speaks to the ID. It is not the ID's closing criterion. |
 | **Proposed** | An answer is written down but no responsible person has accepted it. |
 | **Pending** | The ID is a defined, self-contained work item that is not started and is not waiting on an external input. |
@@ -89,7 +90,7 @@ as approved.
 
 | ID | State | Evidence in this repository | What is missing to close it |
 |---|---|---|---|
-| `GNG-I1` | Pending | None. There is no Go/No-Go document in the repository; the closest statements are negative, not a version history: `backend/docs/synthetic-scenarios.md:47` states that no Go/No-Go signature is claimed (the demo handoff that repeated it was retired from the repository on 2026-10-17). | The Go/No-Go document itself with its version history (date, version, author, description). The source's table is an unfilled template. |
+| `GNG-I1` | Implemented | `odd/entrega/go-no-go.md`: the Go/No-Go document exists with its version-history table (2026-11-09 / 0.1 / Equipo de desarrollo FireWatch / creation of the document), an eleven-row decision matrix whose results are the real ones (including five rows marked No verificado with their reason), the four named blockers, and an explicit statement that it does not declare production approval and leaves GNG-V1…GNG-V5 unmarked. | None for the document. The decision itself needs a named responsible person and evidence the matrix does not have today. |
 | `GNG-I2` | Partial | A check/result table that can seed the matrix exists: `backend/docs/verification.md:3-21` lists the checks performed and their results, and `odd/tasks/security/ci-go-1.27.2-green.md:52` records a CI run outcome. | The matrix's **criterion** column agreed with the team, and a Go/No-Go result per row. `verification.md` carries no criterion column and has no latency or model-regression rows, so the source's three exemplar rows cannot all be filled. |
 | `GNG-V1` | Blocked | Unmarked. The only data-validation evidence is synthetic (see `backend/docs/checklist-evidence-u2-u3.md`, rows `DAT-*`). | A **real-data validation report** with fields-present results, and a named approver for the Data Validation approval. Without real data the box cannot legitimately be marked. |
 | `GNG-V2` | Blocked | Unmarked. There is no trained model and no evaluation report; `backend/docs/synthetic-scenarios.md:47` states the absence of a benchmark and of model metrics. | A model-evaluation report with measured metrics and a named approver for the Model Evaluation approval. Depends on the blocked `REG-*`/`ROB-*` rows of U3. |
@@ -109,10 +110,10 @@ as approved.
 
 ## Summary
 
-- 20 IDs registered: **0 closed**, **0 checkboxes marked**.
+- 20 IDs registered: **1 closed**, **0 checkboxes marked**.
 - 10 IDs hold partial in-repository evidence: `STK-I1`, `STK-V1`, `CT-I1`, `CT-I3`, `CT-I4`, `GNG-I2`,
   `ACT-I1`, `ACT-I2`, `ACT-I3`, `ACT-V1`.
-- 1 ID is pending, self-contained and not started: `GNG-I1`.
+- 1 ID is implemented and closed: `GNG-I1`.
 - 9 IDs are blocked on an input this repository cannot supply: `STK-I2`, `CT-I2`, `CT-V1`, `GNG-V1`,
   `GNG-V2`, `GNG-V3`, `GNG-V4`, `GNG-V5`, `ACT-V2`.
 - The five approval checkboxes (`GNG-V1`–`GNG-V5`) remain unmarked, and the signature row `GNG-V5` is
@@ -132,8 +133,7 @@ as approved.
    the runner not queried.
 4. **Reports and approvals** — a real-data validation report (`GNG-V1`), a trained-model evaluation
    (`GNG-V2`), approved infrastructure/SLA results (`GNG-V3`), a deployment decision (`GNG-V4`), the
-   Go/No-Go document with its version history (`GNG-I1`), the agreed matrix criteria (`GNG-I2`), and the
-   **name and signature of the responsible person** (`GNG-V5`).
+   agreed matrix criteria (`GNG-I2`), and the **name and signature of the responsible person** (`GNG-V5`).
 5. **Observability measurement for the activity** — a load generator with controlled artificial
    latency (`ACT-I3`), a recorded RPS/p95/memory/error/risk-distribution series (`ACT-V1`), and a
    named owner for the written decision (`ACT-V2`); the Prometheus/Grafana stack and the risk-level

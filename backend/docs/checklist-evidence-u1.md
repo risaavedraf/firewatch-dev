@@ -4,33 +4,35 @@ Scope: unit **U1** (governance, security and model/data protection) of
 `Referencias/tareas_verificacion_implementacion_IA.md`, security-plan sections 1, 2 and 3. That document
 is the authoritative criterion source; this file references its IDs and does not replace or restate them.
 
-**No ID in this file is closed and no checklist box is marked — 0 checkboxes marked.** A passing test, a
-documented control and a marked box are three different objects: a passing test observes one bounded
-behaviour that runs today, while a marked box requires the ID's closing criterion — reproducible
-evidence, thresholds agreed with the team, a named responsible person and, where the criterion says so,
-real data.
+**Four IDs in this file are closed — `GOB-I1`, `AME-I1`, `AME-I2` and `RED-I3` — and no checklist box is
+marked: 0 checkboxes marked.** A passing test, a documented control and a marked box are three different
+objects: a passing test observes one bounded behaviour that runs today, while a marked box requires the
+ID's closing criterion — reproducible evidence, thresholds agreed with the team, a named responsible
+person and, where the criterion says so, real data.
 
 Sections 1–3 are, with few exceptions, organisational and security-plan criteria: an internal
 AI-risk-classification policy, a named AI Security Officer, a signed pre-production approval, a threat
 model, an incident-response plan, a rollback drill. For those, the expected result of inspecting an
-academic demonstration repository is an **absent artifact**, and that is recorded below as `Blocked` or
+academic demonstration repository is an **absent artifact**, and that absence is recorded below as `Blocked` or
 `Pending` with the exact missing input named, never padded with unrelated code behaviour. The clauses
 that do carry real in-repository artifacts are the access-control, provenance, input-validation and
-containerisation controls; even there, a documented control is not the ID's closing criterion.
+containerisation controls, plus the four documents cited by `GOB-I1`, `AME-I1`, `AME-I2` and `RED-I3`; even
+there, a documented control is not the ID's closing criterion.
 
 States used below are the ones the tracking document requires (implemented, partial, proposed, justified
 N/A, pending):
 
 | State | Meaning here |
 |---|---|
+| **Implemented** | The ID's closing artifact exists in this repository and the row cites it. Marking a row implemented does not mark a checklist box. |
 | **Partial** | An executable in-repository artifact speaks to the ID. It is not the ID's closing criterion. |
 | **Pending** | The ID is a defined, self-contained work item that is not started and is not waiting on an external input. |
 | **Blocked** | Closing requires an input this repository does not contain: real data, an agreed threshold, a named owner, a signature or an organisational decision. |
 
-The tracking document also defines **implemented**, **proposed** and **justified N/A**. No row uses
-implemented — no criterion here is closed — and no justified N/A is asserted, because every N/A this
-unit could argue (for example prompt injection against a non-generative model) still needs a named owner
-to accept it, and is therefore registered below as blocked, not as justified.
+The tracking document also defines **implemented**, **proposed** and **justified N/A**. Four rows carry
+implemented — `GOB-I1`, `AME-I1`, `AME-I2` and `RED-I3` — and no justified N/A is asserted, because every
+N/A this unit could argue (for example prompt injection against a non-generative model) still needs a
+named owner to accept it, and is therefore registered below as blocked, not as justified.
 
 Pointers below are anchors at the declaration being cited, not whole-file references. No test, build,
 scanner, migration or workflow was executed to produce this registry; every anchor is a file read. The
@@ -52,8 +54,8 @@ artifacts are free of backdoors. Every row below inherits that limit.
 
 | ID | State | Evidence in this repository | What is missing to close it |
 |---|---|---|---|
-| `GOB-I1` | Pending | None. No internal AI risk-classification policy exists. The only classification in the repository is a *wildfire* severity level (`bajo`/`medio`/`alto`/`desconocido`) produced by the own rule, whose level vocabulary is declared at `backend/services/risk/internal/classify/classifier.go:30-33`, which is not an AI-risk scale. | The policy document itself, with the low/limited/high/unacceptable scale written down and mapped to the chosen regulation. A named approver is required for its adoption, but the missing input at this point is the drafted policy. |
-| `GOB-I2` | Blocked | None. No classification of the fire-risk system inside an AI-risk scale exists; `backend/docs/architecture.md:63` lists model approval as a future requirement, not a category. | The scale from `GOB-I1` plus a justified category for this system, decided and accepted by the responsible owner. This is an organisational classification decision, not repository code. |
+| `GOB-I1` | Implemented | `odd/security/ai-risk-classification-policy.md`: the four-level scale (bajo/limitado/alto/inaceptable), its mapping to the chosen regulation (EU AI Act 2024/1689), FireWatch self-assessed as `alto` with the consequence written down, the unknown-is-never-low rule, and the adoption record signed by the named approver (Ricardo Saavedra F., project owner, 2026-11-09). | None for the policy. The AI Security Officer role it creates is defined and unnamed (D3), so no model approval can be registered yet. |
+| `GOB-I2` | Implemented | `odd/security/ai-risk-classification-policy.md` §3 classifies the system as `alto` with its reasoning — a level that orients wildfire prevention and that a reader takes as a fact rather than an estimate, analogous to the critical-infrastructure category of EU AI Act Annex III — and §6 records that classification as adopted by the responsible owner (Ricardo Saavedra F., 2026-11-09). | None. A legal qualification of that self-assessment is out of scope and is not claimed. |
 | `GOB-I3` | Blocked | None. No role, no name and no appointment record exist; the ODD unit itself leaves the responsible person to be confirmed (`odd/urgent/01-seguridad-gobierno.md`). | The name of the designated AI Security Officer (or equivalent) and the appointment record. A named individual is the exact missing input. |
 | `GOB-I4` | Blocked | Closest artifact only: `backend/docs/architecture.md:63` states that model approval remains a requirement for a subsequent slice. No approval procedure or signer is defined anywhere. | The pre-production model-approval procedure and the name of who signs it, together with the evidence required. It depends on a named responsible person and an organisational decision. |
 | `GOB-V1` | Blocked | None. No EU AI Act (or other regulation) consistency assessment exists. | The classification from `GOB-I1`/`GOB-I2` plus a regulatory consistency review accepted by the responsible owner. It cannot be produced before those decisions. |
@@ -63,8 +65,8 @@ artifacts are free of backdoors. Every row below inherits that limit.
 
 | ID | State | Evidence in this repository | What is missing to close it |
 |---|---|---|---|
-| `AME-I1` | Pending | None. No MITRE ATLAS exercise, threat catalogue or data-flow diagram for the AI design exists. | The threat-modelling exercise itself and its output. It is self-contained analytical work; no real data or external signature is the blocker at this point. |
-| `AME-I2` | Pending | None. No document enumerates inversion, extraction, prompt injection or other ATLAS vectors with an assigned mitigation. | The vector-by-vector register with one assigned mitigation per vector. It depends on `AME-I1`, whose output does not exist. |
+| `AME-I1` | Implemented | `odd/security/atlas-threat-model.md`: MITRE ATLAS 2026.10 exercise (`format-version 6.1.0`, `modified-date 2026-10-28`) over the AI design, with a data-flow diagram, four trust boundaries, the actors, and a catalogue of 22 applicable techniques plus justified N/A vectors, every `AML.T` id taken from the release file. | None for the exercise. Tactic placement is deliberately omitted because the release used carries no technique-to-tactic edge. |
+| `AME-I2` | Implemented | `odd/security/atlas-vector-mitigations.md`: one row per applicable vector with an assigned mitigation (`AML.M` ids where they exist) and its real state — 7 implemented, 15 partial, and 7 mitigation elements that do not exist, listed separately. Declares its dependency on AME-I1. | None for the register. The seven absent mitigations are engineering gaps, not missing documentation, and none closes by writing. |
 | `AME-V1` | Blocked | None. There is no threat model to cross-check, and the section 2/3 controls it would map onto are themselves partial or missing (see the rows below). | The completed register from `AME-I2` and the section 2/3 controls it must map onto, plus a named owner to accept the mapping. |
 | `AME-V2` | Blocked | The repository substantiates a *candidate* N/A: the classifier input contract carries only two instants, a zone label and five physical variables, with no generative text surface (`backend/services/risk/internal/classify/classifier.go:84`, `:87`), so prompt injection is not obviously applicable. No written N/A justification exists. | The written N/A justification for each non-applicable vector and **a named owner who accepts it**. The code supports the claim but cannot sign it. |
 
@@ -135,26 +137,25 @@ artifacts are free of backdoors. Every row below inherits that limit.
 |---|---|---|---|
 | `RED-I1` | Blocked | None. No red-teaming calendar, cadence or exercise record exists. | An agreed periodic schedule and a named owner responsible for running it. This is an organisational commitment. |
 | `RED-I2` | Blocked | Closest artifact only: each batch records the classifier version (`backend/services/risk/internal/repository/store.go:47`, written at `:225`), and a versioned registry with an explicit activation contract now exists (`backend/services/risk/internal/repository/models.go:152`, `backend/docs/model-activation.md`). What is still missing is the deployment of versioned model **artifacts** and a rollback of a deployed artifact: the registry activates a rule version, not a trained model. | A versioned model artifact deployment plus an implemented artifact-rollback procedure. No trained model is deployed, so there is nothing to roll back to. |
-| `RED-I3` | Pending | None. No incident-response plan exists. | The incident-response plan document itself, including roles, escalation and the rollback trigger. The missing input at this point is the document. |
+| `RED-I3` | Implemented | `odd/security/incident-response.md`: roles defined by function, four severities, a signal-to-action table built on the existing alert rules, the escalation path, and the rollback trigger with its five-step procedure — the rollback falls back to the rule classifier, so removing a compromised model does not stop the service. | None for the plan. The incident roles are unnamed (D3), no Alertmanager routes the alerts, and no drill has run (RED-V1). |
 | `RED-V1` | Blocked | None. No rollback drill was run and no duration was measured, because `RED-I2` is not implemented. | An implemented rollback (`RED-I2`) and a recorded drill with its measured duration. |
 | `RED-V2` | Blocked | None. Service availability during a rollback was never observed. | The drill from `RED-V1` plus availability measurement and a named owner to accept it. |
 
 ## Summary
 
-- 41 IDs registered: **0 closed**, **0 checkboxes marked**.
+- 41 IDs registered: **5 closed**, **0 checkboxes marked**.
 - 14 IDs hold partial in-repository evidence: `ZT-I1`, `ZT-I2`, `ZT-I3`, `ZT-V1`, `PRV-I1`, `PRV-I2`,
   `PRV-I3`, `PRV-V1`, `PRV-V2`, `GRD-I1`, `GRD-I2`, `GRD-V1`, `SBX-I1`, `SBX-I2`.
-- 4 IDs are pending, self-contained and not started: `GOB-I1`, `AME-I1`, `AME-I2`, `RED-I3`.
-- 23 IDs are blocked on an input this repository cannot supply.
+- 5 IDs are implemented and closed: `GOB-I1`, `GOB-I2`, `AME-I1`, `AME-I2`, `RED-I3`.
+- 22 IDs are blocked on an input this repository cannot supply.
 
 ### Grouped missing inputs
 
-1. **Policies, owners and signatures** — the internal AI risk-classification policy (`GOB-I1`), the
-   system's category and its regulatory consistency (`GOB-I2`, `GOB-V1`), the AI Security Officer's name
-   (`GOB-I3`), the pre-production approval procedure and signer (`GOB-I4`, `GOB-V2`), and a named owner
-   to accept the non-applicable ATLAS vectors (`AME-V2`).
-2. **A threat-model artifact** — the MITRE ATLAS exercise and its vector register (`AME-I1`, `AME-I2`)
-   and the control mapping onto sections 2 and 3 (`AME-V1`).
+1. **Policies, owners and signatures** — the system's regulatory consistency assessment (`GOB-V1`),
+   the AI Security Officer's name (`GOB-I3`), the pre-production approval procedure and signer
+   (`GOB-I4`, `GOB-V2`), and a named owner to accept the non-applicable ATLAS vectors (`AME-V2`).
+2. **The threat-model control mapping** — the mapping of the ATLAS exercise onto sections 2 and 3
+   (`AME-V1`).
 3. **Real data, a real ingestion path and a trained model** — a real risk-input dataset and its
    lineage/integrity checks (`PRV-I1`, `PRV-I2`, `PRV-V1`), a dependency/model inventory and fresh
    authoritative scan evidence (`PRV-I3`, `PRV-V2`), the dataset-sensitivity determination and any
@@ -168,6 +169,5 @@ artifacts are free of backdoors. Every row below inherits that limit.
    validation of BH-11 (`SBX-I1`).
 6. **Agreed thresholds for monitoring** — input-distribution/model-confidence metrics and the thresholds
    that make an alert meaningful (`OBS-I1`, `OBS-V1`).
-7. **Ongoing security operations** — the red-teaming calendar (`RED-I1`), the incident-response plan
-   (`RED-I3`), and a versioned model with a rollback mechanism and a measured drill (`RED-I2`, `RED-V1`,
-   `RED-V2`).
+7. **Ongoing security operations** — the red-teaming calendar (`RED-I1`), and a versioned model with a
+   rollback mechanism and a measured drill (`RED-I2`, `RED-V1`, `RED-V2`).
