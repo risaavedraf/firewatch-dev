@@ -4,10 +4,12 @@ import (
 	"context"
 	"errors"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
 	"firewatch.local/prevention/internal/state"
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -284,6 +286,9 @@ func TestCreateStartsAtPropuestaWithNoHistory(t *testing.T) {
 	if action.Status != string(state.Propuesta) {
 		t.Errorf("new action status %q, want %q", action.Status, state.Propuesta)
 	}
+	if action.AssigneeID != nil {
+		t.Errorf("an action created without an assignment carries assignee_id %q, want null", *action.AssigneeID)
+	}
 	detail, err := store.Get(ctx, action.ID)
 	if err != nil {
 		t.Fatalf("get: %v", err)
@@ -451,5 +456,86 @@ func TestListFiltersAndOrder(t *testing.T) {
 	}
 	if other == nil || len(other) != 0 {
 		t.Errorf("an empty result must be an empty slice, got %#v", other)
+	}
+}
+
+// TestCreatePersistsTheDirectoryAssignment proves both halves of an assignment
+// land together: the directory user is projected and the action references it,
+// while the legacy free-text assignee keeps its own value untouched.
+func TestCreatePersistsTheDirectoryAssignment(t *testing.T) {
+	ctx, store := testStore(t)
+	userID := uuid.NewString()
+	legacy := "brigada-2"
+	action, err := store.Create(ctx, NewAction{
+		CommunityCode: "assignee-community", Title: "Cortafuegos", CreatedBy: "tester",
+		Assignee:   &legacy,
+		Assignment: &Assignment{UserID: userID, DisplayName: "Brigada 2"},
+	})
+	if err != nil {
+		t.Fatalf("create with a directory assignment: %v", err)
+	}
+	t.Cleanup(func() {
+		// The action references the directory user, so it goes first.
+		_, _ = store.DB.Exec(context.Background(), `DELETE FROM prevention.actions WHERE id=$1`, action.ID)
+		_, _ = store.DB.Exec(context.Background(), `DELETE FROM prevention.directory_users WHERE id=$1`, userID)
+	})
+
+	if action.AssigneeID == nil || *action.AssigneeID != userID {
+		t.Fatalf("assignee_id %v did not carry the directory identifier %q", action.AssigneeID, userID)
+	}
+	if action.Assignee == nil || *action.Assignee != legacy {
+		t.Fatalf("legacy assignee %v changed; it must keep its own value", action.Assignee)
+	}
+
+	detail, err := store.Get(ctx, action.ID)
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if detail.AssigneeID == nil || *detail.AssigneeID != userID {
+		t.Errorf("the read projection lost assignee_id: %v", detail.AssigneeID)
+	}
+
+	var displayName string
+	if err := store.DB.QueryRow(ctx, `SELECT display_name FROM prevention.directory_users WHERE id=$1`, userID).Scan(&displayName); err != nil {
+		t.Fatalf("read the projected directory user: %v", err)
+	}
+	if displayName != "Brigada 2" {
+		t.Errorf("projected display_name %q, want %q", displayName, "Brigada 2")
+	}
+}
+
+// TestCreateWithAnUnprojectedDirectoryUserWritesNothing keeps the foreign key
+// meaningful: an assignment the projection cannot vouch for is refused with the
+// documented error, the driver's text never reaches the caller, and neither the
+// action nor a directory row is written.
+func TestCreateWithAnUnprojectedDirectoryUserWritesNothing(t *testing.T) {
+	ctx, store := testStore(t)
+	community := "assignee-missing-" + uuid.NewString()[:8]
+	missing := uuid.NewString()
+
+	_, err := store.Create(ctx, NewAction{
+		CommunityCode: community, Title: "Cortafuegos", CreatedBy: "tester",
+		Assignment: &Assignment{UserID: missing},
+	})
+	if !errors.Is(err, ErrAssigneeNotFound) {
+		t.Fatalf("an unprojected assignment returned %v, want ErrAssigneeNotFound", err)
+	}
+	if strings.Contains(err.Error(), "SQLSTATE") || strings.Contains(err.Error(), "foreign key") {
+		t.Errorf("the mapped error leaks driver text: %v", err)
+	}
+
+	var actions int
+	if err := store.DB.QueryRow(ctx, `SELECT count(*) FROM prevention.actions WHERE community_code=$1`, community).Scan(&actions); err != nil {
+		t.Fatalf("count actions: %v", err)
+	}
+	if actions != 0 {
+		t.Errorf("a refused assignment wrote %d actions, want 0", actions)
+	}
+	var projected int
+	if err := store.DB.QueryRow(ctx, `SELECT count(*) FROM prevention.directory_users WHERE id=$1`, missing).Scan(&projected); err != nil {
+		t.Fatalf("count directory users: %v", err)
+	}
+	if projected != 0 {
+		t.Errorf("a refused assignment projected %d directory users, want 0", projected)
 	}
 }

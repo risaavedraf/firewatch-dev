@@ -6,6 +6,7 @@ import (
 	"crypto/rand"
 	"crypto/rsa"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -13,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"firewatch.local/prevention/internal/directory"
 	"firewatch.local/prevention/internal/repository"
 	"firewatch.local/prevention/internal/state"
 	"github.com/coreos/go-oidc/v3/oidc"
@@ -213,8 +215,15 @@ func withCorrelationID(next http.Handler) http.Handler {
 // app builds the full authenticated handler chain under test.
 func app(t *testing.T, store Repository) (http.Handler, jose.Signer) {
 	t.Helper()
+	return appWith(t, store, nil)
+}
+
+// appWith builds the authenticated chain with a store and, when the route needs
+// one, a user directory attached.
+func appWith(t *testing.T, store Repository, dir Directory) (http.Handler, jose.Signer) {
+	t.Helper()
 	verifier, signer := signingFixture(t)
-	return withCorrelationID(New(store, verifier)), signer
+	return withCorrelationID(New(store, verifier, dir)), signer
 }
 
 // requestWith issues one request with an optional bearer token. An empty bearer
@@ -494,6 +503,7 @@ func TestCreateActionInputValidation(t *testing.T) {
 		{name: "due date with time", body: `{"community_code":"valparaiso","title":"x","due_date":"2026-11-01T10:00:00Z"}`, want: http.StatusUnprocessableEntity},
 		{name: "impossible due date", body: `{"community_code":"valparaiso","title":"x","due_date":"2026-02-31"}`, want: http.StatusUnprocessableEntity},
 		{name: "wrong type", body: `{"community_code":7,"title":"x"}`, want: http.StatusUnprocessableEntity},
+		{name: "malformed assignee id", body: `{"community_code":"valparaiso","title":"x","assignee_id":"not-a-uuid"}`, want: http.StatusUnprocessableEntity},
 		{name: "trailing document", body: `{"community_code":"v","title":"x"}{}`, want: http.StatusUnprocessableEntity},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -531,6 +541,9 @@ func TestCreateActionAcceptsOmittedOptionalFields(t *testing.T) {
 	}
 	if store.lastCreate.Assignee != nil || store.lastCreate.DueDate != nil {
 		t.Errorf("omitted assignee and due_date must be absent, got %+v", store.lastCreate)
+	}
+	if store.lastCreate.Assignment != nil {
+		t.Errorf("an omitted assignee_id must leave the action unassigned, got %+v", *store.lastCreate.Assignment)
 	}
 }
 
@@ -669,3 +682,237 @@ func TestTransitionRefusedByStorageIs409(t *testing.T) {
 		t.Errorf("a refused transition changed the status to %q", store.status)
 	}
 }
+
+// TestCreateActionResolvesAnAssignmentThroughTheDirectory pins the assignment
+// contract end to end at the transport: a named identifier must exist in the
+// directory before anything is written, the resolved entry is what the store
+// receives, and an omitted identifier keeps the action unassigned.
+func TestCreateActionResolvesAnAssignmentThroughTheDirectory(t *testing.T) {
+	const directoryID = "b1f2c3d4-0000-4000-8000-000000000001"
+
+	t.Run("known identifier", func(t *testing.T) {
+		store := &matrixStore{action: repository.Action{
+			ID: fixedActionID, CommunityCode: "valparaiso", Title: "Cortafuegos",
+			Status: string(state.Propuesta), AssigneeID: strPtr(directoryID), CreatedBy: "operator-1",
+		}}
+		dir := &stubDirectory{user: directory.User{ID: directoryID, DisplayName: "Brigada 2"}}
+		h, signer := appWith(t, store, dir)
+		w := requestWith(t, h, http.MethodPost, "/v1/prevention/actions",
+			token(t, signer, "admin", "operator-1"),
+			`{"community_code":"valparaiso","title":"Cortafuegos","assignee_id":"`+directoryID+`"}`)
+
+		if w.Code != http.StatusCreated {
+			t.Fatalf("answered %d, want 201: %s", w.Code, w.Body.String())
+		}
+		if store.createCalls != 1 {
+			t.Fatalf("create reached storage %d times, want 1", store.createCalls)
+		}
+		if store.lastCreate.Assignment == nil {
+			t.Fatal("the resolved assignment did not reach storage")
+		}
+		if store.lastCreate.Assignment.UserID != directoryID || store.lastCreate.Assignment.DisplayName != "Brigada 2" {
+			t.Errorf("assignment %+v does not carry the directory's answer", *store.lastCreate.Assignment)
+		}
+		if dir.userCalls != 1 || dir.lastUserID != directoryID {
+			t.Errorf("the directory was read by identifier %d times for %q, want 1 for the requested id", dir.userCalls, dir.lastUserID)
+		}
+		if dir.calls != 0 {
+			t.Errorf("the assignment resolution scanned the users list %d times, want 0", dir.calls)
+		}
+		var body struct {
+			AssigneeID *string `json:"assignee_id"`
+		}
+		if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+			t.Fatal(err)
+		}
+		if body.AssigneeID == nil || *body.AssigneeID != directoryID {
+			t.Errorf("response assignee_id %v does not echo the reference", body.AssigneeID)
+		}
+	})
+
+	t.Run("unknown identifier", func(t *testing.T) {
+		store := &matrixStore{}
+		dir := &stubDirectory{userErr: directory.ErrUserNotFound}
+		h, signer := appWith(t, store, dir)
+		w := requestWith(t, h, http.MethodPost, "/v1/prevention/actions",
+			token(t, signer, "admin", "operator-1"),
+			`{"community_code":"valparaiso","title":"Cortafuegos","assignee_id":"`+directoryID+`"}`)
+
+		if w.Code != http.StatusUnprocessableEntity {
+			t.Fatalf("answered %d, want 422: %s", w.Code, w.Body.String())
+		}
+		if code := errorBody(t, w)["code"]; code != "assignee_not_found" {
+			t.Errorf("code %q, want assignee_not_found", code)
+		}
+		if store.createCalls != 0 {
+			t.Errorf("an unknown assignee reached storage %d times, want 0", store.createCalls)
+		}
+		if dir.userCalls != 1 || dir.lastUserID != directoryID {
+			t.Errorf("the directory was read by identifier %d times for %q, want 1 for the requested id", dir.userCalls, dir.lastUserID)
+		}
+	})
+
+	t.Run("omitted identifier", func(t *testing.T) {
+		store := &matrixStore{}
+		dir := &stubDirectory{user: directory.User{ID: directoryID, DisplayName: "Brigada 2"}}
+		h, signer := appWith(t, store, dir)
+		w := requestWith(t, h, http.MethodPost, "/v1/prevention/actions",
+			token(t, signer, "admin", "operator-1"), `{"community_code":"valparaiso","title":"Cortafuegos"}`)
+
+		if w.Code != http.StatusCreated {
+			t.Fatalf("answered %d, want 201: %s", w.Code, w.Body.String())
+		}
+		if store.lastCreate.Assignment != nil {
+			t.Errorf("an omitted assignee_id produced the assignment %+v", *store.lastCreate.Assignment)
+		}
+		if dir.userCalls != 0 {
+			t.Errorf("the directory was read %d times for an unassigned action, want 0", dir.userCalls)
+		}
+	})
+
+	t.Run("directory not configured", func(t *testing.T) {
+		store := &matrixStore{}
+		h, signer := appWith(t, store, &stubDirectory{userErr: directory.ErrNotConfigured})
+		w := requestWith(t, h, http.MethodPost, "/v1/prevention/actions",
+			token(t, signer, "admin", "operator-1"),
+			`{"community_code":"valparaiso","title":"Cortafuegos","assignee_id":"`+directoryID+`"}`)
+
+		if w.Code != http.StatusServiceUnavailable {
+			t.Fatalf("answered %d, want 503: %s", w.Code, w.Body.String())
+		}
+		if code := errorBody(t, w)["code"]; code != "directory_unavailable" {
+			t.Errorf("code %q, want directory_unavailable", code)
+		}
+		if store.createCalls != 0 {
+			t.Errorf("an unconfigured directory still reached storage %d times", store.createCalls)
+		}
+	})
+
+	t.Run("directory read failed", func(t *testing.T) {
+		store := &matrixStore{}
+		h, signer := appWith(t, store, &stubDirectory{userErr: errors.New("identity provider refused the read")})
+		w := requestWith(t, h, http.MethodPost, "/v1/prevention/actions",
+			token(t, signer, "admin", "operator-1"),
+			`{"community_code":"valparaiso","title":"Cortafuegos","assignee_id":"`+directoryID+`"}`)
+
+		if w.Code != http.StatusBadGateway {
+			t.Fatalf("answered %d, want 502: %s", w.Code, w.Body.String())
+		}
+		if code := errorBody(t, w)["code"]; code != "directory_upstream_failed" {
+			t.Errorf("code %q, want directory_upstream_failed", code)
+		}
+		if store.createCalls != 0 {
+			t.Errorf("a failed directory read still reached storage %d times", store.createCalls)
+		}
+	})
+}
+
+// TestCreateAssignmentReadsTheIdentifierDirectly is the false-rejection
+// regression this change exists for: assignment resolution must read the
+// identifier on its own instead of scanning the users list's first page. The
+// stub's first page does not hold the requested user while the by-identifier read
+// answers it, which is exactly a realm larger than the list page. A list-based
+// resolution refuses it 422; the direct read assigns it.
+func TestCreateAssignmentReadsTheIdentifierDirectly(t *testing.T) {
+	const directoryID = "b1f2c3d4-0000-4000-8000-000000000001"
+
+	t.Run("identifier beyond the list page", func(t *testing.T) {
+		store := &matrixStore{action: repository.Action{
+			ID: fixedActionID, CommunityCode: "valparaiso", Title: "Cortafuegos",
+			Status: string(state.Propuesta), AssigneeID: strPtr(directoryID), CreatedBy: "operator-1",
+		}}
+		dir := &stubDirectory{
+			users: []directory.User{{ID: "0f3f1f0e-0000-4000-8000-000000000001", DisplayName: "Otra Brigada"}},
+			user:  directory.User{ID: directoryID, DisplayName: "Brigada 2"},
+		}
+		h, signer := appWith(t, store, dir)
+		w := requestWith(t, h, http.MethodPost, "/v1/prevention/actions",
+			token(t, signer, "admin", "operator-1"),
+			`{"community_code":"valparaiso","title":"Cortafuegos","assignee_id":"`+directoryID+`"}`)
+
+		if w.Code != http.StatusCreated {
+			t.Fatalf("a user the list's first page does not hold was refused: answered %d, want 201: %s", w.Code, w.Body.String())
+		}
+		if store.createCalls != 1 {
+			t.Fatalf("create reached storage %d times, want 1", store.createCalls)
+		}
+		if store.lastCreate.Assignment == nil || store.lastCreate.Assignment.UserID != directoryID || store.lastCreate.Assignment.DisplayName != "Brigada 2" {
+			t.Errorf("assignment %+v does not carry the by-identifier answer", store.lastCreate.Assignment)
+		}
+		if dir.userCalls != 1 || dir.lastUserID != directoryID {
+			t.Errorf("the directory was read by identifier %d times for %q, want 1 for the requested id", dir.userCalls, dir.lastUserID)
+		}
+		if dir.calls != 0 {
+			t.Errorf("the assignment resolution scanned the users list %d times, want 0", dir.calls)
+		}
+		var body struct {
+			AssigneeID *string `json:"assignee_id"`
+		}
+		if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+			t.Fatal(err)
+		}
+		if body.AssigneeID == nil || *body.AssigneeID != directoryID {
+			t.Errorf("response assignee_id %v does not echo the reference", body.AssigneeID)
+		}
+	})
+
+	t.Run("directory answers not found", func(t *testing.T) {
+		store := &matrixStore{}
+		dir := &stubDirectory{userErr: directory.ErrUserNotFound}
+		h, signer := appWith(t, store, dir)
+		w := requestWith(t, h, http.MethodPost, "/v1/prevention/actions",
+			token(t, signer, "admin", "operator-1"),
+			`{"community_code":"valparaiso","title":"Cortafuegos","assignee_id":"`+directoryID+`"}`)
+
+		if w.Code != http.StatusUnprocessableEntity {
+			t.Fatalf("answered %d, want the documented 422: %s", w.Code, w.Body.String())
+		}
+		if code := errorBody(t, w)["code"]; code != "assignee_not_found" {
+			t.Errorf("code %q, want assignee_not_found", code)
+		}
+		if store.createCalls != 0 {
+			t.Errorf("a not-found assignee reached storage %d times, want 0", store.createCalls)
+		}
+	})
+
+	t.Run("directory unconfigured", func(t *testing.T) {
+		store := &matrixStore{}
+		dir := &stubDirectory{userErr: directory.ErrNotConfigured}
+		h, signer := appWith(t, store, dir)
+		w := requestWith(t, h, http.MethodPost, "/v1/prevention/actions",
+			token(t, signer, "admin", "operator-1"),
+			`{"community_code":"valparaiso","title":"Cortafuegos","assignee_id":"`+directoryID+`"}`)
+
+		if w.Code != http.StatusServiceUnavailable {
+			t.Fatalf("answered %d, want 503: %s", w.Code, w.Body.String())
+		}
+		if code := errorBody(t, w)["code"]; code != "directory_unavailable" {
+			t.Errorf("code %q, want directory_unavailable", code)
+		}
+		if store.createCalls != 0 {
+			t.Errorf("an unconfigured directory still reached storage %d times", store.createCalls)
+		}
+	})
+
+	t.Run("directory answered 500", func(t *testing.T) {
+		store := &matrixStore{}
+		dir := &stubDirectory{userErr: errors.New("identity provider answered 500")}
+		h, signer := appWith(t, store, dir)
+		w := requestWith(t, h, http.MethodPost, "/v1/prevention/actions",
+			token(t, signer, "admin", "operator-1"),
+			`{"community_code":"valparaiso","title":"Cortafuegos","assignee_id":"`+directoryID+`"}`)
+
+		if w.Code != http.StatusBadGateway {
+			t.Fatalf("answered %d, want 502: %s", w.Code, w.Body.String())
+		}
+		if code := errorBody(t, w)["code"]; code != "directory_upstream_failed" {
+			t.Errorf("code %q, want directory_upstream_failed", code)
+		}
+		if store.createCalls != 0 {
+			t.Errorf("a failing directory still reached storage %d times", store.createCalls)
+		}
+	})
+}
+
+// strPtr is the pointer-of-literal helper the assignment fixtures use.
+func strPtr(value string) *string { return &value }

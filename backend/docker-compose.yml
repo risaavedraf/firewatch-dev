@@ -82,6 +82,11 @@ services:
       KC_HEALTH_ENABLED: 'true'
       DEMO_ADMIN_PASSWORD: ${DEMO_ADMIN_PASSWORD:?required}
       DEMO_VIEWER_PASSWORD: ${DEMO_VIEWER_PASSWORD:?required}
+      # The directory client's secret is substituted into the imported realm, so
+      # the realm file carries a placeholder and never a credential. It defaults
+      # to empty: the stack then starts with a directory that is not configured and
+      # GET /v1/users answers 503 rather than exposing an unauthenticated read.
+      DIRECTORY_CLIENT_SECRET: ${DIRECTORY_CLIENT_SECRET:-}
     volumes:
       - ./deploy/local/firewatch-realm.json:/opt/keycloak/data/import/firewatch-realm.json:ro
     ports: ['127.0.0.1:8081:8080']
@@ -191,6 +196,14 @@ services:
       <<: *oidc
       # Owns the `prevention` schema of this database, not the whole database.
       DATABASE_URL: postgres://risk_app:${RISK_DB_PASSWORD:?required}@postgres:5432/risk?sslmode=disable
+      # Admin API of the identity provider, read by GET /v1/users as the
+      # confidential `firewatch-directory` client the realm declares. The secret
+      # defaults to empty on purpose: without it the stack still starts and the
+      # route fails closed with 503 instead of answering an empty list.
+      KEYCLOAK_ADMIN_URL: http://identity:8080
+      KEYCLOAK_ADMIN_REALM: firewatch
+      DIRECTORY_CLIENT_ID: firewatch-directory
+      DIRECTORY_CLIENT_SECRET: ${DIRECTORY_CLIENT_SECRET:-}
     depends_on:
       prevention-migrate: {condition: service_completed_successfully}
 

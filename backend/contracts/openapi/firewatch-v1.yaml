@@ -685,6 +685,17 @@ paths:
         ignored. Only community_code and title are required, because the
         contract names the other columns without defining a vocabulary for
         them.
+
+        An optional assignee_id is resolved against the user directory before
+        anything is stored: an identifier the directory does not know is
+        refused 422 assignee_not_found and no action is created, while an
+        unconfigured or failing directory is refused 503 directory_unavailable
+        or 502 directory_upstream_failed instead of being stored unverified. An
+        action created without assignee_id stays valid and unassigned, and the
+        legacy assignee text, when sent, is stored as it always was. The
+        identifier is read directly from the directory at the admin API's
+        single-user path, not scanned out of the users list, so a realm larger
+        than the list's first page still assigns every user it holds.
       requestBody:
         required: true
         content:
@@ -720,8 +731,11 @@ paths:
         '422':
           description: >-
             Invalid input; no action was created. A blank community or title, a
-            due_date that is not a calendar date, an unknown field, or a body
-            that is not one JSON document is refused here.
+            due_date that is not a calendar date, a malformed assignee_id, an
+            unknown field, or a body that is not one JSON document is refused
+            as invalid_action_request. An assignee_id the user directory does
+            not know is refused as assignee_not_found. In both cases nothing
+            is written.
           headers:
             X-Request-ID: {$ref: '#/components/headers/RequestID'}
             Cache-Control: {schema: {type: string, enum: [no-store]}}
@@ -731,7 +745,7 @@ paths:
                 type: object
                 required: [code, request_id]
                 properties:
-                  code: {type: string, enum: [invalid_action_request]}
+                  code: {type: string, enum: [invalid_action_request, assignee_not_found]}
                   request_id: {type: string, format: uuid}
         '429': {$ref: '#/components/responses/RateLimited'}
         '502': {$ref: '#/components/responses/UpstreamUnavailable'}
@@ -1254,6 +1268,52 @@ paths:
         '429': {$ref: '#/components/responses/RateLimited'}
         '502': {$ref: '#/components/responses/UpstreamUnavailable'}
         '503': {$ref: '#/components/responses/StorageUnavailable'}
+  /v1/users:
+    get:
+      operationId: listRealmUsers
+      description: >-
+        Admin only; a viewer receives 403 and an unauthenticated caller 401. The
+        realm's users as the identity provider's admin API reports them, with the
+        identifier it assigns and a display name, sorted by display_name then id
+        and capped at 200 entries. Reading the directory changes nothing.
+
+        The display name is resolved in one order and is never empty: the first
+        and last name joined by a space when either is present, the account's
+        username otherwise, and the identifier as the last resort.
+
+        The 200 cap is the identity provider's first page, not a global
+        ranking: the realm's users are requested as one page of 200 in the
+        identity provider's own order and that page is then sorted by
+        display_name then id here. A realm with more than 200 users answers
+        with a sorted selection of its first page, not with the first 200 by
+        display name; this operation does not page through the remainder.
+
+        The route fails closed, so an empty answer carries exactly one meaning.
+        200 [] is a realm that really has no users. A directory that is not
+        configured (no admin URL or no client credentials) is answered 503
+        directory_unavailable, and an identity provider that answers an error or
+        cannot be reached is answered 502 directory_upstream_failed; neither is
+        answered with an empty list, because that would claim the realm has no
+        users when the truth is that nobody could ask.
+      responses:
+        '200':
+          description: >-
+            The realm's users, sorted by display_name then id and capped at 200
+            entries; [] only when the realm really has no users.
+          headers:
+            X-Request-ID: {$ref: '#/components/headers/RequestID'}
+            Cache-Control: {schema: {type: string, enum: [no-store]}}
+          content:
+            application/json:
+              schema:
+                type: array
+                maxItems: 200
+                items: {$ref: '#/components/schemas/DirectoryUser'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '429': {$ref: '#/components/responses/RateLimited'}
+        '502': {$ref: '#/components/responses/DirectoryUpstreamFailed'}
+        '503': {$ref: '#/components/responses/DirectoryUnavailable'}
 components:
   securitySchemes:
     bearerAuth: {type: http, scheme: bearer, bearerFormat: JWT}
@@ -1365,6 +1425,41 @@ components:
       content:
         application/json:
           schema: {$ref: '#/components/schemas/ErrorResponse'}
+    DirectoryUnavailable:
+      description: >-
+        The user directory is not configured: the identity provider's admin URL
+        or this service's directory client credentials are missing. The route
+        refuses with 503 instead of answering an empty list it cannot justify,
+        so the answer is never confused with a realm that has no users. code is
+        directory_unavailable.
+      headers:
+        X-Request-ID: {$ref: '#/components/headers/RequestID'}
+        Cache-Control: {schema: {type: string, enum: [no-store]}}
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [code, request_id]
+            properties:
+              code: {type: string, enum: [directory_unavailable]}
+              request_id: {type: string, format: uuid}
+    DirectoryUpstreamFailed:
+      description: >-
+        The identity provider's admin API answered an error or could not be
+        reached, so no user list was produced. The alternative would be an empty
+        list, which would claim the realm has no users. code is
+        directory_upstream_failed.
+      headers:
+        X-Request-ID: {$ref: '#/components/headers/RequestID'}
+        Cache-Control: {schema: {type: string, enum: [no-store]}}
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [code, request_id]
+            properties:
+              code: {type: string, enum: [directory_upstream_failed]}
+              request_id: {type: string, format: uuid}
   schemas:
     CycleSourceStatus:
       type: object
@@ -1453,6 +1548,25 @@ components:
           type: string
           format: uuid
           description: Correlation id, identical to the X-Request-ID header.
+    DirectoryUser:
+      type: object
+      description: One user of the realm, as the user directory reports it.
+      required: [id, display_name]
+      additionalProperties: false
+      properties:
+        id:
+          type: string
+          minLength: 1
+          description: >-
+            Stable identifier the identity provider assigns to the user. It is
+            what a future action assignment or audit entry quotes.
+        display_name:
+          type: string
+          minLength: 1
+          description: >-
+            Names joined by a space when either is present, the username
+            otherwise, the identifier as the last resort. Never empty.
+          example: Demo Admin
     OperationalStatus:
       type: object
       required: [checked_at, ready, reason, dependencies]
@@ -1840,6 +1954,7 @@ components:
         - priority
         - status
         - assignee
+        - assignee_id
         - due_date
         - created_by
         - created_at
@@ -1859,7 +1974,18 @@ components:
         assignee:
           type: string
           nullable: true
-          description: Absent until someone is assigned; null means unassigned.
+          description: >-
+            LEGACY free-text assignment, kept for the rows created before the
+            directory reference existed. It is returned unchanged and is never
+            derived from assignee_id. New assignments use assignee_id.
+        assignee_id:
+          type: string
+          format: uuid
+          nullable: true
+          description: >-
+            Directory user the action is assigned to, resolved from the realm's
+            user directory. Null means unassigned. This is the reference new
+            assignments use; assignee is legacy free text.
         due_date:
           type: string
           nullable: true
@@ -1956,7 +2082,20 @@ components:
         title: {type: string, description: Must not be blank.}
         description: {type: string}
         priority: {type: string}
-        assignee: {type: string}
+        assignee:
+          type: string
+          description: >-
+            LEGACY free-text assignment kept for compatibility. The value is
+            stored as sent and is not resolved or validated against the
+            directory; new assignments use assignee_id.
+        assignee_id:
+          type: string
+          format: uuid
+          description: >-
+            Directory user to assign. It must exist in the realm's user
+            directory: the directory is read directly by this identifier, and
+            a user it reports as missing is refused 422 assignee_not_found and
+            nothing is created. Omit it for an unassigned action.
         due_date:
           type: string
           description: Calendar date (YYYY-MM-DD); a date-time is refused.

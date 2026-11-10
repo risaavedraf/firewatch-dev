@@ -51,6 +51,44 @@ Open **Clients → firewatch-demo → Settings** and confirm all three fields sh
 
 A programmatic check was **not executed** as part of this change: it needs a running Keycloak with the local `.env` credentials, which is outside what this repository can verify on its own. Treat the sign-in and logout round trip through the browser as the real acceptance check.
 
+## The directory client: `firewatch-directory`
+
+`backend/deploy/local/firewatch-realm.json` declares a second client, the confidential one the prevention service reads the realm's users with at `GET /v1/users`:
+
+| Setting | Value |
+| --- | --- |
+| `clientId` | `firewatch-directory` |
+| `publicClient` | `false` |
+| `serviceAccountsEnabled` | `true` |
+| `standardFlowEnabled` / `directAccessGrantsEnabled` | `false` / `false` |
+| `secret` | `${DIRECTORY_CLIENT_SECRET}`, expanded from the `identity` container's environment |
+| service account user | `service-account-firewatch-directory` |
+| `realm-management` client roles | `query-users`, `view-users` |
+
+**The same create-only import rule applies to it.** On a realm that already exists, the file is read and ignored, so the client, its service account and its role grant are never created; the role grant is what lets the service account read users at all. Import creates them only on a **fresh** identity database.
+
+### Symptom of a missing client
+
+`GET /v1/users` answers **502 `directory_upstream_failed`**: the route's documented upstream failure, because the token endpoint refuses a client the realm does not have. It is deliberately **not** `200 []`, which would claim the realm has no users. A missing or empty `DIRECTORY_CLIENT_SECRET` is a different answer, **503 `directory_unavailable`**: with no credential the service never calls the identity provider at all. Prevention logs `directory_read_failed` with the request id for the 502 and `directory_not_configured` for the 503; the identity provider's own log carries the reason it refused.
+
+### Applying it to an existing realm
+
+One of:
+
+- **Fresh identity volume**, only when every local account is disposable. `docker compose down -v` deletes the identity database, and the next start imports the whole realm including this client. The warning above applies with the same force: never do this on a realm whose users, sessions or credentials you want to keep.
+- **By hand in the console**, which is the only in-place route:
+
+1. Open `http://localhost:8081`, sign in, and select the realm **firewatch**.
+2. **Clients → Create client**. Client ID `firewatch-directory`, type **OpenID Connect**. Next.
+3. Client authentication **On**; Standard flow **Off**, Direct access grants **Off**, Service accounts roles **On**. Save.
+4. **Credentials** tab: copy the generated client secret into `DIRECTORY_CLIENT_SECRET` in your local `.env`. That file is git-ignored; never paste the value into a tracked file, an issue, a commit or a command whose arguments end up in shell history.
+5. **Service accounts roles** tab → **Assign role** → **Filter by clients** → `realm-management` → `query-users` and `view-users` → **Assign**.
+6. Recreate the container so it reads the new environment (`docker compose up -d prevention`), then call `GET /v1/users` with an `admin` bearer and confirm `200` with the realm's users.
+
+### The admin URL's scheme
+
+`KEYCLOAK_ADMIN_URL` is where the client secret travels, so it follows the same rule as the OIDC endpoints: `https` is always accepted, plain `http` only when `APP_ENV=development`, which is what the compose stack sets. Outside development a plaintext admin URL is refused before any request is made and the route answers the documented **503 `directory_unavailable`** instead of sending the secret in clear text. `http://identity:8080` in `backend/docker-compose.yml` is the development default and stays valid locally.
+
 ## Forward risk: HTTPS enforcement for client URIs
 
 Keycloak 26.6.0 introduces the `secure-client-uris` client policy executor, which requires HTTPS and makes **existing clients using `http` in "Post logout redirect URIs" fail validation when they are updated**. This repository pins `quay.io/keycloak/keycloak:26.5.7` (`backend/docker-compose.yml:72`), so the behavior does not apply today.

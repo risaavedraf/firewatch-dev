@@ -67,6 +67,23 @@ var ErrReassessmentNotNew = errors.New("preventive reassessment batch is not lat
 // job is one real publication and can never be relabelled under another action.
 var ErrReassessmentAlreadyLinked = errors.New("preventive reassessment job is already linked")
 
+// ErrAssigneeNotFound means the assignment names a directory identifier that the
+// local projection does not hold, so the foreign key refuses it. It is mapped
+// from the driver's SQLSTATE 23503 so the transport can answer a documented
+// refusal instead of leaking driver text, and nothing is written.
+var ErrAssigneeNotFound = errors.New("preventive action assignee is not in the directory")
+
+// Assignment is one resolved directory entry: the identifier the identity
+// provider assigns and the name it reported for that user. The transport
+// resolves it through the directory; the store projects both values and writes
+// the reference in the same transaction. An empty DisplayName means the entry
+// cannot be projected (directory_users.display_name is NOT NULL and non-blank),
+// so the identifier is used as a reference only and must already be projected.
+type Assignment struct {
+	UserID      string
+	DisplayName string
+}
+
 // Action is one row of prevention.actions as it appears on the wire.
 type Action struct {
 	ID string `json:"id"`
@@ -83,11 +100,16 @@ type Action struct {
 	// Assignee and DueDate are absent until someone sets them; DueDate is
 	// rendered as a plain calendar date (YYYY-MM-DD) because it is a date, not
 	// an instant, and a time of day would be a fabricated precision.
-	Assignee  *string   `json:"assignee"`
-	DueDate   *string   `json:"due_date"`
-	CreatedBy string    `json:"created_by"`
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
+	//
+	// Assignee is the legacy free-text assignment kept for rows created before
+	// the directory reference existed. AssigneeID is the reference new
+	// assignments use; it is null when the action is unassigned.
+	Assignee   *string   `json:"assignee"`
+	AssigneeID *string   `json:"assignee_id"`
+	DueDate    *string   `json:"due_date"`
+	CreatedBy  string    `json:"created_by"`
+	CreatedAt  time.Time `json:"created_at"`
+	UpdatedAt  time.Time `json:"updated_at"`
 }
 
 // History is one row of prevention.action_history: who moved an action from one
@@ -166,8 +188,12 @@ type NewAction struct {
 	Description   string
 	Priority      string
 	Assignee      *string
-	DueDate       *string
-	CreatedBy     string
+	// Assignment is the resolved directory entry the action references, or nil
+	// for an unassigned action. The store projects it and writes assignee_id in
+	// the same transaction as the action.
+	Assignment *Assignment
+	DueDate    *string
+	CreatedBy  string
 }
 
 // NewEvidence is the validated evidence snapshot to append.
@@ -187,12 +213,12 @@ type NewReview struct {
 // actionColumns is the single projection every read shares, so a column cannot be
 // selected in one query and forgotten in another. due_date is rendered in SQL so
 // the wire format is a calendar date regardless of the driver's time zone.
-const actionColumns = `id::text,community_code,title,description,priority,status,assignee,to_char(due_date,'YYYY-MM-DD'),created_by,created_at,updated_at`
+const actionColumns = `id::text,community_code,title,description,priority,status,assignee,assignee_id::text,to_char(due_date,'YYYY-MM-DD'),created_by,created_at,updated_at`
 
 // scanAction reads the shared projection in the shared ordered list.
 func scanAction(row pgx.Row) (Action, error) {
 	var a Action
-	err := row.Scan(&a.ID, &a.CommunityCode, &a.Title, &a.Description, &a.Priority, &a.Status, &a.Assignee, &a.DueDate, &a.CreatedBy, &a.CreatedAt, &a.UpdatedAt)
+	err := row.Scan(&a.ID, &a.CommunityCode, &a.Title, &a.Description, &a.Priority, &a.Status, &a.Assignee, &a.AssigneeID, &a.DueDate, &a.CreatedBy, &a.CreatedAt, &a.UpdatedAt)
 	return a, err
 }
 
@@ -200,17 +226,63 @@ func scanAction(row pgx.Row) (Action, error) {
 // here, so it is known before the row exists and cannot collide with a
 // client-supplied value. Creation writes no history row: history records
 // transitions, and a creation is not a transition from another status.
+//
+// An assignment is written in the same transaction as the action: the resolved
+// directory entry is projected into prevention.directory_users and the action's
+// assignee_id references it, so a failed projection and a failed assignment
+// cannot diverge. A reference the projection cannot fill is refused by the
+// foreign key and mapped to ErrAssigneeNotFound, leaving both tables untouched.
 func (s Store) Create(ctx context.Context, input NewAction) (Action, error) {
-	action, err := scanAction(s.DB.QueryRow(ctx, `INSERT INTO prevention.actions
-		(id,community_code,title,description,priority,status,assignee,due_date,created_by)
-		VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)
-		RETURNING `+actionColumns,
-		uuid.NewString(), input.CommunityCode, input.Title, input.Description, input.Priority,
-		string(state.Propuesta), input.Assignee, input.DueDate, input.CreatedBy))
+	tx, err := s.DB.Begin(ctx)
 	if err != nil {
 		return Action{}, err
 	}
-	return action, nil
+	defer tx.Rollback(ctx)
+
+	var assigneeID *string
+	if input.Assignment != nil {
+		if err = projectAssignment(ctx, tx, *input.Assignment); err != nil {
+			return Action{}, err
+		}
+		assigneeID = &input.Assignment.UserID
+	}
+	action, err := scanAction(tx.QueryRow(ctx, `INSERT INTO prevention.actions
+		(id,community_code,title,description,priority,status,assignee,assignee_id,due_date,created_by)
+		VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+		RETURNING `+actionColumns,
+		uuid.NewString(), input.CommunityCode, input.Title, input.Description, input.Priority,
+		string(state.Propuesta), input.Assignee, assigneeID, input.DueDate, input.CreatedBy))
+	if err != nil {
+		return Action{}, mapAssignmentError(err)
+	}
+	return action, tx.Commit(ctx)
+}
+
+// projectAssignment upserts the directory entry an assignment was resolved from.
+// An empty display name cannot be projected (the column is NOT NULL and
+// non-blank), so the entry is a reference only: the row must already exist, and
+// the caller's foreign key is what decides.
+func projectAssignment(ctx context.Context, tx pgx.Tx, assignment Assignment) error {
+	if assignment.DisplayName == "" {
+		return nil
+	}
+	_, err := tx.Exec(ctx, `INSERT INTO prevention.directory_users(id,display_name,synced_at)
+		VALUES($1,$2,now())
+		ON CONFLICT (id) DO UPDATE SET display_name=EXCLUDED.display_name, synced_at=EXCLUDED.synced_at`,
+		assignment.UserID, assignment.DisplayName)
+	return err
+}
+
+// mapAssignmentError turns the assignment foreign-key violation into the error
+// the transport documents. The check names the constraint, so a future foreign
+// key on this table cannot be mistaken for a missing directory entry, and the
+// driver's message is never returned.
+func mapAssignmentError(err error) error {
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) && pgErr.Code == "23503" && pgErr.ConstraintName == "actions_assignee_id_fkey" {
+		return ErrAssigneeNotFound
+	}
+	return err
 }
 
 // defaultListLimit bounds a list read. The contract documents no page size, so

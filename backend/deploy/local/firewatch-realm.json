@@ -27,6 +27,15 @@
       "protocolMapper": "oidc-usermodel-realm-role-mapper",
       "config": {"claim.name": "realm_access.roles", "jsonType.label": "String", "multivalued": "true", "access.token.claim": "true", "id.token.claim": "false"}
     }]
+  }, {
+    "clientId": "firewatch-directory",
+    "enabled": true,
+    "publicClient": false,
+    "serviceAccountsEnabled": true,
+    "standardFlowEnabled": false,
+    "directAccessGrantsEnabled": false,
+    "protocol": "openid-connect",
+    "secret": "${DIRECTORY_CLIENT_SECRET}"
   }],
   "users": [{
     "username": "demo-admin", "enabled": true,
@@ -38,5 +47,10 @@
     "firstName": "Demo", "lastName": "Viewer", "email": "viewer@example.invalid", "emailVerified": true,
     "realmRoles": ["viewer"],
     "credentials": [{"type": "password", "value": "${DEMO_VIEWER_PASSWORD}", "temporary": false}]
+  }, {
+    "username": "service-account-firewatch-directory",
+    "enabled": true,
+    "serviceAccountClientId": "firewatch-directory",
+    "clientRoles": {"realm-management": ["query-users", "view-users"]}
   }]
 }

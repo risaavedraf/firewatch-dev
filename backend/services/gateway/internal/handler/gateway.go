@@ -81,6 +81,11 @@ func New(verifier Verifier, jobs, risk, prevention *url.URL, webOrigin string) h
 	// below this one prefix, so a single registration forwards them all exactly
 	// as /v1/risk/ does for the risk service.
 	mux.Handle("/v1/prevention/", proxy(prevention))
+	// The users directory is served by prevention too: it owns the identity
+	// configuration and the application credential the directory read uses. The
+	// exact path is registered because the contract defines no subtree below it,
+	// exactly as /v1/audit pairs only its own path.
+	mux.Handle("/v1/users", proxy(prevention))
 	// Three quota layers, per the agreed BH-03 policy: an emergency aggregate
 	// bound charged before authentication, a per-verified-subject bound, and one
 	// deliberately shared anonymous bound. Identity is the verified token

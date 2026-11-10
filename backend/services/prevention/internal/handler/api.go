@@ -15,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	"firewatch.local/prevention/internal/directory"
 	"firewatch.local/prevention/internal/repository"
 	"firewatch.local/prevention/internal/state"
 	"github.com/google/uuid"
@@ -51,14 +52,15 @@ const (
 	maxTransitionBody = 1024
 )
 
-// New builds the authenticated handler for the four contract routes.
-func New(store Repository, verifier Verifier) http.Handler {
+// New builds the authenticated handler for the contract routes.
+func New(store Repository, verifier Verifier, dir Directory) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /v1/prevention/actions", list(store))
-	mux.HandleFunc("POST /v1/prevention/actions", create(store))
+	mux.HandleFunc("POST /v1/prevention/actions", create(store, dir))
 	mux.HandleFunc("GET /v1/prevention/actions/{id}", detail(store))
 	mux.HandleFunc("POST /v1/prevention/actions/{id}/transitions", transition(store))
 	registerEvidenceRoutes(mux, store)
+	mux.HandleFunc("GET /v1/users", listUsers(dir))
 	return Authorize(verifier, mux)
 }
 
@@ -120,13 +122,23 @@ type createRequest struct {
 	Title         *string `json:"title"`
 	Description   *string `json:"description"`
 	Priority      *string `json:"priority"`
-	Assignee      *string `json:"assignee"`
-	DueDate       *string `json:"due_date"`
+	// Assignee is the legacy free-text assignment, kept for clients that still
+	// send it. AssigneeID is the directory reference new assignments use; it is
+	// resolved against the directory before anything is written.
+	Assignee   *string `json:"assignee"`
+	AssigneeID *string `json:"assignee_id"`
+	DueDate    *string `json:"due_date"`
 }
 
 // create serves POST /v1/prevention/actions: admin only, and the created action is
 // always propuesta.
-func create(store Repository) http.HandlerFunc {
+//
+// An assignee_id is resolved through the user directory before storage is
+// touched. An identifier the directory does not know is refused 422 with the
+// documented assignee_not_found body and nothing is written; an unconfigured or
+// failing directory is refused 503/502 rather than persisted unverified. An
+// omitted assignee_id leaves the action unassigned, exactly as before.
+func create(store Repository, dir Directory) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if !isAdmin(r.Context()) {
 			fail(w, 403, "forbidden")
@@ -146,12 +158,27 @@ func create(store Repository) http.HandlerFunc {
 			fail(w, 422, "invalid_action_request")
 			return
 		}
-		input, ok := newActionFrom(request, subjectOf(r.Context()))
+		input, assigneeID, ok := newActionFrom(request, subjectOf(r.Context()))
 		if !ok {
 			fail(w, 422, "invalid_action_request")
 			return
 		}
+		if assigneeID != "" {
+			assignment, status, code := resolveAssignment(r, dir, assigneeID)
+			if code != "" {
+				fail(w, status, code)
+				return
+			}
+			input.Assignment = assignment
+		}
 		action, err := store.Create(r.Context(), input)
+		if errors.Is(err, repository.ErrAssigneeNotFound) {
+			// The directory answered but the reference is not projectable. It is the
+			// same documented refusal as an identifier the directory never returned,
+			// and the store wrote neither the action nor a directory row.
+			fail(w, 422, "assignee_not_found")
+			return
+		}
 		if err != nil {
 			slog.Error("create_action_failed", "request_id", r.Header.Get("X-Request-ID"))
 			fail(w, 503, "storage_unavailable")
@@ -171,16 +198,55 @@ func create(store Repository) http.HandlerFunc {
 	}
 }
 
+// resolveAssignment reads one identifier from the directory. The directory is
+// the authority, never the local projection: a user the identity provider does
+// not know is refused, and a directory that cannot be read is refused too rather
+// than persisted unverified. The identifier is read directly at the admin API's
+// single-user path, not scanned in the users list GET /v1/users serves, so a
+// realm larger than that list's first page still resolves every user it holds.
+// The returned status and code are empty on success.
+func resolveAssignment(r *http.Request, dir Directory, id string) (*repository.Assignment, int, string) {
+	if dir == nil {
+		slog.Error("directory_not_configured", "request_id", r.Header.Get("X-Request-ID"))
+		return nil, http.StatusServiceUnavailable, "directory_unavailable"
+	}
+	user, err := dir.User(r.Context(), id)
+	if errors.Is(err, directory.ErrNotConfigured) {
+		slog.Error("directory_not_configured", "request_id", r.Header.Get("X-Request-ID"))
+		return nil, http.StatusServiceUnavailable, "directory_unavailable"
+	}
+	if errors.Is(err, directory.ErrUserNotFound) {
+		// The identity provider answered and knows no such user. It is a client
+		// error on the reference itself, not an upstream failure, so it keeps the
+		// documented 422 path rather than the 502 one.
+		return nil, http.StatusUnprocessableEntity, "assignee_not_found"
+	}
+	if err != nil {
+		// The error is deliberately not logged: this is the one dependency that
+		// holds a credential, and the correlation id is enough to find the
+		// identity provider's log.
+		slog.Error("directory_read_failed", "request_id", r.Header.Get("X-Request-ID"))
+		return nil, http.StatusBadGateway, "directory_upstream_failed"
+	}
+	display := user.DisplayName
+	if display == "" {
+		display = user.ID
+	}
+	return &repository.Assignment{UserID: user.ID, DisplayName: display}, 0, ""
+}
+
 // newActionFrom validates the create body. The only required fields are the
 // community and the title: the contract names the other columns without defining
 // a vocabulary for them, so requiring more would reject requests the contract
-// allows. due_date must be a calendar date, and the actor is the verified subject.
-func newActionFrom(request createRequest, actor string) (repository.NewAction, bool) {
+// allows. due_date must be a calendar date, assignee_id must be a UUID, and the
+// actor is the verified subject. The returned identifier is the canonical
+// assignee_id, or "" when the body omits it.
+func newActionFrom(request createRequest, actor string) (repository.NewAction, string, bool) {
 	if request.CommunityCode == nil || strings.TrimSpace(*request.CommunityCode) == "" {
-		return repository.NewAction{}, false
+		return repository.NewAction{}, "", false
 	}
 	if request.Title == nil || strings.TrimSpace(*request.Title) == "" {
-		return repository.NewAction{}, false
+		return repository.NewAction{}, "", false
 	}
 	input := repository.NewAction{CommunityCode: *request.CommunityCode, Title: *request.Title, CreatedBy: actor}
 	if request.Description != nil {
@@ -194,14 +260,22 @@ func newActionFrom(request createRequest, actor string) (repository.NewAction, b
 	if request.Assignee != nil && *request.Assignee != "" {
 		input.Assignee = request.Assignee
 	}
+	assigneeID := ""
+	if request.AssigneeID != nil && *request.AssigneeID != "" {
+		parsed, err := uuid.Parse(*request.AssigneeID)
+		if err != nil || parsed == uuid.Nil {
+			return repository.NewAction{}, "", false
+		}
+		assigneeID = parsed.String()
+	}
 	if request.DueDate != nil && *request.DueDate != "" {
 		parsed, err := time.Parse("2006-01-02", *request.DueDate)
 		if err != nil || parsed.Format("2006-01-02") != *request.DueDate {
-			return repository.NewAction{}, false
+			return repository.NewAction{}, "", false
 		}
 		input.DueDate = request.DueDate
 	}
-	return input, true
+	return input, assigneeID, true
 }
 
 // detail serves GET /v1/prevention/actions/{id}: the action plus its history.

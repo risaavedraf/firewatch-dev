@@ -13,6 +13,7 @@ import (
 	"syscall"
 	"time"
 
+	"firewatch.local/prevention/internal/directory"
 	"firewatch.local/prevention/internal/handler"
 	"firewatch.local/prevention/internal/metrics"
 	"firewatch.local/prevention/internal/repository"
@@ -70,8 +71,17 @@ func run() error {
 	keyCtx := oidc.ClientContext(ctx, &http.Client{Timeout: 5 * time.Second})
 	verifier := oidc.NewVerifier(issuer, oidc.NewRemoteKeySet(keyCtx, jwks), &oidc.Config{ClientID: os.Getenv("OIDC_AUDIENCE"), SupportedSigningAlgs: []string{"RS256"}})
 	store := repository.Store{DB: db}
+	// The user directory is built even when it is not configured: the route then
+	// answers 503 instead of refusing to start, which is what lets the local stack
+	// come up without a client secret and fail closed on GET /v1/users.
+	directoryClient := directory.New(directory.Config{
+		BaseURL:      os.Getenv("KEYCLOAK_ADMIN_URL"),
+		Realm:        os.Getenv("KEYCLOAK_ADMIN_REALM"),
+		ClientID:     os.Getenv("DIRECTORY_CLIENT_ID"),
+		ClientSecret: os.Getenv("DIRECTORY_CLIENT_SECRET"),
+	})
 	mux := http.NewServeMux()
-	mux.Handle("/v1/", handler.New(store, verifier))
+	mux.Handle("/v1/", handler.New(store, verifier, directoryClient))
 	mux.HandleFunc("GET /health/live", func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(204) })
 	mux.Handle("GET /health/ready", readyHandler(db.Ping))
 	// /metrics is answered here, next to the health checks and before any bearer
