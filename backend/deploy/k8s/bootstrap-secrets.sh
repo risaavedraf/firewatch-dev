@@ -14,9 +14,31 @@
 # operator's machine (FIREWATCH_CA_KEY, default ~/.firewatch-internal-ca/ca.key).
 #
 # Usage: ./bootstrap-secrets.sh [namespace]
+#
+# KUBECTL overrides the client binary, the same way tests/render-contract.sh does.
+# Pointing it at a recording stub shows what this script would create without a
+# cluster; it takes one executable path, never extra arguments.
 set -eu
 
-namespace="${1:-firewatch}"
+# One variable for the client, so the script can be exercised against a stub.
+kubectl_bin="${KUBECTL:-kubectl}"
+
+# The namespace is declared in one place, the base manifests, and the default is
+# read from there instead of repeated here: every certificate below carries
+# <service>.<namespace>.svc SANs, and a namespace written by hand would leave them
+# naming a Service that nothing answers for. An explicit argument still wins.
+repo_root="$(cd "$(dirname "$0")/../.." && pwd)"
+namespace_file="$repo_root/deploy/k8s/base/namespace.yaml"
+if [ ! -f "$namespace_file" ]; then
+	echo "missing $namespace_file: it declares the namespace these SANs name" >&2
+	exit 1
+fi
+base_namespace="$(awk '/^metadata:/{m=1;next} m && /^  name:/{print $2; exit}' "$namespace_file")"
+if [ -z "$base_namespace" ]; then
+	echo "$namespace_file declares no metadata.name" >&2
+	exit 1
+fi
+namespace="${1:-$base_namespace}"
 workdir="$(mktemp -d)"
 trap 'rm -rf "$workdir"' EXIT
 # The CA signing key is deliberately not cluster material: it lives on the
@@ -25,7 +47,7 @@ trap 'rm -rf "$workdir"' EXIT
 ca_key_file="${FIREWATCH_CA_KEY:-$HOME/.firewatch-internal-ca/ca.key}"
 
 exists() {
-	kubectl --namespace "$namespace" get secret "$1" >/dev/null 2>&1
+	"$kubectl_bin" --namespace "$namespace" get secret "$1" >/dev/null 2>&1
 }
 
 random_hex() {
@@ -47,11 +69,11 @@ apply_generic() {
 		literal_args="$literal_args --from-literal=$pair"
 	done
 	# shellcheck disable=SC2086 # word splitting is how kubectl receives each --from-literal
-	kubectl --namespace "$namespace" create secret generic "$name" $literal_args
+	"$kubectl_bin" --namespace "$namespace" create secret generic "$name" $literal_args
 }
 
 echo "namespace/$namespace"
-kubectl get namespace "$namespace" >/dev/null 2>&1 || kubectl create namespace "$namespace"
+"$kubectl_bin" get namespace "$namespace" >/dev/null 2>&1 || "$kubectl_bin" create namespace "$namespace"
 
 # --- credentials -----------------------------------------------------------
 # Generated once and then reused on every run: the StatefulSet reads them, so a
@@ -70,7 +92,7 @@ apply_generic postgres-credentials \
 # the cluster. Read them back so the derived URLs below match what the database
 # will actually accept.
 read_secret() {
-	kubectl --namespace "$namespace" get secret "$1" --output "jsonpath={.data.$2}" | base64 --decode
+	"$kubectl_bin" --namespace "$namespace" get secret "$1" --output "jsonpath={.data.$2}" | base64 --decode
 }
 postgres_password="$(read_secret postgres-credentials POSTGRES_PASSWORD)"
 jobs_db_password="$(read_secret postgres-credentials JOBS_DB_PASSWORD)"
@@ -82,46 +104,59 @@ apply_generic broker-credentials \
 	"RABBITMQ_RISK_PASSWORD=$(random_hex)" \
 	"RABBITMQ_ERLANG_COOKIE=$(random_hex)"
 
+# Read back for the same reason as the database passwords: an existing Secret is
+# never rewritten, so the AMQP_URL below has to carry the password the broker was
+# provisioned with, not the one this run generated.
+jobs_broker_password="$(read_secret broker-credentials RABBITMQ_JOBS_PASSWORD)"
+risk_broker_password="$(read_secret broker-credentials RABBITMQ_RISK_PASSWORD)"
+
 # --- internal CA and server certificates -----------------------------------
 # One CA for the cluster's internal services. The certificates name the Service
 # DNS entries as SANs, because a client that verifies the hostname would reject
 # a certificate issued for a bare pod name.
+#
+# issue_certificate SECRET_BASE [SERVICE]: the Secret is <SECRET_BASE>-tls, and the
+# certificate is valid for the Service name clients dial, which is not always the
+# same word (Keycloak's Service is `identity`, its Secret `keycloak-tls`).
 issue_certificate() {
-	common_name="$1"
-	shift
-	if exists "$common_name-tls"; then
-		echo "secret/$common_name-tls already exists, left untouched"
+	secret_base="$1"
+	service="${2:-$1}"
+	if exists "$secret_base-tls"; then
+		echo "secret/$secret_base-tls already exists, left untouched"
 		return 0
 	fi
-	openssl req -new -newkey rsa:2048 -nodes -keyout "$workdir/$common_name.key" \
-		-out "$workdir/$common_name.csr" -subj "/CN=$common_name" >/dev/null 2>&1
-	cat > "$workdir/$common_name.ext" <<EXT
-subjectAltName = DNS:$common_name, DNS:$common_name.$namespace.svc, DNS:$common_name.$namespace.svc.cluster.local
+	openssl req -new -newkey rsa:2048 -nodes -keyout "$workdir/$secret_base.key" \
+		-out "$workdir/$secret_base.csr" -subj "/CN=$service" >/dev/null 2>&1
+	# localhost and 127.0.0.1 are SANs because a port-forward is how a service is
+	# exercised before its Ingress exists, and a certificate that named only the
+	# in-cluster DNS would fail verification there.
+	cat > "$workdir/$secret_base.ext" <<EXT
+subjectAltName = DNS:$service, DNS:$service.$namespace.svc, DNS:$service.$namespace.svc.cluster.local, DNS:localhost, IP:127.0.0.1
 extendedKeyUsage = serverAuth
 EXT
-	openssl x509 -req -in "$workdir/$common_name.csr" -CA "$workdir/ca.crt" -CAkey "$workdir/ca.key" \
-		-CAcreateserial -days 825 -extfile "$workdir/$common_name.ext" \
-		-out "$workdir/$common_name.crt" >/dev/null 2>&1
-	kubectl --namespace "$namespace" create secret generic "$common_name-tls" \
-		--from-file=tls.crt="$workdir/$common_name.crt" \
-		--from-file=tls.key="$workdir/$common_name.key" \
+	openssl x509 -req -in "$workdir/$secret_base.csr" -CA "$workdir/ca.crt" -CAkey "$workdir/ca.key" \
+		-CAcreateserial -days 825 -extfile "$workdir/$secret_base.ext" \
+		-out "$workdir/$secret_base.crt" >/dev/null 2>&1
+	"$kubectl_bin" --namespace "$namespace" create secret generic "$secret_base-tls" \
+		--from-file=tls.crt="$workdir/$secret_base.crt" \
+		--from-file=tls.key="$workdir/$secret_base.key" \
 		--from-file=ca.crt="$workdir/ca.crt"
 }
 
 if exists firewatch-ca; then
-	kubectl --namespace "$namespace" get secret firewatch-ca --output jsonpath='{.data.ca\.crt}' | base64 --decode > "$workdir/ca.crt"
-	if [ -n "$(kubectl --namespace "$namespace" get secret firewatch-ca --output jsonpath='{.data.ca\.key}' 2>/dev/null)" ]; then
+	"$kubectl_bin" --namespace "$namespace" get secret firewatch-ca --output jsonpath='{.data.ca\.crt}' | base64 --decode > "$workdir/ca.crt"
+	if [ -n "$("$kubectl_bin" --namespace "$namespace" get secret firewatch-ca --output jsonpath='{.data.ca\.key}' 2>/dev/null)" ]; then
 		echo "secret/firewatch-ca still carries ca.key: take it out of the cluster with" >&2
 		echo "  kubectl --namespace $namespace patch secret firewatch-ca --type=json -p '[{\"op\":\"remove\",\"path\":\"/data/ca.key\"}]'" >&2
 	fi
 else
 	openssl req -x509 -newkey rsa:2048 -nodes -days 3650 -keyout "$workdir/ca.key" \
 		-out "$workdir/ca.crt" -subj "/CN=firewatch-internal-ca" >/dev/null 2>&1
-	kubectl --namespace "$namespace" create secret generic firewatch-ca \
+	"$kubectl_bin" --namespace "$namespace" create secret generic firewatch-ca \
 		--from-file=ca.crt="$workdir/ca.crt"
 	# The key never leaves this machine: anything able to read Secrets in the
-	# namespace could otherwise mint a certificate for postgres or rabbitmq and
-	# answer as either of them.
+	# namespace could otherwise mint a certificate for any service here and answer
+	# as it.
 	mkdir -p "$(dirname "$ca_key_file")"
 	chmod 700 "$(dirname "$ca_key_file")"
 	cp "$workdir/ca.key" "$ca_key_file"
@@ -139,21 +174,70 @@ else
 fi
 
 if [ -s "$workdir/ca.key" ]; then
+	# The two data services, then one certificate per application service: the
+	# cross-contract in odd/tasks/kubernetes-deployment.md (L10) puts TLS on every
+	# service port, and a per-service certificate means one pod's key cannot answer
+	# as its peer.
 	issue_certificate postgres
 	issue_certificate rabbitmq
+	issue_certificate gateway
+	issue_certificate jobs
+	issue_certificate risk
+	issue_certificate prevention
+	issue_certificate inference
+	# Keycloak is the product; `identity` is the Service clients dial, so that is the
+	# name the certificate has to carry.
+	issue_certificate keycloak identity
 else
 	echo "skipping certificate issuance: the CA private key is not available" >&2
 fi
 
-# --- migration-owner connection strings ------------------------------------
-# Separate from the application credentials on purpose: a migration owner can
-# reshape the schema, and no application pod may hold that authority.
+# --- connection strings ----------------------------------------------------
 # sslmode=verify-full with an explicit root certificate, because verify-ca would
-# accept any certificate signed by the CA for any hostname.
-migration_suffix="?sslmode=verify-full&sslrootcert=/etc/tls/ca.crt"
+# accept any certificate signed by the CA for any hostname. One suffix for every
+# DSN, so the trust settings cannot drift between the migration owner and the
+# application: the CA is mounted at the path this names.
+tls_suffix="?sslmode=verify-full&sslrootcert=/etc/tls/ca.crt"
+
+# Migration owners are separate from the application credentials on purpose: a
+# migration owner can reshape the schema, and no application pod may hold that
+# authority.
 apply_generic migration-credentials \
-	"JOBS_DATABASE_URL=postgres://postgres:$postgres_password@postgres:5432/jobs$migration_suffix" \
-	"RISK_DATABASE_URL=postgres://postgres:$postgres_password@postgres:5432/risk$migration_suffix"
+	"JOBS_DATABASE_URL=postgres://postgres:$postgres_password@postgres:5432/jobs$tls_suffix" \
+	"RISK_DATABASE_URL=postgres://postgres:$postgres_password@postgres:5432/risk$tls_suffix"
+
+# What the Deployments mount: base/workloads.yaml names these three Secrets as
+# `secretRef`, so without them a pod waits in CreateContainerConfigError, and a
+# plaintext DSN is refused outside development. The passwords are the roles
+# postgres-init.sh creates, read back from postgres-credentials above; the trust
+# settings are the same suffix the migration owner gets.
+#
+# Two keys, and each one has an owner that reads it at startup: DATABASE_URL, and
+# AMQP_URL — jobs and risk read it before building their worker
+# (services/{jobs,risk}/cmd/server/transport.go), so a pod without it starts and
+# never serves. prevention owns no queue and holds no broker client, so it never
+# gets one.
+#
+# Every part of that URL comes from the base, not from a guess: host `rabbitmq` and
+# port 5671 are the Service and its only AMQP listener in base/rabbitmq.yaml
+# (listeners.ssl.default), vhost `firewatch` is that StatefulSet's
+# RABBITMQ_DEFAULT_VHOST, and `firewatch-jobs` / `firewatch-risk` are the two users
+# deploy/local/rabbitmq-topology.sh provisions, whose passwords this script keeps in
+# broker-credentials. amqps because requireSecureBrokerURL refuses any other scheme
+# outside development; no verification parameter because the CA is not part of the
+# URL, the pod mounts it and names it in TLS_CA_FILE, and that same guard refuses
+# `verify=verify_none`.
+apply_generic jobs-runtime \
+	"DATABASE_URL=postgres://jobs_app:$jobs_db_password@postgres:5432/jobs$tls_suffix" \
+	"AMQP_URL=amqps://firewatch-jobs:$jobs_broker_password@rabbitmq:5671/firewatch"
+apply_generic risk-runtime \
+	"DATABASE_URL=postgres://risk_app:$risk_db_password@postgres:5432/risk$tls_suffix" \
+	"AMQP_URL=amqps://firewatch-risk:$risk_broker_password@rabbitmq:5671/firewatch"
+# prevention owns the `prevention` schema inside the risk database (L8), so its DSN
+# names that same database: a database of its own is never created, and a DSN
+# naming one would point at nothing.
+apply_generic prevention-runtime \
+	"DATABASE_URL=postgres://risk_app:$risk_db_password@postgres:5432/risk$tls_suffix"
 
 # --- shared scripts, as ConfigMaps -----------------------------------------
 # The PostgreSQL role/database script, the broker plugin list and the broker
@@ -162,7 +246,6 @@ apply_generic migration-credentials \
 # Kubernetes tree, so the base cannot drift from the Compose stack. apply -f -
 # makes a re-run update them, which is safe: none of them is mounted by a running
 # container's decision logic, they are read at container start.
-repo_root="$(cd "$(dirname "$0")/../.." && pwd)"
 # The ConfigMap key is the file name the container reads, not the repository file
 # name: rabbitmq.yaml mounts subPath `enabled_plugins`, which is also what
 # RABBITMQ_ENABLED_PLUGINS_FILE names. Declaring the key here, per entry, keeps the
@@ -170,16 +253,26 @@ repo_root="$(cd "$(dirname "$0")/../.." && pwd)"
 # basename.
 # `rabbitmq-topology` is mounted by the broker-provision Job as /topology and run
 # as that Job's entrypoint, so the Job declares no topology of its own.
-for entry in "postgres-init:deploy/local/postgres-init.sh:postgres-init.sh" "rabbitmq-plugins:deploy/local/rabbitmq-plugins:enabled_plugins" "rabbitmq-topology:deploy/local/rabbitmq-topology.sh:rabbitmq-topology.sh"; do
+# `keycloak-realm` is the realm the identity provider imports. The file carries
+# ${...} placeholders that Keycloak expands from the container's environment
+# (docs/keycloak-realm-setup.md): what lands in the cluster is the shape of the
+# realm, never a password.
+for entry in \
+	"postgres-init:deploy/local/postgres-init.sh:postgres-init.sh" \
+	"rabbitmq-plugins:deploy/local/rabbitmq-plugins:enabled_plugins" \
+	"rabbitmq-topology:deploy/local/rabbitmq-topology.sh:rabbitmq-topology.sh" \
+	"keycloak-realm:deploy/local/firewatch-realm.json:firewatch-realm.json"; do
 	configmap_name="${entry%%:*}"
 	rest="${entry#*:}"
 	source_file="$repo_root/${rest%%:*}"
 	configmap_key="${rest#*:}"
-	kubectl --namespace "$namespace" create configmap "$configmap_name" \
+	"$kubectl_bin" --namespace "$namespace" create configmap "$configmap_name" \
 		--from-file="$configmap_key=$source_file" \
-		--dry-run=client --output yaml | kubectl --namespace "$namespace" apply -f -
+		--dry-run=client --output yaml | "$kubectl_bin" --namespace "$namespace" apply -f -
 done
 
 echo
-echo "done. Application runtime secrets are created when the workloads are wired (T7),"
-echo "because they carry the broker trust settings that the workload mounts must match."
+echo "done. jobs-runtime and risk-runtime carry DATABASE_URL and AMQP_URL;"
+echo "prevention-runtime carries DATABASE_URL only. The TLS file mounts belong to the"
+echo "workload wiring (T7.7), and its mounts must keep the paths these URLs name:"
+echo "/etc/tls/ca.crt."
