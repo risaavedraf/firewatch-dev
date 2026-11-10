@@ -1,7 +1,12 @@
 package main
 
 import (
+	"net/http"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -15,9 +20,9 @@ const (
 	// keeps a plaintext fallback. Both look encrypted at a glance and are not.
 	unauthenticatedDatabaseURL = "postgres://user:pass@db:5432/x?sslmode=require"
 	fallbackDatabaseURL        = "postgres://user:pass@db:5432/x?sslmode=prefer"
-	plaintextBrokerURL   = "amqp://user:pass@broker:5672/firewatch"
-	encryptedBrokerURL   = "amqps://user:pass@broker:5671/firewatch"
-	unverifiedBrokerURL  = "amqps://user:pass@broker:5671/firewatch?verify=verify_none"
+	plaintextBrokerURL         = "amqp://user:pass@broker:5672/firewatch"
+	encryptedBrokerURL         = "amqps://user:pass@broker:5671/firewatch"
+	unverifiedBrokerURL        = "amqps://user:pass@broker:5671/firewatch?verify=verify_none"
 
 	tlsGuardMessage    = "DATABASE_URL must require TLS outside development"
 	tlsFallbackMessage = "DATABASE_URL must not fall back to a plaintext connection outside development"
@@ -128,4 +133,133 @@ func TestStartupBrokerURLRefusesPlaintextOutsideDevelopment(t *testing.T) {
 	t.Setenv("AMQP_URL", plaintextBrokerURL)
 	_, err := startupBrokerURL("production")
 	assertGuardResult(t, err, amqpsGuardMessage)
+}
+
+// The three messages the operator can read, and the paths the guard is given.
+// Naming the variable is the point: an operator with a half-mounted secret must
+// not have to guess which half is missing.
+const (
+	certMissingOutsideDevelopment = "TLS_CERT_FILE is required outside development: set TLS_CERT_FILE and TLS_KEY_FILE, or run with APP_ENV=development for plaintext"
+	certMissingForConfiguredKey   = "TLS_CERT_FILE is required when TLS_KEY_FILE is set"
+	keyMissingForConfiguredCert   = "TLS_KEY_FILE is required when TLS_CERT_FILE is set"
+	// Any path works here: the guard decides from the strings alone, and the
+	// listener is the only place that opens the files.
+	certPath = "/mnt/tls/tls.crt"
+	keyPath  = "/mnt/tls/tls.key"
+)
+
+// TestRequireListenerTLS pins T7.2's inbound half of the crossing contract: a
+// configured key pair serves TLS; no key pair keeps the plaintext of development
+// and nothing else; every other combination refuses to start and names the
+// variable that is missing, including a half pair in development.
+func TestRequireListenerTLS(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		environment string
+		certFile    string
+		keyFile     string
+		want        string
+	}{
+		{name: "key pair outside development", environment: "staging", certFile: certPath, keyFile: keyPath},
+		{name: "key pair in production", environment: "production", certFile: certPath, keyFile: keyPath},
+		{name: "key pair in development", environment: "development", certFile: certPath, keyFile: keyPath},
+		{name: "no key pair in development", environment: "development"},
+		{name: "no key pair outside development", environment: "staging", want: certMissingOutsideDevelopment},
+		{name: "no key pair with an unset environment", want: certMissingOutsideDevelopment},
+		{name: "the development exception is not case-insensitive", environment: "Development", want: certMissingOutsideDevelopment},
+		{name: "certificate without a key outside development", environment: "staging", certFile: certPath, want: keyMissingForConfiguredCert},
+		{name: "key without a certificate outside development", environment: "staging", keyFile: keyPath, want: certMissingForConfiguredKey},
+		{name: "certificate without a key in development", environment: "development", certFile: certPath, want: keyMissingForConfiguredCert},
+		{name: "key without a certificate in development", environment: "development", keyFile: keyPath, want: certMissingForConfiguredKey},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			assertGuardResult(t, requireListenerTLS(tc.environment, tc.certFile, tc.keyFile), tc.want)
+		})
+	}
+}
+
+// TestStartupListenerTLSTakesTheDecisionFromTheEnvironment pins the wiring, not
+// only the guard: startup reads the two variables, and the values it accepts are
+// exactly the ones handed to the listener.
+func TestStartupListenerTLSTakesTheDecisionFromTheEnvironment(t *testing.T) {
+	t.Setenv(tlsCertFileEnv, certPath)
+	t.Setenv(tlsKeyFileEnv, keyPath)
+	cert, key, err := startupListenerTLS("staging")
+	if err != nil || cert != certPath || key != keyPath {
+		t.Fatalf("configured key pair = %q, %q, %v", cert, key, err)
+	}
+	t.Setenv(tlsCertFileEnv, "")
+	t.Setenv(tlsKeyFileEnv, "")
+	if _, _, err = startupListenerTLS("production"); err == nil || !strings.Contains(err.Error(), tlsCertFileEnv) {
+		t.Fatalf("startup outside development without TLS = %v, want a refusal naming %s", err, tlsCertFileEnv)
+	}
+	// The development plaintext case is the only accepted one that serves without
+	// a key pair, and it resolves to no certificate and no key.
+	if cert, key, err = startupListenerTLS("development"); err != nil || cert != "" || key != "" {
+		t.Fatalf("development without TLS = %q, %q, %v", cert, key, err)
+	}
+}
+
+// TestStartupRootCAsLoadsTheInternalCA pins T7.2's outbound half: no TLS_CA_FILE
+// is no pool, so every client keeps the system roots it uses today, and a
+// configured bundle is loaded from disk. A bundle that cannot be trusted is a
+// refusal that names the variable, never a silent fall back to the system roots.
+func TestStartupRootCAsLoadsTheInternalCA(t *testing.T) {
+	t.Setenv(tlsCAFileEnv, "")
+	if pool, err := startupRootCAs(); err != nil || pool != nil {
+		t.Fatalf("no CA = %v, %v; want no pool and the system roots", pool, err)
+	}
+	_, _, caFile := testKeyPair(t)
+	t.Setenv(tlsCAFileEnv, caFile)
+	if pool, err := startupRootCAs(); err != nil || pool == nil {
+		t.Fatalf("configured CA = %v, %v; want a loaded pool", pool, err)
+	}
+	dir := t.TempDir()
+	blank := filepath.Join(dir, "blank.crt")
+	if err := os.WriteFile(blank, []byte("not a certificate"), 0o600); err != nil {
+		t.Fatalf("write blank bundle: %v", err)
+	}
+	for _, tc := range []struct{ name, path string }{
+		{"missing file", filepath.Join(dir, "absent.crt")},
+		{"bundle without a certificate", blank},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv(tlsCAFileEnv, tc.path)
+			_, err := startupRootCAs()
+			if err == nil || !strings.Contains(err.Error(), tlsCAFileEnv) {
+				t.Fatalf("startup with %s = %v, want a refusal naming %s", tc.path, err, tlsCAFileEnv)
+			}
+		})
+	}
+}
+
+// TestNewJWKSClientCarriesTheInternalCA pins the key-set client of T7.2: the
+// configured pool is the trust anchor it verifies the issuer with, and without
+// TLS_CA_FILE it stays the bare client with the system roots - no Transport at
+// all, so an unset variable cannot reshape the connection.
+func TestNewJWKSClientCarriesTheInternalCA(t *testing.T) {
+	_, _, caFile := testKeyPair(t)
+	t.Setenv(tlsCAFileEnv, caFile)
+	pool, err := startupRootCAs()
+	if err != nil {
+		t.Fatalf("load CA: %v", err)
+	}
+	client := newJWKSClient(pool)
+	transport, ok := client.Transport.(*http.Transport)
+	if !ok || transport.TLSClientConfig == nil || transport.TLSClientConfig.RootCAs != pool {
+		t.Fatalf("the key-set client does not carry the configured CA: %#v", client.Transport)
+	}
+	t.Setenv(tlsCAFileEnv, "")
+	if pool, err = startupRootCAs(); err != nil {
+		t.Fatalf("load no CA: %v", err)
+	}
+	bare := newJWKSClient(pool)
+	if bare.Transport != nil {
+		t.Fatalf("without TLS_CA_FILE the key-set client must keep no Transport, got %#v", bare.Transport)
+	}
+	for _, c := range []*http.Client{client, bare} {
+		if c.Timeout != 5*time.Second {
+			t.Fatalf("key-set client timeout %v, want the 5s bound it always had", c.Timeout)
+		}
+	}
 }

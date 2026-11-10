@@ -108,6 +108,19 @@ func run() error {
 	if os.Getenv("DATABASE_URL") == "" || os.Getenv("AMQP_URL") == "" {
 		return errors.New("database and broker configuration required")
 	}
+	// The crossing contract's transport decisions are taken here: after the migrate
+	// branch, because a migration job holds only DATABASE_URL and never binds a port
+	// or dials the broker, and before any client is built, so a deployment with no
+	// key pair or with a CA bundle that cannot be loaded stops instead of running with
+	// trust it did not ask for.
+	certFile, keyFile, err := startupListenerTLS(os.Getenv("APP_ENV"))
+	if err != nil {
+		return err
+	}
+	rootCAs, err := startupRootCAs()
+	if err != nil {
+		return err
+	}
 	issuer, jwks := os.Getenv("OIDC_ISSUER"), os.Getenv("OIDC_JWKS_URL")
 	for _, value := range []string{issuer, jwks} {
 		u, err := url.Parse(value)
@@ -118,7 +131,9 @@ func run() error {
 	if os.Getenv("OIDC_AUDIENCE") == "" {
 		return errors.New("OIDC_AUDIENCE required")
 	}
-	keyCtx := oidc.ClientContext(ctx, &http.Client{Timeout: 5 * time.Second})
+	// The key-set client trusts the internal CA when TLS_CA_FILE is configured and
+	// stays the bare client with the system roots when it is not.
+	keyCtx := oidc.ClientContext(ctx, newJWKSClient(rootCAs))
 	verifier := oidc.NewVerifier(issuer, oidc.NewRemoteKeySet(keyCtx, jwks), &oidc.Config{ClientID: os.Getenv("OIDC_AUDIENCE"), SupportedSigningAlgs: []string{"RS256"}})
 	store := repository.Store{DB: db}
 	// Validate both bounds before starting any broker worker.
@@ -137,7 +152,7 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	broker := &messaging.Broker{DB: db, URL: amqpURL, Handle: store.Complete, Fail: store.Fail}
+	broker := &messaging.Broker{DB: db, URL: amqpURL, RootCAs: rootCAs, Handle: store.Complete, Fail: store.Fail}
 	workerDone := make(chan struct{})
 	go func() { defer close(workerDone); broker.Run(ctx) }()
 	defer func() { stop(); <-workerDone }()
@@ -182,7 +197,7 @@ func run() error {
 		defer cancel()
 		_ = srv.Shutdown(shutdown)
 	}()
-	err = srv.ListenAndServe()
+	err = listenAndServe(srv, certFile, keyFile)
 	if errors.Is(err, http.ErrServerClosed) {
 		return nil
 	}
