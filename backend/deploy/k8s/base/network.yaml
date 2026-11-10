@@ -101,9 +101,10 @@ spec:
 #
 # A bare podSelector matches pods of this policy's own namespace, which is where
 # both StatefulSets live, so the labels here are the ones those pods actually
-# carry. The sources are the application Deployments by their `app` label and
-# nothing else: a migration or topology Job added later must carry one of those
-# labels, or be named here, or it will not reach what it provisions.
+# carry. The sources are the application Deployments by their `app` label, plus
+# the migration Job, which is named here instead of borrowing an application's
+# label: a Job that pretends to be `risk` would be admitted everywhere `risk`
+# is, which is more than a migration needs.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata: {name: postgres-entry}
@@ -114,7 +115,7 @@ spec:
   ingress:
     - from:
         - podSelector:
-            matchExpressions: [{key: app, operator: In, values: [jobs, risk, prevention]}]
+            matchExpressions: [{key: app, operator: In, values: [jobs, risk, prevention, migrate]}]
       ports: [{protocol: TCP, port: 5432}]
 ---
 # The broker is reached by the two services that publish or consume; prevention
@@ -131,3 +132,50 @@ spec:
         - podSelector:
             matchExpressions: [{key: app, operator: In, values: [jobs, risk]}]
       ports: [{protocol: TCP, port: 5671}]
+---
+# The management listener carries operator commands over plain HTTP inside the
+# cluster. Nothing admitted it before, while `rabbitmq.yaml` claimed it was
+# restricted to the provisioning namespace: the truth was that the provisioning
+# Job could not reach it at all. One source, one port, and no data crosses it.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: {name: rabbitmq-management}
+spec:
+  podSelector:
+    matchLabels: {app.kubernetes.io/name: rabbitmq}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels: {app: broker-provision}
+      ports: [{protocol: TCP, port: 15671}]
+---
+# Both bootstrap Jobs are their own sources. They carry `app: migrate` and
+# `app: broker-provision`, labels no Deployment uses, so neither inherits an
+# application's egress: each one gets exactly the single destination it
+# provisions. DNS already reaches every pod through `dns-and-oidc`.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: {name: migrate-egress}
+spec:
+  podSelector:
+    matchLabels: {app: migrate}
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - podSelector:
+            matchLabels: {app.kubernetes.io/name: postgres}
+      ports: [{protocol: TCP, port: 5432}]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: {name: broker-provision-egress}
+spec:
+  podSelector:
+    matchLabels: {app: broker-provision}
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - podSelector:
+            matchLabels: {app.kubernetes.io/name: rabbitmq}
+      ports: [{protocol: TCP, port: 15671}]

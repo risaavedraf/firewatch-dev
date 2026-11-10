@@ -9,6 +9,13 @@ resources:
   # guarantee kustomize offers.
   - postgres.yaml
   - rabbitmq.yaml
+  # The two bootstrap Jobs come before any replica: migrating a database that has
+  # no schema only works if it runs first, and provisioning the broker before the
+  # services dial it is what keeps their first reconnection from being a failure.
+  # Kustomize renders a list; it guarantees no apply order. This is the intended
+  # order, and enforcing it is the delivery's job (T7, T9).
+  - jobs-migrate.yaml
+  - broker-provision.yaml
   - workloads.yaml
   - autoscaling.yaml
   - network.yaml

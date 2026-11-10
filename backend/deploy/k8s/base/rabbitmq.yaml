@@ -5,9 +5,11 @@
 #   - 5671, amqps, with the internal CA's server certificate. This is the only
 #     listener the services may use; the startup guards refuse `amqp://` outside
 #     development, so a plaintext listener would be dead weight at best.
-#   - 15672, the management API, plaintext and reachable only from the namespace
-#     that runs the provisioning Job and from monitoring, enforced by
-#     NetworkPolicy. It carries operator commands and no data-plane traffic.
+#   - 15671, the management API over TLS, with the same server certificate as
+#     AMQPS. It carries operator commands and the administrative credential, so
+#     it does not run in the clear; NetworkPolicy admits it only from the
+#     provisioning Job. The plaintext management port is disabled, not left
+#     idle.
 #
 # The Erlang cookie comes from the Secret: it must survive a restart, otherwise a
 # restarted node refuses to rejoin its own data directory.
@@ -32,7 +34,16 @@ data:
     # acceptance of clients, not the client's verification of the server.
     ssl_options.verify = verify_none
     ssl_options.fail_if_no_peer_cert = false
-    management.tcp.port = 15672
+    # The management API carries the administrative password in a basic-auth
+    # header, so it gets the same treatment as the data plane: TLS only. Port 0
+    # disables the plaintext listener outright. VERIFY ON FIRST APPLY (T9): the
+    # management plugin accepts port 0 as "disabled" from 3.8 onward, and a
+    # broker that refuses this setting fails visibly at startup, not silently.
+    management.tcp.port = 0
+    management.ssl.port = 15671
+    management.ssl.cacertfile = /etc/rabbitmq/tls/ca.crt
+    management.ssl.certfile = /etc/rabbitmq/tls/tls.crt
+    management.ssl.keyfile = /etc/rabbitmq/tls/tls.key
     prometheus.tcp.port = 15692
     # Quorum queues are the default here; the topology script declares them
     # explicitly, and a single node gives durability, not availability.
@@ -54,7 +65,7 @@ spec:
       port: 5671
       targetPort: amqps
     - name: management
-      port: 15672
+      port: 15671
       targetPort: management
     - name: metrics
       port: 15692
@@ -116,7 +127,7 @@ spec:
             - name: amqps
               containerPort: 5671
             - name: management
-              containerPort: 15672
+              containerPort: 15671
             - name: metrics
               containerPort: 15692
           env:

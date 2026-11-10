@@ -1,0 +1,130 @@
+# Broker and identity provisioning, as a bounded Job.
+#
+# `deploy/local/rabbitmq-topology.sh` is the single description of the broker's
+# shape: three exchanges, four queues, five bindings, the two service identities
+# and the V1-H-04 permission matrix. This Job mounts that script from a ConfigMap
+# that `bootstrap-secrets.sh` renders from the repository file itself, so the
+# cluster cannot drift from the Compose stack the way a retyped copy would.
+# The script takes no arguments and no flags: every input is an environment
+# variable, and none of the credentials reaches argv.
+#
+# The management API is reached over TLS on 15671 with the broker's own server
+# certificate, verified against the internal CA: the administrative credential
+# travels in a basic-auth header, so it never crosses a plaintext port. The
+# services publish and consume over amqps on 5671, which stays the only listener
+# any application may use.
+#
+# DEPENDENCY this file cannot satisfy itself: the namespace runs `default-deny`,
+# and `rabbitmq-entry` admits only 5671 from `app: jobs|risk`. This pod reaches
+# the broker only through the two policies keyed on the pod label this template
+# carries, `app: broker-provision`: `broker-provision-egress` for egress and
+# `rabbitmq-management` for ingress, both on 15671 and nothing else.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: broker-provision
+  namespace: firewatch
+  labels:
+    app.kubernetes.io/name: broker-provision
+    app.kubernetes.io/part-of: firewatch
+spec:
+  # The script is idempotent: declarations are idempotent PUTs, a duplicate
+  # binding answers 409 (accepted), and an already retired exchange answers 404
+  # (accepted), so a retry re-runs the whole topology harmlessly. A Job cannot
+  # wait for the broker to be ready, because there is no readiness gate between
+  # them, so the early attempts absorb a broker that is still starting.
+  # Kubernetes backs off exponentially; six attempts cover a cold start, and a
+  # later failure is a real provisioning error rather than a slow startup.
+  backoffLimit: 6
+  # A run that has not finished in five minutes is waiting on a broker that will
+  # not answer, not doing slow work.
+  activeDeadlineSeconds: 300
+  # A completed Job never runs again: re-applying an unchanged manifest is a
+  # no-op and editing its pod template is refused as immutable. Deleting the
+  # finished Job after an hour is what lets a later apply start a fresh run, so
+  # re-provisioning after broker data loss needs no manual `kubectl delete job`.
+  # The cost is that the run's evidence leaves with it: read the pod's logs before
+  # the TTL expires if they are needed.
+  ttlSecondsAfterFinished: 3600
+  template:
+    metadata:
+      labels:
+        # The network policies that open 15671 select on exactly this label.
+        app: broker-provision
+        app.kubernetes.io/name: broker-provision
+        app.kubernetes.io/part-of: firewatch
+    spec:
+      restartPolicy: Never
+      # The pod needs no API server credentials, so it holds none. Its own egress
+      # rule grants the management port and no other destination; the
+      # namespace-wide rule additionally allows DNS and outbound 443 to every pod.
+      automountServiceAccountToken: false
+      securityContext:
+        # The namespace enforces Pod Security `restricted`. The uid is pinned
+        # because the image names its user (`curl_user`) instead of numbering it,
+        # and kubelet refuses to verify `runAsNonRoot` against a user name: with
+        # the uid stated, the proof is in the manifest. Nothing on the filesystem
+        # is owned by or read as this uid, and the container writes nowhere.
+        # NOT CONFIRMED ON A CLUSTER YET: the first apply must show the pod
+        # admitted under `restricted` and the container running as 65532.
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        seccompProfile: {type: RuntimeDefault}
+      containers:
+        - name: broker-provision
+          image: curlimages/curl:8.12.1
+          # `command` is the entrypoint. The path is the mount point of the
+          # ConfigMap, not a copy of it: a ConfigMap key gets no execute bit, and
+          # stating the interpreter is what makes that irrelevant.
+          command: [sh, /topology/rabbitmq-topology.sh]
+          env:
+            # Plain, non-secret settings: where the management API answers and
+            # which vhost to shape.
+            - name: RABBITMQ_MANAGEMENT_URL
+              value: https://rabbitmq:15671
+            # curl verifies the management certificate against the internal CA
+            # because this variable names the bundle. Without it the handshake
+            # fails closed: the image ships the public roots, not ours.
+            - name: CURL_CA_BUNDLE
+              value: /etc/tls/ca.crt
+            - name: RABBITMQ_VHOST
+              value: firewatch
+            # The broker's administrative identity. The username is an identifier,
+            # not a credential: it must match RABBITMQ_DEFAULT_USER in rabbitmq.yaml
+            # and it grants nothing by itself. Its password, and the two service
+            # passwords, exist only in the Secret.
+            - name: ADMIN_USER
+              value: firewatch
+            - name: ADMIN_PASS
+              valueFrom:
+                secretKeyRef: {name: broker-credentials, key: RABBITMQ_PASSWORD}
+            - name: JOBS_PASSWORD
+              valueFrom:
+                secretKeyRef: {name: broker-credentials, key: RABBITMQ_JOBS_PASSWORD}
+            - name: RISK_PASSWORD
+              valueFrom:
+                secretKeyRef: {name: broker-credentials, key: RABBITMQ_RISK_PASSWORD}
+          volumeMounts:
+            - name: topology
+              mountPath: /topology
+              readOnly: true
+            - name: ca
+              mountPath: /etc/tls
+              readOnly: true
+          resources:
+            requests: {cpu: 10m, memory: 16Mi}
+            limits: {cpu: 100m, memory: 64Mi}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: [ALL]}
+      volumes:
+        - name: topology
+          configMap:
+            name: rabbitmq-topology
+        # The CA the management certificate is verified against: public material,
+        # so it is mounted read-only and nothing else is.
+        - name: ca
+          secret:
+            secretName: firewatch-ca
