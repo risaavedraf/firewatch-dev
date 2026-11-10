@@ -147,3 +147,42 @@ Una sesión anterior dejó las dos unidades escritas y sin commitear. Esta las c
 1. `backend/services/prevention/internal/directory/directory.go` — si la segunda lectura del bundle falla, `New` ignora el error y deja las raíces del sistema, aunque su propio comentario dice lo contrario; y `TestAnUnloadableTLSCAFileDoesNotBecomeATrustAnchor` comprueba `Transport == nil`, que es justamente el caso contrario al que el comentario promete. En el arranque real no hay vía insegura, porque `run()` aborta antes de construir el cliente.
 2. prevention no tiene ningún handshake positivo, ni para el listener ni para JWKS: el listener solo se prueba con un certificado inexistente, y el test de JWKS levanta un servidor TLS al que nunca le hace una petición.
 3. Los call sites de `run()` no están cubiertos en ninguno de los dos servicios —ni en `jobs` desde `e8e085f`—: quitar el pool camino de un cliente deja la suite en verde. Los helpers y los handshakes sí están cubiertos.
+
+**L14 (2026-11-10) — estrategia de entrega: `stacked-to-main`, decidida y registrada; los PRs no están publicados.**
+
+**Decisión del responsable: `stacked-to-main`,** tras una sola pasada de troceado. Siete rebanadas contiguas, en orden, cada una en su propio PR contra `main` (`babf7d3`), revisables y reversibles por separado. Contiguas significa que no se reescribe el historial: cada commit pertenece a exactamente una rebanada y la frontera entre dos rebanadas es un SHA que ya existe. El plan completo —tabla de las siete, diagrama de dependencias y regla de mecanización— queda en «Plan de entrega (stacked-to-main)».
+
+**Cuatro rebanadas superan la guía de ~400 líneas y no se trocean más: la 3, la 5, la 6 y la 7** —527, 874, 1.079 y 557 líneas—. Cada una es un comportamiento completo, un servicio que sirve TLS y confía en la CA interna, y partirla obligaría a partir `main.go` entre dos commits: el estado intermedio dejaría el listener ya cableado y los clientes todavía sin CA, un servicio que arranca y no puede hablar con nadie. El corte por comportamiento se sostiene; el corte por línea, en esas cuatro, no.
+
+**Publicar los PRs queda pendiente de autorización del responsable.** Se registra el plan, no se abre nada: `push`, creación de PR y merge no son parte de la autorización de implementación, igual que quedó escrito en L11.
+
+## Plan de entrega (stacked-to-main)
+
+Siete rebanadas **contiguas**, en este orden, cada una en su propio PR contra `main` (`babf7d3`). No se reescribe historial: cada commit pertenece a una sola rebanada y la frontera entre dos rebanadas es un SHA existente. La 📍 marca la siguiente rebanada a publicar.
+
+| PR | Rango de commits | Commits incluidos | Líneas cambiadas | Unidad de comportamiento que entrega |
+| --- | --- | --- | --- | --- |
+| 1 📍 | `babf7d3..eede268` | 7 — `dd9a542`, `63a5124`, `51713e5`, `9ae67e1`, `7c94e02`, `54734c9`, `eede268` | 653 | Jobs de migración y aprovisionamiento del broker, con sus dos correcciones y la documentación del sustrato |
+| 2 | `74145c6` | 1 — `74145c6` | 453 | inference sirve TLS desde el listener dirigido por entorno |
+| 3 | `069b418` | 1 — `069b418` | 527 | gateway sirve TLS y confía en la CA interna |
+| 4 | `9f225e2` | 1 — `9f225e2` | 186 | un certificado por servicio y el entorno runtime |
+| 5 | `e8e085f` | 1 — `e8e085f` | 874 | jobs sirve TLS y confía en la CA para broker y OIDC |
+| 6 | `b2af3b2` | 1 — `b2af3b2` | 1.079 | risk sirve TLS y confía en la CA para broker, OIDC e inferencia |
+| 7 | `52e943a` + `bf6af99` | 2 — `52e943a`, `bf6af99` | 557 | prevention sirve TLS y confía en la CA para OIDC y el directorio, más el cierre documental del frente |
+
+**Dependencias.** Las rebanadas 2 a 7 se pueblan desde `main`; el historial de ninguna depende del de otra. La única arista entre rebanadas es lógica, no de commits: la 5 depende de la 4 porque los servicios necesitan el certificado por servicio que emite el aprovisionador.
+
+```text
+main  babf7d3  (merge-base con el frente)
+ │
+ ├── PR 1 📍  babf7d3..eede268   sustrato: Jobs de migración y aprovisionamiento del broker
+ │
+ ├── PR 2     74145c6            inference
+ ├── PR 3     069b418            gateway
+ ├── PR 4     9f225e2            certificado por servicio + entorno runtime
+ │    └──(lógica)──▶ PR 5  e8e085f   jobs: consume el certificado por servicio de la 4
+ ├── PR 6     b2af3b2            risk
+ └── PR 7     52e943a + bf6af99  prevention + cierre documental
+```
+
+**Mecanización.** La rebanada 1 es la rama actual recortada en su SHA final, `eede268`: se abre tal cual desde `feat/k8s-bootstrap-jobs`, sin reescribir historial. Las rebanadas 2 a 7 nacen de `main`, una rama por rebanada, y se pueblan con `git cherry-pick` de sus commits **en ese orden**; tras cada merge, las ramas todavía pendientes se rebasan sobre la `main` actualizada. Nada se aplana ni se reordena: la frontera de cada PR sigue siendo un SHA existente.
