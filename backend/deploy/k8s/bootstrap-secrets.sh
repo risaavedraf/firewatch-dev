@@ -9,12 +9,20 @@
 # workloads then need a restart, which is the operator's decision, not this
 # script's.
 #
+# The CA signing key is the one piece of material this script deliberately keeps
+# out of the cluster: the Secret carries only ca.crt, and ca.key stays on the
+# operator's machine (FIREWATCH_CA_KEY, default ~/.firewatch-internal-ca/ca.key).
+#
 # Usage: ./bootstrap-secrets.sh [namespace]
 set -eu
 
 namespace="${1:-firewatch}"
 workdir="$(mktemp -d)"
 trap 'rm -rf "$workdir"' EXIT
+# The CA signing key is deliberately not cluster material: it lives on the
+# operator's machine, and FIREWATCH_CA_KEY points somewhere else when it does not
+# live in the default location.
+ca_key_file="${FIREWATCH_CA_KEY:-$HOME/.firewatch-internal-ca/ca.key}"
 
 exists() {
 	kubectl --namespace "$namespace" get secret "$1" >/dev/null 2>&1
@@ -102,18 +110,32 @@ EXT
 
 if exists firewatch-ca; then
 	kubectl --namespace "$namespace" get secret firewatch-ca --output jsonpath='{.data.ca\.crt}' | base64 --decode > "$workdir/ca.crt"
-	# The private key is only needed to issue new certificates; when it is absent
-	# the script can still issue nothing, so say that instead of failing obscurely.
-	if kubectl --namespace "$namespace" get secret firewatch-ca --output jsonpath='{.data.ca\.key}' | base64 --decode > "$workdir/ca.key" 2>/dev/null && [ -s "$workdir/ca.key" ]; then
-		:
-	else
-		echo "secret/firewatch-ca holds no ca.key: existing certificates are kept, new ones cannot be issued" >&2
+	if [ -n "$(kubectl --namespace "$namespace" get secret firewatch-ca --output jsonpath='{.data.ca\.key}' 2>/dev/null)" ]; then
+		echo "secret/firewatch-ca still carries ca.key: take it out of the cluster with" >&2
+		echo "  kubectl --namespace $namespace patch secret firewatch-ca --type=json -p '[{\"op\":\"remove\",\"path\":\"/data/ca.key\"}]'" >&2
 	fi
 else
 	openssl req -x509 -newkey rsa:2048 -nodes -days 3650 -keyout "$workdir/ca.key" \
 		-out "$workdir/ca.crt" -subj "/CN=firewatch-internal-ca" >/dev/null 2>&1
 	kubectl --namespace "$namespace" create secret generic firewatch-ca \
-		--from-file=ca.crt="$workdir/ca.crt" --from-file=ca.key="$workdir/ca.key"
+		--from-file=ca.crt="$workdir/ca.crt"
+	# The key never leaves this machine: anything able to read Secrets in the
+	# namespace could otherwise mint a certificate for postgres or rabbitmq and
+	# answer as either of them.
+	mkdir -p "$(dirname "$ca_key_file")"
+	chmod 700 "$(dirname "$ca_key_file")"
+	cp "$workdir/ca.key" "$ca_key_file"
+	chmod 600 "$ca_key_file"
+	echo "CA private key written to $ca_key_file (0600, outside the cluster)"
+fi
+
+# New certificates need the signing key, which the cluster no longer holds. When
+# the local copy is missing the operator supplies it through FIREWATCH_CA_KEY; the
+# existing certificates and the secret are never rewritten here.
+if [ -s "$ca_key_file" ]; then
+	cp "$ca_key_file" "$workdir/ca.key"
+else
+	echo "no CA private key at $ca_key_file: existing certificates are kept, new ones cannot be issued" >&2
 fi
 
 if [ -s "$workdir/ca.key" ]; then
@@ -145,7 +167,7 @@ repo_root="$(cd "$(dirname "$0")/../.." && pwd)"
 # name: rabbitmq.yaml mounts subPath `enabled_plugins`, which is also what
 # RABBITMQ_ENABLED_PLUGINS_FILE names. Declaring the key here, per entry, keeps the
 # two sides of that contract visible in one place instead of deriving it from a
-# basename that happens to differ.
+# basename.
 for entry in "postgres-init:deploy/local/postgres-init.sh:postgres-init.sh" "rabbitmq-plugins:deploy/local/rabbitmq-plugins:enabled_plugins"; do
 	configmap_name="${entry%%:*}"
 	rest="${entry#*:}"
