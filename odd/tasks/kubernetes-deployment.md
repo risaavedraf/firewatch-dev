@@ -257,13 +257,13 @@ Nada se aplana ni se reordena: la frontera de cada PR sigue siendo un SHA existe
 
 **El diagnóstico que faltaba.** Los runs `42895529340` (push) y `42895560420` (PR) sobre `46e8ff1` dejan `Frontend`, `Risk` y `Prevention` en verde y solo `Backend integration` en rojo, y dentro de él un único job, `compose`. El paso que falla es `docker compose up -d --build`, y el mensaje es de Compose, no del servicio:
 
-```
+```text
 dependency failed to start: container firewatch-inference-1 is unhealthy
 ```
 
 La causa no está en ese mensaje sino en el log del contenedor, que solo imprime el paso `Migration diagnostics on failure`:
 
-```
+```text
 {"level":"ERROR","msg":"service_stopped","error":"TLS_CERT_FILE is required outside development: set TLS_CERT_FILE and TLS_KEY_FILE, or run with APP_ENV=development for plaintext"}
 ```
 
@@ -274,3 +274,28 @@ La causa no está en ese mensaje sino en el log del contenedor, que solo imprime
 **Por qué no lo cazó nada.** El defecto llegó a `main` porque ninguna prueba miraba el cableado de entorno de Compose: el guard tiene pruebas propias y el arranque tiene su smoke, pero ninguno nota que un servicio nunca recibe la variable. `backend/scripts/test_ci_migration.py` gana `TlsGuardEnvironmentTest`, que deriva del código la lista de servicios con el guard y exige que cada uno reciba `development`, sea en su propio bloque o por el ancla. Corre en el workflow antes de `docker compose up`, sin daemon. Se escribió primero y falló nombrando exactamente un servicio, `inference`.
 
 **Verificación.** `python3 -m unittest discover -s scripts -p test_ci_migration.py`: 18 pruebas, todas en verde. `docker compose config --quiet`: válido, y el bloque de `inference` muestra `APP_ENV: development`. El daemon de Docker no estaba corriendo en la máquina donde se hizo el arreglo, así que no hubo prueba con contenedores: la prueba de extremo a extremo es el run de CI sobre esta rama.
+
+**L19 (2026-11-10) — el cuarto rojo no era el mismo defecto: `broker-topology` pierde una carrera contra la API de administración.**
+
+**Lo que reveló el run.** `60befd0` corrige `inference` —el contenedor pasa a `Healthy`— y el mismo commit produce dos resultados: el run de `pull_request` (`42899423939`) en verde y el de `push` (`42899415104`) en rojo. No es una diferencia de código: los dos prueban el mismo árbol. El fallo es otro, y con la prueba de `inference` ya cerrada queda a la vista:
+
+```text
+Container firewatch-broker-topology-1 Error service "broker-topology" didn't complete successfully: exit 1
+```
+
+Su log, otra vez solo visible en `Migration diagnostics on failure`, dice:
+
+```text
+provisioning: exchanges
+provisioning: PUT /exchanges/firewatch/firewatch.jobs.events: request failed
+```
+
+**La carrera.** `request failed` es la rama de transporte, no un código HTTP: la primera petición murió sin respuesta. El healthcheck del broker contesta por el lado AMQP, así que `depends_on: rabbitmq: service_healthy` libera el aprovisionador mientras el plugin de administración todavía está abriendo el 15672. En el run que pasó, el aprovisionador arrancó con el broker ya asentado; en el que falló, arrancó 0,2 s después del verde y chocó. `set -eu` convertía ese tropiezo de arranque en un stack caído.
+
+**La corrección.** `request` reintenta solo el fallo de transporte, acotado a 30 intentos de un segundo, y escribe el motivo de curl una sola vez al agotarlos: un broker lento ya no tumba el `up`, y un broker que nunca responde falla con su razón en vez de con un contador. Un código HTTP no se reintenta nunca —un 409 que significa que el objeto existente discrepa, o un 401 de credenciales, deben fallar al primer intento—. El `DELETE` del exchange legado pasa por el mismo camino, porque corría al final sin red y un broker reiniciado a mitad lo habría tumbado sin decir nada.
+
+**Verificación.** Tres pruebas nuevas en `BrokerTopologyRetryTest`, con un `curl` falso que es el único del `PATH` del hijo y puede rechazar las primeras N conexiones: el reintento llega a buen término, el reintento se detiene en el límite y conserva el motivo, y un 409 falla al primer intento. Contra el script anterior las dos primeras fallan y la tercera pasa, que es lo que debe hacer: fija el comportamiento que ya existía. Las 21 pruebas del archivo quedan en verde.
+
+**Nota de plataforma.** MSYS/git-bash reescribe un valor de entorno que empieza por `/` como ruta de Windows antes de que lo vea el hijo, así que el patrón del 409 se nombra sin barra inicial. Es una trampa del harness, no del script.
+
+**Frontera de la rebanada.** Los cuatro commits de esta rama —`46e8ff1`, `cd10c4f`, `9f51b4f` y este— son una sola rebanada de revisión: la rama `fix/ci-green` y su PR #65. Supera el umbral de 400 líneas contando pruebas y documento, y no se parte porque los tres rojos y su causa comparten una sola verificación: el run de `Backend integration` sobre el mismo workflow. Partirla dejaría tramos cuyo verde no se puede leer sin el anterior.
