@@ -61,18 +61,17 @@ spec:
         - namespaceSelector:
             matchLabels: {kubernetes.io/metadata.name: monitoring}
       ports: [{protocol: TCP, port: 8080}]
+  # The data plane runs in this namespace and carries app.kubernetes.io/name, not
+  # `app`. A namespaceSelector for `firewatch-infra` named a namespace no
+  # manifest creates, so this egress matched nothing at all.
   egress:
     - to:
-        - namespaceSelector:
-            matchLabels: {kubernetes.io/metadata.name: firewatch-infra}
-          podSelector:
-            matchLabels: {app: postgres}
+        - podSelector:
+            matchLabels: {app.kubernetes.io/name: postgres}
       ports: [{protocol: TCP, port: 5432}]
     - to:
-        - namespaceSelector:
-            matchLabels: {kubernetes.io/metadata.name: firewatch-infra}
-          podSelector:
-            matchLabels: {app: rabbitmq}
+        - podSelector:
+            matchLabels: {app.kubernetes.io/name: rabbitmq}
       ports: [{protocol: TCP, port: 5671}]
 ---
 apiVersion: networking.k8s.io/v1
@@ -92,8 +91,43 @@ spec:
   # No broker egress: this service owns one schema and talks to nothing else.
   egress:
     - to:
-        - namespaceSelector:
-            matchLabels: {kubernetes.io/metadata.name: firewatch-infra}
-          podSelector:
-            matchLabels: {app: postgres}
+        - podSelector:
+            matchLabels: {app.kubernetes.io/name: postgres}
       ports: [{protocol: TCP, port: 5432}]
+---
+# Ingress back into the data plane. `default-deny` closes every pod in the
+# namespace, and a policy that only opens egress leaves the destination shut: the
+# store and the broker were reachable by nothing.
+#
+# A bare podSelector matches pods of this policy's own namespace, which is where
+# both StatefulSets live, so the labels here are the ones those pods actually
+# carry. The sources are the application Deployments by their `app` label and
+# nothing else: a migration or topology Job added later must carry one of those
+# labels, or be named here, or it will not reach what it provisions.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: {name: postgres-entry}
+spec:
+  podSelector:
+    matchLabels: {app.kubernetes.io/name: postgres}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchExpressions: [{key: app, operator: In, values: [jobs, risk, prevention]}]
+      ports: [{protocol: TCP, port: 5432}]
+---
+# The broker is reached by the two services that publish or consume; prevention
+# has no broker client and therefore stays out.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: {name: rabbitmq-entry}
+spec:
+  podSelector:
+    matchLabels: {app.kubernetes.io/name: rabbitmq}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchExpressions: [{key: app, operator: In, values: [jobs, risk]}]
+      ports: [{protocol: TCP, port: 5671}]
