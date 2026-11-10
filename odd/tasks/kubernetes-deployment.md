@@ -22,13 +22,13 @@ Requisito externo nuevo: la entrega se monta en Kubernetes. Sustituye el sustrat
 | T4 | RabbitMQ como StatefulSet con persistencia y gestión acotada | S3 | inline | Hecho en `3c7b0b0` |
 | T5 | Jobs de migración en el orden correcto (risk → prevention → jobs) | S3 | inline | Hecho en `dd9a542` — un Job con initContainers secuenciales; contrato ejecutable en `backend/deploy/k8s/tests/render-contract.sh` |
 | T6 | Job que aprovisiona broker e identidades con el script existente | S3 | inline | Hecho en `dd9a542` — el script del repositorio montado desde ConfigMap; la API de administración pasó a TLS 15671 |
-| **T7** | **Deployments de la aplicación contra los secretos reales, sin `replace-before-deploy`** — bloque abierto, partido en nueve unidades T7.1–T7.9; la dependencia de cada una va en su propia celda | S1 | inline | En curso: las nueve unidades están pendientes |
-| T7.1 | **T7.1 — Gateway: TLS de entrada, upstreams HTTPS y CA de confianza.** Superficie disjunta: en paralelo con T7.2–T7.5 | S1 | inline | Pendiente |
-| T7.2 | **T7.2 — jobs: TLS de entrada, AMQP con CA propia y JWKS con CA.** Superficie disjunta: en paralelo con T7.1 y T7.3–T7.5 | S1 | inline | Pendiente |
-| T7.3 | **T7.3 — risk: TLS de entrada, AMQP con CA propia, JWKS y cliente de inferencia con CA.** Superficie disjunta: en paralelo con T7.1, T7.2, T7.4 y T7.5 | S1 | inline | Pendiente |
-| T7.4 | **T7.4 — prevention: TLS de entrada en 8084, JWKS y cliente administrativo del directorio con CA.** Superficie disjunta: en paralelo con T7.1–T7.3 y T7.5 | S1 | inline | Pendiente |
-| T7.5 | **T7.5 — inference: TLS de entrada.** Superficie disjunta: en paralelo con T7.1–T7.4 | S1 | inline | Pendiente |
-| T7.6 | **T7.6 — secretos de runtime y certificados por servicio.** Superficie disjunta: en paralelo con T7.7, T7.8 y con T7.1–T7.5 | S1 | inline | Pendiente |
+| **T7** | **Deployments de la aplicación contra los secretos reales, sin `replace-before-deploy`** — bloque abierto, partido en nueve unidades T7.1–T7.9; la dependencia de cada una va en su propia celda | S1 | inline | En curso: T7.1–T7.6 hechas; quedan T7.7, T7.8 y T7.9 |
+| T7.1 | **T7.1 — Gateway: TLS de entrada, upstreams HTTPS y CA de confianza.** Superficie disjunta: en paralelo con T7.2–T7.5 | S1 | inline | Hecho en `069b418` |
+| T7.2 | **T7.2 — jobs: TLS de entrada, AMQP con CA propia y JWKS con CA.** Superficie disjunta: en paralelo con T7.1 y T7.3–T7.5 | S1 | inline | Hecho en `e8e085f` |
+| T7.3 | **T7.3 — risk: TLS de entrada, AMQP con CA propia, JWKS y cliente de inferencia con CA.** Superficie disjunta: en paralelo con T7.1, T7.2, T7.4 y T7.5 | S1 | inline | Hecho en `b2af3b2` |
+| T7.4 | **T7.4 — prevention: TLS de entrada en 8084, JWKS y cliente administrativo del directorio con CA.** Superficie disjunta: en paralelo con T7.1–T7.3 y T7.5 | S1 | inline | Hecho en `52e943a` |
+| T7.5 | **T7.5 — inference: TLS de entrada.** Superficie disjunta: en paralelo con T7.1–T7.4 | S1 | inline | Hecho en `74145c6` |
+| T7.6 | **T7.6 — secretos de runtime y certificados por servicio.** Superficie disjunta: en paralelo con T7.7, T7.8 y con T7.1–T7.5 | S1 | inline | Hecho en `9f225e2` |
 | T7.7 | **T7.7 — manifiestos de la aplicación.** Superficie disjunta: en paralelo con T7.6, T7.8 y con T7.1–T7.5 | S1 | inline | Pendiente |
 | T7.8 | **T7.8 — Keycloak e inferencia en el clúster.** Superficie disjunta: en paralelo con T7.6, T7.7 y con T7.1–T7.5 | S1 | inline | Pendiente |
 | T7.9 | **T7.9 — contrato de render ampliado.** Va al final: comprueba el resultado de todas las unidades, así que no se ejecuta en paralelo con ninguna | S1 | inline | Pendiente |
@@ -133,3 +133,85 @@ La B se apila sobre la A: un PR para la A y otro para la B, y la B no se abre ha
 **L12 (2026-11-10) — corrección al contrato de L10: `AMQP_URL` en los secretos de runtime.**
 
 L10 fijó `DATABASE_URL` como única clave de `jobs-runtime`, `risk-runtime` y `prevention-runtime`, y omitió `AMQP_URL`. La tabla de secretos de `backend/deploy/k8s/README.md` sí la declaraba para `jobs` y `risk`, y ambos procesos la leen al arrancar (`backend/services/{jobs,risk}/cmd/server/transport.go`): el arranque se detiene sin ella (`backend/services/jobs/cmd/server/main.go:121`, `backend/services/risk/cmd/server/main.go:119`), así que los pods habrían arrancado sin broker y sin servir. La clave entra ahora en esos dos secretos y solo en ellos —`prevention` no declara cola ni cliente de broker (`backend/services/prevention/cmd/server/main.go:194`)— como `amqps://` sobre 5671, con las credenciales que `bootstrap-secrets.sh` ya guarda en `broker-credentials` (`RABBITMQ_JOBS_PASSWORD` y `RABBITMQ_RISK_PASSWORD`, releídas del Secret para que la URL nombre la contraseña que el broker tiene y no la que generó esa ejecución): usuarios `firewatch-jobs` y `firewatch-risk` y vhost `firewatch`, los que provisiona `deploy/local/rabbitmq-topology.sh`; host `rabbitmq` y 5671, el Service y su único listener AMQP en `base/rabbitmq.yaml` (`RABBITMQ_DEFAULT_VHOST: firewatch`, `listeners.ssl.default = 5671`). La URL no lleva parámetros de verificación: la CA entra por `TLS_CA_FILE` en el pod, y `requireSecureBrokerURL` rechaza `verify=verify_none`. Lo detectó la unidad T7.6 al ejecutar el script, no una revisión.
+
+**L13 (2026-11-10) — T7.3 y T7.4 cerradas en `b2af3b2` y `52e943a`.**
+
+Una sesión anterior dejó las dos unidades escritas y sin commitear. Esta las cierra en dos commits, uno por servicio: `b2af3b2` para risk y `52e943a` para prevention, sobre la superficie que L10 asignó a cada una y sin tocar la de ninguna otra unidad.
+
+**Verificación, medida.** `go test -p 1 ./...` en risk: 12 paquetes `ok`, 0 `FAIL`; en prevention: 8 paquetes `ok`, 0 `FAIL`. Ambas suites se repitieron con `-count=1` para que ninguna respuesta viniera de la caché, con el mismo resultado. `gofmt -l` limpio en los 16 archivos tocados. Los handshakes de los tests son reales —`tls.Server` en loopback y `httptest.StartTLS`—, no stubs: lo que se comprueba es el protocolo, no una función que dice haber hecho TLS.
+
+**Rebanada de entrega.** «Rebanada C — cargas de trabajo con TLS, servicios risk y prevention»: `e8e085f..52e943a`, dos commits, uno por servicio. La rama acumula ya 13 commits y unas 4.300 líneas autoradas desde `main`, muy por encima de la rebanada de ~400 que fija el protocolo de revisión, así que la siguiente unidad del frente no empieza sin aplicar la estrategia de entrega que ya decidió L11: PR encadenado o revisión por rebanada.
+
+**Tres hallazgos menores de la revisión independiente, registrados y sin corregir.** Ninguno bloquea esta entrega y ninguno abre una vía insegura en el despliegue; quedan como tarea de un pase posterior:
+
+1. `backend/services/prevention/internal/directory/directory.go` — si la segunda lectura del bundle falla, `New` ignora el error y deja las raíces del sistema, aunque su propio comentario dice lo contrario; y `TestAnUnloadableTLSCAFileDoesNotBecomeATrustAnchor` comprueba `Transport == nil`, que es justamente el caso contrario al que el comentario promete. En el arranque real no hay vía insegura, porque `run()` aborta antes de construir el cliente.
+2. prevention no tiene ningún handshake positivo, ni para el listener ni para JWKS: el listener solo se prueba con un certificado inexistente, y el test de JWKS levanta un servidor TLS al que nunca le hace una petición.
+3. Los call sites de `run()` no están cubiertos en ninguno de los dos servicios —ni en `jobs` desde `e8e085f`—: quitar el pool camino de un cliente deja la suite en verde. Los helpers y los handshakes sí están cubiertos.
+
+**L14 (2026-11-10) — estrategia de entrega: `stacked-to-main`, decidida y registrada; los PRs no están publicados.**
+
+**Decisión del responsable: `stacked-to-main`,** tras una sola pasada de troceado. Siete rebanadas contiguas, en orden, cada una en su propio PR contra `main` (`babf7d3`), revisables y reversibles por separado. Contiguas significa que no se reescribe el historial: cada commit pertenece a exactamente una rebanada y la frontera entre dos rebanadas es un SHA que ya existe. El plan completo —tabla de las siete, diagrama de dependencias y regla de mecanización— queda en «Plan de entrega (stacked-to-main)».
+
+**Cuatro rebanadas superan la guía de ~400 líneas y no se trocean más: la 3, la 5, la 6 y la 7** —527, 874, 1.079 y 557 líneas—. Cada una es un comportamiento completo, un servicio que sirve TLS y confía en la CA interna, y partirla obligaría a partir `main.go` entre dos commits: el estado intermedio dejaría el listener ya cableado y los clientes todavía sin CA, un servicio que arranca y no puede hablar con nadie. El corte por comportamiento se sostiene; el corte por línea, en esas cuatro, no.
+
+**Publicar los PRs queda pendiente de autorización del responsable.** Se registra el plan, no se abre nada: `push`, creación de PR y merge no son parte de la autorización de implementación, igual que quedó escrito en L11.
+
+**L15 (2026-11-10) — el plan de L14 lo corrigió su propia ejecución tres veces; las ocho rebanadas se publicaron con `patch-id` idéntico.**
+
+**Lo que se creía y lo que pasó.** L14 se escribió antes de publicar nada y quedó falso en tres puntos. El plan de «Plan de entrega (stacked-to-main)» es ya el corregido, y esto es lo que cambió:
+
+1. **Eran ocho rebanadas, no siete.** El cierre documental del frente no cabía dentro del código de prevention: se separó en su propia rebanada, `bf6af99` + `73611a7`, 2 commits y 67 líneas autoradas (39 + 28), publicada como PR 8. La 7 queda con lo que de verdad entrega: prevention sirviendo TLS, `52e943a` y sus 557 líneas.
+2. **La rebanada 4 no aplica sobre `main`.** Su parche, `9f225e2`, reescribe `backend/deploy/k8s/bootstrap-secrets.sh`, que `dd9a542` —rebanada 1— ya había modificado. Su base real es la rama del PR 1, `eede268`, y el PR 4 se abrió contra esa rama.
+3. **La rebanada 8 tampoco aplica sobre `main` ni sobre la rama del PR 1 sola.** Sus dos commits son documentales sobre `odd/tasks/kubernetes-deployment.md`, y `9f225e2` también escribió ahí. Su base real es la rama del PR 4.
+
+**Las rebanadas 2, 3, 5, 6 y 7 sí nacen de `main` limpiamente**, como decía L14: la corrección alcanza al número de rebanadas y a las bases de la 4 y de la 8, no a esas cinco.
+
+**Verificación antes de publicar, rebanada por rebanada.** Cada diff publicado se comparó con el parche original mediante `git patch-id --stable`: las ocho dan el mismo id, así que el diff publicado es idéntico al escrito en el frente y ninguna rebanada perdió ni ganó cambios al cambiar de base.
+
+**PRs publicados.** 1 = #57, 2 = #58, 3 = #59, 4 = #60 (base: rama del PR 1), 5 = #61, 6 = #62, 7 = #63 y 8 = esta rama. Por eso la 📍 desapareció de la tabla: no queda ninguna rebanada pendiente de publicar.
+
+## Plan de entrega (stacked-to-main)
+
+Ocho rebanadas **contiguas**, en este orden, cada una en su propio PR. No se reescribe historial: cada commit pertenece a una sola rebanada y la frontera entre dos rebanadas es un SHA existente. **Las ocho ya están publicadas** —la 1 es #57, la 2 #58, la 3 #59, la 4 #60, la 5 #61, la 6 #62, la 7 #63 y la 8 esta rama—, así que la 📍 que marcaba «la siguiente a publicar» desaparece: no hay siguiente. La columna **Base** dice la rama sobre la que cada rebanada aplica de verdad, que no es `main` en las dos que comparten archivos con una anterior.
+
+| PR | Base | Rango de commits | Commits incluidos | Líneas cambiadas | Unidad de comportamiento que entrega |
+| --- | --- | --- | --- | --- | --- |
+| 1 | `main` | `babf7d3..eede268` | 7 — `dd9a542`, `63a5124`, `51713e5`, `9ae67e1`, `7c94e02`, `54734c9`, `eede268` | 653 | Jobs de migración y aprovisionamiento del broker, con sus dos correcciones y la documentación del sustrato |
+| 2 | `main` | `74145c6` | 1 — `74145c6` | 453 | inference sirve TLS desde el listener dirigido por entorno |
+| 3 | `main` | `069b418` | 1 — `069b418` | 527 | gateway sirve TLS y confía en la CA interna |
+| 4 | rama del PR 1 (`eede268`) | `9f225e2` | 1 — `9f225e2` | 186 | un certificado por servicio y el entorno runtime |
+| 5 | `main` | `e8e085f` | 1 — `e8e085f` | 874 | jobs sirve TLS y confía en la CA para broker y OIDC |
+| 6 | `main` | `b2af3b2` | 1 — `b2af3b2` | 1.079 | risk sirve TLS y confía en la CA para broker, OIDC e inferencia |
+| 7 | `main` | `52e943a` | 1 — `52e943a` | 557 | prevention sirve TLS y confía en la CA para OIDC y el directorio |
+| 8 | rama del PR 4 (`9f225e2`) | `bf6af99` + `73611a7` | 2 — `bf6af99`, `73611a7` | 67 (39 + 28) | cierre documental del frente |
+
+**Dependencias de base.** Sólo cinco rebanadas se pueblan desde `main`: la 2, la 3, la 5, la 6 y la 7. Las otras dos nacen de la rama de una anterior, porque comparten un archivo con ella:
+
+- **4 → rama del PR 1 (`eede268`).** `9f225e2` reescribe `backend/deploy/k8s/bootstrap-secrets.sh`, el mismo script que `dd9a542` modificó en la rebanada 1. Aplicado sobre `main`, ese es el parche que conflictúa.
+- **8 → rama del PR 4 (`9f225e2`).** `bf6af99` y `73611a7` son documentales sobre `odd/tasks/kubernetes-deployment.md`, el mismo archivo que `9f225e2` también toca al dejar escrito el contrato de L10. Ni sobre `main` ni sobre la rama del PR 1 sola aplica limpia: le falta ese contexto.
+
+**Y una arista lógica, que no es de base:** la 5 depende de la 4 porque los servicios necesitan el certificado por servicio que emite el aprovisionador.
+
+```text
+main  babf7d3  (merge-base con el frente)
+ │
+ ├── PR 1  babf7d3..eede268   sustrato: Jobs de migración y aprovisionamiento del broker
+ │    └──(base)──▶ PR 4  9f225e2   certificado por servicio + entorno runtime
+ │         └──(base)──▶ PR 8  bf6af99 + 73611a7   cierre documental del frente
+ │
+ ├── PR 2  74145c6            inference
+ ├── PR 3  069b418            gateway
+ ├── PR 5  e8e085f            jobs (depende de la 4 por comportamiento, no por base)
+ ├── PR 6  b2af3b2            risk
+ └── PR 7  52e943a            prevention
+```
+
+**Mecanización.** Una rama por rebanada, y la base de cada una no la elige el orden de publicación sino el archivo que comparte con una anterior:
+
+- La rebanada 1 es la rama original recortada en su SHA final, `eede268`: se abre tal cual, sin reescribir historial.
+- Las rebanadas 2, 3, 5, 6 y 7 nacen de `main` y se pueblan con `git cherry-pick` de su commit.
+- La rebanada 4 nace de la rama del PR 1: `9f225e2` reescribe `backend/deploy/k8s/bootstrap-secrets.sh`, que `dd9a542` ya había modificado, así que ese parche es el que conflictúa sobre `main`.
+- La rebanada 8 nace de la rama del PR 4: sus dos commits tocan `odd/tasks/kubernetes-deployment.md`, que `9f225e2` también modificó al dejar escrito el contrato de L10, así que ese es el parche que conflictúa sobre `main` y sobre la rama del PR 1 sola.
+- Cada rama encadenada se rebasa sobre `main` cuando la anterior se fusiona: la 4 queda en `main` tras el merge del PR 1 y la 8 tras el del PR 4.
+
+Nada se aplana ni se reordena: la frontera de cada PR sigue siendo un SHA existente. El diff publicado se comparó con el original rebanada por rebanada con `git patch-id --stable`, y las ocho dan el mismo id.
