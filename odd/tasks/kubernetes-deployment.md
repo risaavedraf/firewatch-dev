@@ -156,33 +156,62 @@ Una sesión anterior dejó las dos unidades escritas y sin commitear. Esta las c
 
 **Publicar los PRs queda pendiente de autorización del responsable.** Se registra el plan, no se abre nada: `push`, creación de PR y merge no son parte de la autorización de implementación, igual que quedó escrito en L11.
 
+**L15 (2026-11-10) — el plan de L14 lo corrigió su propia ejecución tres veces; las ocho rebanadas se publicaron con `patch-id` idéntico.**
+
+**Lo que se creía y lo que pasó.** L14 se escribió antes de publicar nada y quedó falso en tres puntos. El plan de «Plan de entrega (stacked-to-main)» es ya el corregido, y esto es lo que cambió:
+
+1. **Eran ocho rebanadas, no siete.** El cierre documental del frente no cabía dentro del código de prevention: se separó en su propia rebanada, `bf6af99` + `73611a7`, 2 commits y 67 líneas autoradas (39 + 28), publicada como PR 8. La 7 queda con lo que de verdad entrega: prevention sirviendo TLS, `52e943a` y sus 557 líneas.
+2. **La rebanada 4 no aplica sobre `main`.** Su parche, `9f225e2`, reescribe `backend/deploy/k8s/bootstrap-secrets.sh`, que `dd9a542` —rebanada 1— ya había modificado. Su base real es la rama del PR 1, `eede268`, y el PR 4 se abrió contra esa rama.
+3. **La rebanada 8 tampoco aplica sobre `main` ni sobre la rama del PR 1 sola.** Sus dos commits son documentales sobre `odd/tasks/kubernetes-deployment.md`, y `9f225e2` también escribió ahí. Su base real es la rama del PR 4.
+
+**Las rebanadas 2, 3, 5, 6 y 7 sí nacen de `main` limpiamente**, como decía L14: la corrección alcanza al número de rebanadas y a las bases de la 4 y de la 8, no a esas cinco.
+
+**Verificación antes de publicar, rebanada por rebanada.** Cada diff publicado se comparó con el parche original mediante `git patch-id --stable`: las ocho dan el mismo id, así que el diff publicado es idéntico al escrito en el frente y ninguna rebanada perdió ni ganó cambios al cambiar de base.
+
+**PRs publicados.** 1 = #57, 2 = #58, 3 = #59, 4 = #60 (base: rama del PR 1), 5 = #61, 6 = #62, 7 = #63 y 8 = esta rama. Por eso la 📍 desapareció de la tabla: no queda ninguna rebanada pendiente de publicar.
+
 ## Plan de entrega (stacked-to-main)
 
-Siete rebanadas **contiguas**, en este orden, cada una en su propio PR contra `main` (`babf7d3`). No se reescribe historial: cada commit pertenece a una sola rebanada y la frontera entre dos rebanadas es un SHA existente. La 📍 marca la siguiente rebanada a publicar.
+Ocho rebanadas **contiguas**, en este orden, cada una en su propio PR. No se reescribe historial: cada commit pertenece a una sola rebanada y la frontera entre dos rebanadas es un SHA existente. **Las ocho ya están publicadas** —la 1 es #57, la 2 #58, la 3 #59, la 4 #60, la 5 #61, la 6 #62, la 7 #63 y la 8 esta rama—, así que la 📍 que marcaba «la siguiente a publicar» desaparece: no hay siguiente. La columna **Base** dice la rama sobre la que cada rebanada aplica de verdad, que no es `main` en las dos que comparten archivos con una anterior.
 
-| PR | Rango de commits | Commits incluidos | Líneas cambiadas | Unidad de comportamiento que entrega |
-| --- | --- | --- | --- | --- |
-| 1 📍 | `babf7d3..eede268` | 7 — `dd9a542`, `63a5124`, `51713e5`, `9ae67e1`, `7c94e02`, `54734c9`, `eede268` | 653 | Jobs de migración y aprovisionamiento del broker, con sus dos correcciones y la documentación del sustrato |
-| 2 | `74145c6` | 1 — `74145c6` | 453 | inference sirve TLS desde el listener dirigido por entorno |
-| 3 | `069b418` | 1 — `069b418` | 527 | gateway sirve TLS y confía en la CA interna |
-| 4 | `9f225e2` | 1 — `9f225e2` | 186 | un certificado por servicio y el entorno runtime |
-| 5 | `e8e085f` | 1 — `e8e085f` | 874 | jobs sirve TLS y confía en la CA para broker y OIDC |
-| 6 | `b2af3b2` | 1 — `b2af3b2` | 1.079 | risk sirve TLS y confía en la CA para broker, OIDC e inferencia |
-| 7 | `52e943a` + `bf6af99` | 2 — `52e943a`, `bf6af99` | 557 | prevention sirve TLS y confía en la CA para OIDC y el directorio, más el cierre documental del frente |
+| PR | Base | Rango de commits | Commits incluidos | Líneas cambiadas | Unidad de comportamiento que entrega |
+| --- | --- | --- | --- | --- | --- |
+| 1 | `main` | `babf7d3..eede268` | 7 — `dd9a542`, `63a5124`, `51713e5`, `9ae67e1`, `7c94e02`, `54734c9`, `eede268` | 653 | Jobs de migración y aprovisionamiento del broker, con sus dos correcciones y la documentación del sustrato |
+| 2 | `main` | `74145c6` | 1 — `74145c6` | 453 | inference sirve TLS desde el listener dirigido por entorno |
+| 3 | `main` | `069b418` | 1 — `069b418` | 527 | gateway sirve TLS y confía en la CA interna |
+| 4 | rama del PR 1 (`eede268`) | `9f225e2` | 1 — `9f225e2` | 186 | un certificado por servicio y el entorno runtime |
+| 5 | `main` | `e8e085f` | 1 — `e8e085f` | 874 | jobs sirve TLS y confía en la CA para broker y OIDC |
+| 6 | `main` | `b2af3b2` | 1 — `b2af3b2` | 1.079 | risk sirve TLS y confía en la CA para broker, OIDC e inferencia |
+| 7 | `main` | `52e943a` | 1 — `52e943a` | 557 | prevention sirve TLS y confía en la CA para OIDC y el directorio |
+| 8 | rama del PR 4 (`9f225e2`) | `bf6af99` + `73611a7` | 2 — `bf6af99`, `73611a7` | 67 (39 + 28) | cierre documental del frente |
 
-**Dependencias.** Las rebanadas 2 a 7 se pueblan desde `main`; el historial de ninguna depende del de otra. La única arista entre rebanadas es lógica, no de commits: la 5 depende de la 4 porque los servicios necesitan el certificado por servicio que emite el aprovisionador.
+**Dependencias de base.** Sólo cinco rebanadas se pueblan desde `main`: la 2, la 3, la 5, la 6 y la 7. Las otras dos nacen de la rama de una anterior, porque comparten un archivo con ella:
+
+- **4 → rama del PR 1 (`eede268`).** `9f225e2` reescribe `backend/deploy/k8s/bootstrap-secrets.sh`, el mismo script que `dd9a542` modificó en la rebanada 1. Aplicado sobre `main`, ese es el parche que conflictúa.
+- **8 → rama del PR 4 (`9f225e2`).** `bf6af99` y `73611a7` son documentales sobre `odd/tasks/kubernetes-deployment.md`, el mismo archivo que `9f225e2` también toca al dejar escrito el contrato de L10. Ni sobre `main` ni sobre la rama del PR 1 sola aplica limpia: le falta ese contexto.
+
+**Y una arista lógica, que no es de base:** la 5 depende de la 4 porque los servicios necesitan el certificado por servicio que emite el aprovisionador.
 
 ```text
 main  babf7d3  (merge-base con el frente)
  │
- ├── PR 1 📍  babf7d3..eede268   sustrato: Jobs de migración y aprovisionamiento del broker
+ ├── PR 1  babf7d3..eede268   sustrato: Jobs de migración y aprovisionamiento del broker
+ │    └──(base)──▶ PR 4  9f225e2   certificado por servicio + entorno runtime
+ │         └──(base)──▶ PR 8  bf6af99 + 73611a7   cierre documental del frente
  │
- ├── PR 2     74145c6            inference
- ├── PR 3     069b418            gateway
- ├── PR 4     9f225e2            certificado por servicio + entorno runtime
- │    └──(lógica)──▶ PR 5  e8e085f   jobs: consume el certificado por servicio de la 4
- ├── PR 6     b2af3b2            risk
- └── PR 7     52e943a + bf6af99  prevention + cierre documental
+ ├── PR 2  74145c6            inference
+ ├── PR 3  069b418            gateway
+ ├── PR 5  e8e085f            jobs (depende de la 4 por comportamiento, no por base)
+ ├── PR 6  b2af3b2            risk
+ └── PR 7  52e943a            prevention
 ```
 
-**Mecanización.** La rebanada 1 es la rama actual recortada en su SHA final, `eede268`: se abre tal cual desde `feat/k8s-bootstrap-jobs`, sin reescribir historial. Las rebanadas 2 a 7 nacen de `main`, una rama por rebanada, y se pueblan con `git cherry-pick` de sus commits **en ese orden**; tras cada merge, las ramas todavía pendientes se rebasan sobre la `main` actualizada. Nada se aplana ni se reordena: la frontera de cada PR sigue siendo un SHA existente.
+**Mecanización.** Una rama por rebanada, y la base de cada una no la elige el orden de publicación sino el archivo que comparte con una anterior:
+
+- La rebanada 1 es la rama original recortada en su SHA final, `eede268`: se abre tal cual, sin reescribir historial.
+- Las rebanadas 2, 3, 5, 6 y 7 nacen de `main` y se pueblan con `git cherry-pick` de su commit.
+- La rebanada 4 nace de la rama del PR 1: `9f225e2` reescribe `backend/deploy/k8s/bootstrap-secrets.sh`, que `dd9a542` ya había modificado, así que ese parche es el que conflictúa sobre `main`.
+- La rebanada 8 nace de la rama del PR 4: sus dos commits tocan `odd/tasks/kubernetes-deployment.md`, que `9f225e2` también modificó al dejar escrito el contrato de L10, así que ese es el parche que conflictúa sobre `main` y sobre la rama del PR 1 sola.
+- Cada rama encadenada se rebasa sobre `main` cuando la anterior se fusiona: la 4 queda en `main` tras el merge del PR 1 y la 8 tras el del PR 4.
+
+Nada se aplana ni se reordena: la frontera de cada PR sigue siendo un SHA existente. El diff publicado se comparó con el original rebanada por rebanada con `git patch-id --stable`, y las ocho dan el mismo id.
