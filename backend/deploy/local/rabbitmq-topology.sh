@@ -18,8 +18,10 @@
 #      the broker on its own authority, not under the service identity; granting
 #      write would let one service forge a dead letter into its peer's queue.
 #
-# The credentials below are read from the environment and never printed. This
-# script's output is safe to paste into evidence.
+# The credentials below are read from the environment and never printed. They also
+# never reach argv: an argument is readable through `ps` for the life of the
+# request, and in any process accounting the node keeps. This script's output is
+# safe to paste into evidence.
 set -eu
 
 api="${RABBITMQ_MANAGEMENT_URL:?required}/api"
@@ -36,6 +38,13 @@ legacy_exchange=firewatch.events
 risk_queue=risk.jobs.v1
 jobs_queue=jobs.results.v1
 
+# Credentials travel through curl's config on stdin. `--config -` reads the same
+# options from a stream, so the user and password are never an argument: only the
+# method, the path and the message body are, and none of those is a secret.
+curl_auth() {
+	printf 'user = "%s:%s"\n' "$admin_user" "$admin_pass" | curl --config - "$@"
+}
+
 # call METHOD PATH BODY [allow_conflict]
 #
 # A 2xx is success. A 409 counts as success only where it means "already there",
@@ -47,7 +56,7 @@ call() {
 	body=$3
 	allow_conflict=${4:-no}
 
-	response=$(curl -sS --connect-timeout 5 --max-time 15 -u "$admin_user:$admin_pass" -X "$method" \
+	response=$(curl_auth -sS --connect-timeout 5 --max-time 15 -X "$method" \
 		-H 'content-type: application/json' --data "$body" \
 		-w '\n%{http_code}' "$api$path") || {
 		echo "provisioning: $method $path: request failed" >&2
@@ -112,7 +121,7 @@ call POST "/bindings/$vhost/e/$dead_exchange/q/$jobs_queue.dead" \
 # duplicate into the same queues for anything publishing to it. A 404 means a
 # previous run already retired it. Queue messages are untouched by this.
 echo "provisioning: retiring the legacy exchange"
-code=$(curl -sS --connect-timeout 5 --max-time 15 -o /dev/null -w '%{http_code}' -u "$admin_user:$admin_pass" \
+code=$(curl_auth -sS --connect-timeout 5 --max-time 15 -o /dev/null -w '%{http_code}' \
 	-X DELETE "$api/exchanges/$vhost/$legacy_exchange")
 case "$code" in
 204 | 404) : ;;
