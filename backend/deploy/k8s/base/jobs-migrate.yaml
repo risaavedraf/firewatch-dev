@@ -29,7 +29,16 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: migrate
+  # The name carries the schema version on purpose. A Job's pod template is
+  # immutable and a completed Job is not re-run by `apply`, so a fixed name plus
+  # the TTL below means a release within the hour either has its migration
+  # skipped (template unchanged, apply is a no-op) or rejected (template changed,
+  # immutable field) -- and the application then rolls out against the old
+  # schema. Naming it after the schema it produces makes a release with new
+  # migrations a different object, while re-applying the same release stays a
+  # no-op, which is the truth: there is nothing new to migrate. The render
+  # contract keeps this name in step with the highest migration in the tree.
+  name: migrate-v14
   namespace: firewatch
   labels:
     app.kubernetes.io/name: migrate
@@ -50,7 +59,8 @@ spec:
   activeDeadlineSeconds: 600
   # The Job's only output is its pod log. An hour keeps that log readable for the
   # operator applying the base, then the Job and its pod are removed; the durable
-  # record of what was applied is the ledger in the database, not the log.
+  # record of what was applied is the ledger in the database, not the log. The
+  # TTL is what stops the generated names from accumulating across applies.
   ttlSecondsAfterFinished: 3600
   template:
     metadata:

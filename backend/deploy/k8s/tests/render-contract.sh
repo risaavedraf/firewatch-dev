@@ -38,8 +38,14 @@ render=$("$K" kustomize base) || fail "kustomize render"
 # --- the two Jobs exist, by the names the documentation uses ------------------
 printf '%s\n' "$render" | grep -q 'name: broker-provision' ||
 	fail "broker-provision Job missing from the render"
-printf '%s\n' "$render" | grep -q '^  name: migrate$' ||
-	fail "migrate Job missing from the render"
+# The Job is named after the schema version it produces. A fixed name survives
+# `apply`, and a completed Job is never re-run, so a release with new migrations
+# would silently skip them. This keeps the name honest with the tree.
+schema_version=$(ls ../../services/risk/migrations/*.sql ../../services/prevention/migrations/*.sql |
+	sed 's|.*/||' | grep -oE '^[0-9]+' | sort -n | tail -1 | sed 's/^0*//')
+[ -n "$schema_version" ] || fail "could not read the migration versions from the tree"
+printf '%s\n' "$render" | grep -q "^  name: migrate-v$schema_version$" ||
+	fail "the migrate Job is not named migrate-v$schema_version: a stale name is not re-run by apply and would skip the new migrations"
 
 # --- migration order is a pod-level guarantee of the API server ----------------
 init_order=$(awk '/^      initContainers:/{f=1;next} /^      containers:/{f=0} f&&/^        - name:/{print $3}' base/jobs-migrate.yaml | tr '\n' ' ')
