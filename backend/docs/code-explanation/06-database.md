@@ -66,7 +66,7 @@ Las ocho versiones siguientes reemplazan los literales congelados por datos:
 
 ## Embed y rama migrate
 
-Los dos `migrations/embed.go` embeben todo su SQL con `//go:embed`: el de jobs ocupa 23 líneas y exporta `Initial`, `Zones`, `SyntheticScenario` y `JobFailureState` ([jobs](../../services/jobs/migrations/embed.go):1-23); el de risk ocupa 65 y guarda nueve archivos en variables privadas, más el tipo `Migration{Version,Name,SQL}` y `All()` ([risk](../../services/risk/migrations/embed.go):1-65), que devuelve la lista ascendente 1-8 y 10 (53-65). Añadir una versión es añadir un archivo y una entrada en esa lista; no existe lectura SQL dinámica del filesystem.
+Los dos `migrations/embed.go` embeben todo su SQL con `//go:embed`: el de jobs ocupa 23 líneas y exporta `Initial`, `Zones`, `SyntheticScenario` y `JobFailureState` ([jobs](../../services/jobs/migrations/embed.go):1-23); el de risk ocupa 76 y guarda once archivos en variables privadas, más el tipo `Migration{Version,Name,SQL}` y `All()` ([risk](../../services/risk/migrations/embed.go):1-76), que devuelve la lista ascendente 1-8, 10, 12 y 13 (62-76). Añadir una versión es añadir un archivo y una entrada en esa lista; no existe lectura SQL dinámica del filesystem. El número no se elige dentro del servicio: el reparto vigente y la próxima versión libre están en [el ledger compartido](../migration-ledger.md).
 
 La rama `migrate` ya **no es idéntica** en los dos servicios: comparte el esqueleto, pero jobs lleva la lista de versiones literal dentro de `main.go` y risk la importa de `migrations.All()` y además lee de una vez el conjunto ya aplicado.
 
@@ -79,7 +79,7 @@ La rama `migrate` ya **no es idéntica** en los dos servicios: comparte el esque
 | jobs `main.go:95-97` · risk `main.go:105-107` | Commit del esquema, antes del seed | Error commit devuelto; no arranca HTTP ni broker |
 | jobs `main.go:98-103` · risk `main.go:108-113` | Seed de zonas desde el asset embebido, en su propia transacción, en cada migrate | Error `seed zones: %w`; log `zones_seeded` con el conteo |
 
-Con argumentos adicionales, incluso `migrate extra`, la condición no se cumple y se intenta el servidor normal. La rama migrate ocurre antes de exigir AMQP/OIDC, pero usa el mismo setup del pool. No hay down migrations ni comparación de checksum del SQL con la versión guardada: `schema_migrations` es la única fuente de lo aplicado. risk no usa las versiones 9 y 11 porque prevention las reserva en esa misma base (`services/prevention/migrations/embed.go`:38-39), y un test fija el orden sin huecos obligatorios (`services/risk/migrations/migrations_test.go`:27-33).
+Con argumentos adicionales, incluso `migrate extra`, la condición no se cumple y se intenta el servidor normal. La rama migrate ocurre antes de exigir AMQP/OIDC, pero usa el mismo setup del pool. No hay down migrations ni comparación de checksum del SQL con la versión guardada: `schema_migrations` es la única fuente de lo aplicado. risk no usa las versiones 9 y 11 porque prevention las reserva en esa misma base (`services/prevention/migrations/embed.go`:37-38), y un test fija el orden sin huecos obligatorios (`services/risk/migrations/migrations_test.go`:43-65); la regla de versiones y la próxima versión libre están en [el ledger compartido](../migration-ledger.md).
 
 ## Inicialización local: roles antes de grants
 

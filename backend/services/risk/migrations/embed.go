@@ -53,9 +53,10 @@ type Migration struct {
 // All returns the known migrations in ascending version order.
 //
 // Adding a migration means adding one file under this directory plus one entry
-// here, with the next version number and a short name. A version is reserved
-// against the integrated tree, not against this module alone: the prevention
-// service records into the same ledger and owns versions 9 and 11. The runner
+// here. The numbering is global across the services that share this ledger, not
+// per module: this service claims 1-8, 10, 12 and 13, the prevention service
+// claims 9, 11 and 14, and the next free number is 15. The rule, the current
+// claims and the guard are in backend/docs/migration-ledger.md. The runner
 // applies whatever is still pending in schema_migrations and does nothing on a
 // database that is already up to date.
 func All() []Migration {

@@ -76,13 +76,13 @@ func TestVersionsDoNotCollideWithPrevention(t *testing.T) {
 	registry := filepath.Join("..", "..", "prevention", "migrations", "embed.go")
 	raw, err := os.ReadFile(registry)
 	if err != nil {
-		// Each service's test image copies only its own service, so the sibling
-		// module is absent inside the container and this guard has nothing to read
-		// there. Skipping is not a weakening: the per-service workflow runs this
-		// package on the runner with the integrated tree checked out, and that is
-		// where the reservation can actually be enforced. A missing file that is not
-		// a container boundary stays a failure.
+		// The two services are separate modules and CI can build one alone, so the
+		// sibling module can be absent from the checkout; the guard then protects the
+		// integrated tree only, which is the declared limit in
+		// backend/docs/migration-ledger.md. A missing file that is not a module
+		// boundary stays a failure.
 		if errors.Is(err, fs.ErrNotExist) {
+			t.Logf("guard skipped: %s was not found in this tree", registry)
 			t.Skipf("prevention's migration registry is not in this tree (%s); the integrated-tree run enforces this guard", registry)
 		}
 		t.Fatalf("read prevention's migration registry %s: %v", registry, err)

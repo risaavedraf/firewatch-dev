@@ -127,9 +127,10 @@ request therefore changes no state and appends no history. The existing
 
 Migration `011_preventive_evidence.sql` adds three append-only tables in the
 `prevention` schema and is registered as version **11** in the shared
-`schema_migrations` ledger: risk owns `001..008` and `010`, this service owns
-`009`, and `011` is the next free version (version `10` belongs to risk's
-`010_models_activation_grant.sql`). Migration `009` is not edited.
+`schema_migrations` ledger, where this service claims `9`, `11` and `14` and risk
+claims `1..8`, `10`, `12` and `13`; the next free version is therefore **15**.
+The rule behind those numbers, and the test that enforces it, live in the
+[shared migration ledger](migration-ledger.md). Migration `009` is not edited.
 
 | Table | Contents |
 | --- | --- |
