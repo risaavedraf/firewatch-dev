@@ -319,3 +319,21 @@ provisioning: PUT /exchanges/firewatch/firewatch.jobs.events: request failed
 **Lo que sigue abierto, y no se disimula.** (1) Los Deployments todavía llevan `firewatch/<servicio>:replace-before-deploy`; en kind se satisfizo cargando la imagen con esa etiqueta literal, pero la sustitución por digests en un overlay es trabajo de entrega pendiente (README paso 1). (2) El realm se aprovisiona fuera de banda. (3) **El tramo ingress→gateway no se ejercitó**: no hay controlador de ingress en kind ni existe el Secret `firewatch-tls`, así que lo verificado ahí es la anotación, no un handshake de borde. (4) `proxy-ssl-verify` sigue apagado por defecto en NGINX: el tramo va cifrado pero no autenticado. (5) Todo esto es un clúster local: el entorno objetivo sigue sin tocarse.
 
 **Frontera de la rebanada.** Los seis commits de `feat/k8s-pr9-app-tls` —`8556c66`, `4ce9b3c`, `2ac11ad`, `fde877c`, `11ae899`, `d5b4053`— son una sola unidad de revisión, con su PR. Pasan de las 400 líneas contando pruebas y documento, y no se parten porque comparten una sola verificación: el mismo `apply` sobre el mismo clúster. Partirlos dejaría tramos cuyo verde no se puede leer sin el anterior.
+
+**L21 (2026-11-10) — estado para retomar en otra sesión.**
+
+**Dónde quedó.** Rama `feat/k8s-pr9-app-tls`, siete commits (`8556c66`, `4ce9b3c`, `2ac11ad`, `fde877c`, `11ae899`, `d5b4053`, `f2994ab` y el documental), árbol limpio. Revisión nativa aprobada y confirmada: linaje `review-705957432076a9cb`, tier `high`, lentes risk + reliability, autoridad quemada, un hallazgo informativo (`R3-001`, `render-contract.sh:118`) que no abre corrección.
+
+**El clúster de evidencia era desechable y se borró.** `kind` no queda corriendo: la evidencia está en L20, no en un pod vivo. Reproducirlo cuesta minutos: crear el clúster, correr el bootstrap con los dos artefactos de Windows del README, cargar las cinco imágenes con la etiqueta `firewatch/<servicio>:replace-before-deploy` y `kubectl apply -k deploy/k8s/base`. El namespace nace con `restricted`, así que cualquier pod de sonda tiene que cumplirla.
+
+**Lo que falta, en orden de dependencia, con el criterio de cada uno.**
+
+1. **Overlay de entrega con digests.** Es la cláusula de T7 que sigue abierta y la única que impide declarar T7 cerrada: hoy los Deployments llevan `replace-before-deploy`. Cierra cuando un overlay fija imágenes por digest y el `base` no necesita sustitución manual.
+2. **Controlador de ingress y el Secret `firewatch-tls`.** Sin eso el tramo borde→gateway no se ejercita; lo verificado es la anotación `backend-protocol: HTTPS`, no un handshake. Cierra cuando una petición atraviesa el ingress hasta el gateway por TLS.
+3. **metrics-server (o equivalente).** Los HPA del `base` fallan con `unable to fetch metrics from resource metrics API` en un clúster sin métricas; hasta que exista, `V1-F-06` no puede observar escalado.
+4. **`proxy-ssl-verify` encendido.** Hoy el tramo ingress→gateway va cifrado pero no autenticado. Necesita que `bootstrap-secrets.sh` emita un Secret con `tls.crt` (la CA interna) y `tls.key` no vacía, que es la forma que exige `nginx.ingress.kubernetes.io/proxy-ssl-secret`; `firewatch-ca` trae solo `ca.crt`, así que no sirve tal cual.
+5. **Aplicación al entorno objetivo (T9 real).** Todo lo de L20 es un clúster local. Cierra cuando exista evidencia del mismo conjunto de comprobaciones en el entorno autorizado.
+
+**Fuera de este frente.** Las acciones de CI siguen apuntando a versiones de Node 20 (`actions/checkout` en los cuatro workflows, `setup-python`, `setup-node`, `setup-go`), y `ubuntu-latest` migra a Ubuntu 26 en octubre de 2026. Es un cambio de entrega, va en su propia rama con su corrida de CI.
+
+**Una advertencia para quien retome.** No lea el verde de un render como despliegue funcionando: el defecto de Keycloak de L20 pasó manifiesto válido, render limpio, contrato en verde y admisión `restricted` sin problema, y solo murió al arrancar el contenedor. Todo lo que se afirme de este frente necesita el mismo tipo de evidencia que L20.
