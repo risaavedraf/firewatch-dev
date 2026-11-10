@@ -125,3 +125,6 @@ spec:
             name: rabbitmq-topology
         # The CA the management certificate is verified against: public material,
         # so it is mounted read-only and nothing else is.
+        - name: ca
+          secret:
+            secretName: firewatch-ca

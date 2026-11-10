@@ -95,6 +95,24 @@ done
 [ "$(grep -c 'drop: \[ALL\]' base/jobs-migrate.yaml)" = 3 ] ||
 	fail "every migration container must drop ALL capabilities"
 
+# --- no container mounts a volume the pod does not define ---------------------
+# The pod spec is rejected at admission when a volumeMount names a volume that
+# does not exist, and kustomize renders that happily. This check exists because
+# exactly that got through once: the CA mount was added without its volume, and
+# the broker Job would never have started.
+for f in base/jobs-migrate.yaml base/broker-provision.yaml; do
+	mounted=$(awk '/- name: /{name=$3; getline nxt; if (nxt ~ /mountPath:/) print name}' "$f" | sort -u)
+	declared=$(awk '/^      volumes:/{v=1;next} v&&/^      [a-z]/{v=0} v&&/^        - name:/{print $3}' "$f" | sort -u)
+	for m in $mounted; do
+		printf '%s\n' "$declared" | grep -qx "$m" ||
+			fail "$f mounts volume '$m' but never declares it"
+	done
+done
+
+# --- the two volumes that carry trust and topology are sourced, not empty ----
+grep -q 'secretName: firewatch-ca' base/broker-provision.yaml ||
+	fail "broker-provision must source its CA from the firewatch-ca Secret"
+
 # --- no credential lives in a manifest ---------------------------------------
 if grep -nEi 'pass(word)?[:=] *[a-z0-9]{6,}|BEGIN ([A-Z]+ )?PRIVATE KEY' \
 	base/jobs-migrate.yaml base/broker-provision.yaml >/dev/null 2>&1; then
