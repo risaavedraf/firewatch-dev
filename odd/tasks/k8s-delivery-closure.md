@@ -1,6 +1,6 @@
 # Cierre de entrega de Kubernetes — overlay, métricas y borde
 
-**Estado:** abierto y en ejecución.
+**Estado:** cerrado en su alcance el 2026-11-11 — T1, T2 y T3 fusionadas (#68, #69, #70). Sigue fuera el pendiente 5 de L21: el entorno objetivo.
 **Origen:** los cinco pendientes que deja L21 de `odd/tasks/kubernetes-deployment.md`, autorizados en bloque en esta sesión. El pendiente 5 (entorno objetivo) no entra: requiere acceso que esta sesión no tiene.
 
 ## Specs

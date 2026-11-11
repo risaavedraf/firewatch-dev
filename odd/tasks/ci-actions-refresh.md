@@ -1,6 +1,6 @@
 # Acciones de CI fuera de Node 20
 
-**Estado:** en ejecución.
+**Estado:** fusionado en `main` (PR #67, `4457d38`), con las ocho corridas de CI en verde.
 **Origen:** el pendiente que L21 de `odd/tasks/kubernetes-deployment.md` deja fuera del frente de Kubernetes, autorizado en esta sesión.
 
 ## Specs
