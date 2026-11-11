@@ -164,6 +164,43 @@ else
 	echo "CA private key written to $ca_key_file (0600, outside the cluster)"
 fi
 
+# --- the trust anchor the Ingress verifies the gateway against -------------
+# base/ingress.yaml turns upstream verification on with
+# `proxy-ssl-verify: 'on'`, names the SAN the gateway certificate carries, and
+# gives the controller this Secret by name. Repackaging the CA is what makes
+# that hop authenticated and not only encrypted: without an anchor the
+# controller verifies the gateway against its own trust store, which has never
+# heard of this CA, and every request through the edge fails.
+#
+# The shape below is the one ingress-nginx v1.15.1 actually reads, determined by
+# installing it and pointing the annotation at candidate Secrets rather than by
+# reading the annotation's documentation. The controller renders
+# `proxy_ssl_trusted_certificate` from the Secret's `ca.crt` and writes it at
+# /etc/ingress-controller/ssl/ca-<namespace>-<name>.pem. It treats `tls.crt`
+# and `tls.key` in the same Secret as a *client* key pair it presents to the
+# upstream: the CA in `tls.crt` with an unrelated `tls.key` was rejected with
+# "certificate and private key does not have a matching public key", and with no
+# `ca.crt` the annotation renders no trusted certificate at all. This hop asks
+# for no client certificate and the gateway requires none, so the Secret carries
+# one key and no key pair.
+#
+# The CA is copied rather than referenced. firewatch-ca would be accepted as-is
+# by this controller version — it carries exactly `ca.crt` — but it is the
+# cluster's distributable trust anchor, read by every workload that verifies an
+# outbound peer, and this is one hop's pin: the single CA the ingress accepts
+# when it authenticates the gateway. Keeping them separate means a later change
+# to firewatch-ca (a rotation bundle, a second CA) needs a deliberate decision
+# about the edge instead of silently widening what the Ingress accepts. The
+# cost is the same rotation rule as every other Secret here: replacing the CA
+# means deleting this Secret too, and until it is re-created verification fails
+# closed when the gateway's certificate changes.
+if exists gateway-upstream-ca; then
+	echo "secret/gateway-upstream-ca already exists, left untouched"
+elif [ -s "$workdir/ca.crt" ]; then
+	"$kubectl_bin" --namespace "$namespace" create secret generic gateway-upstream-ca \
+		--from-file=ca.crt="$workdir/ca.crt"
+fi
+
 # New certificates need the signing key, which the cluster no longer holds. When
 # the local copy is missing the operator supplies it through FIREWATCH_CA_KEY; the
 # existing certificates and the secret are never rewritten here.

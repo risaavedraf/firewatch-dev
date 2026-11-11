@@ -12,6 +12,29 @@ metadata:
     # would be a 502 per request rather than a deployment that will not
     # come up.
     nginx.ingress.kubernetes.io/backend-protocol: 'HTTPS'
+    # Encrypted is not authenticated. `proxy-ssl-verify` defaults to `off`, so
+    # without this the controller completes a TLS handshake with anything that
+    # answers on the Service address and calls the hop secure because it is
+    # encrypted. With it on, NGINX checks the chain and the name below and
+    # fails the request when the certificate does not check out.
+    nginx.ingress.kubernetes.io/proxy-ssl-verify: 'on'
+    # The name NGINX matches against the certificate's subject alternative
+    # names. gateway-tls carries `gateway` (bootstrap-secrets.sh, the
+    # `issue_certificate gateway` line). Without this annotation the name is
+    # not checked at all, so any certificate signed by the trusted CA below
+    # would pass as the gateway — including one issued for another service in
+    # this namespace.
+    nginx.ingress.kubernetes.io/proxy-ssl-name: gateway
+    # The trust anchor that verification above uses, and the only place NGINX
+    # reads one from: there is no separate annotation for it, so turning
+    # verification on without this line checks the gateway against NGINX's own
+    # trust store, which has never heard of the internal CA, and every request
+    # fails at the hop. The value must be namespace/name: a bare name fails
+    # `invalid format (namespace/name)`, the controller denies the location,
+    # and every request through it answers 503. The Secret carries `ca.crt`,
+    # the key the controller renders as proxy_ssl_trusted_certificate;
+    # bootstrap-secrets.sh writes it.
+    nginx.ingress.kubernetes.io/proxy-ssl-secret: firewatch/gateway-upstream-ca
     # Edge TLS is the one boundary where traffic still arrives in clear, so
     # the redirect is what keeps http:// from being served at all. The
     # certificate is the operator-supplied `firewatch-tls` Secret named

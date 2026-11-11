@@ -114,6 +114,48 @@ service_port() {
 	'
 }
 
+# The Secret an Ingress trusts for its hop to a backend, as the namespace/name
+# the controller requires it to be. Inside the Ingress document, because the
+# annotation and the Secret it names are one claim.
+proxy_ssl_secret() {
+	printf '%s\n' "$1" | awk '
+		/nginx\.ingress\.kubernetes\.io\/proxy-ssl-secret:/ {
+			v = $0
+			sub(/.*proxy-ssl-secret: */, "", v)
+			gsub(/"/, "", v)
+			print v
+			exit
+		}
+	'
+}
+
+# What upstream verification is missing from this Ingress document, one defect
+# per line and nothing when the two annotations agree. It takes the document as
+# its argument rather than the file, so the mutation at the bottom of this
+# section asks the same question of a deliberately broken copy.
+upstream_verify_defects() {
+	printf '%s\n' "$1" | awk '
+		/nginx\.ingress\.kubernetes\.io\/proxy-ssl-verify:/ {
+			v = $0
+			sub(/.*proxy-ssl-verify: */, "", v)
+			gsub(/"/, "", v)
+			verify = v
+		}
+		/nginx\.ingress\.kubernetes\.io\/proxy-ssl-name:/ {
+			v = $0
+			sub(/.*proxy-ssl-name: */, "", v)
+			gsub(/"/, "", v)
+			name = v
+		}
+		END {
+			if (verify != "on")
+				printf "proxy-ssl-verify is \"%s\", not \"on\"\n", (verify == "" ? "absent" : verify)
+			if (name != "gateway")
+				printf "proxy-ssl-name is \"%s\", not the SAN the gateway certificate carries\n", (name == "" ? "absent" : name)
+		}
+	'
+}
+
 # The shape all six TLS pods share: the container port is named `https`, no
 # probe addresses another port in clear, and the certificate directory is
 # mounted where the variables point. Six call sites, one failure to name.
@@ -415,6 +457,71 @@ ing=$(doc Ingress firewatch)
 [ -n "$ing" ] || fail "the Ingress is missing from the render"
 printf '%s\n' "$ing" | grep -q '^ *nginx.ingress.kubernetes.io/backend-protocol: HTTPS$' ||
 	fail "the Ingress does not declare backend-protocol HTTPS: NGINX would proxy the gateway's TLS port in plaintext"
+
+# --- and that the hop behind it is authenticated, not only encrypted ----------
+# S4 of odd/tasks/k8s-delivery-closure.md. `backend-protocol: HTTPS` makes the
+# hop encrypted, and encryption alone completes a handshake with whatever
+# answers on the Service address. Three annotations make it authenticated, and
+# each one is load-bearing: verification is off unless switched on; without a
+# name NGINX checks only that the chain ends at the trusted CA, so a certificate
+# issued for another service in this namespace would pass; and without a Secret
+# the trusted certificate is NGINX's own store, where the internal CA is
+# unknown. What a render cannot show is the handshake itself — a manifest that
+# says this is exactly the state S3 was stuck in — so the observed one lives in
+# deploy/k8s/local/README.md and this section only refuses to let the three
+# annotations drift apart or away.
+secret_ref=$(proxy_ssl_secret "$ing")
+case "$secret_ref" in
+*/*) ;;
+*)
+	fail "the Ingress sets proxy-ssl-secret to '$secret_ref', want namespace/name: a bare name is 'invalid format (namespace/name)' to the controller, which denies the location and answers 503"
+	;;
+esac
+verify_defects=$(upstream_verify_defects "$ing" | tr '\n' ' ')
+[ -z "$verify_defects" ] ||
+	fail "the Ingress does not authenticate its hop to the gateway: $verify_defects"
+
+# The anchor is a Secret this repository creates, and the name in the annotation
+# is the contract between the two. A Secret nothing writes is not a render error
+# and not an apply error: the controller logs the missing certificate and serves
+# the request unverified, so the drift is only visible here.
+proxy_ca=${secret_ref#*/}
+# The controller refuses a Secret from another namespace, so the annotation's
+# namespace has to be the Ingress's own: the two are the same object from the
+# API server's point of view, and splitting them is a location denial with no
+# manifest error anywhere.
+ing_namespace=$(printf '%s\n' "$ing" | awk '/^  namespace: /{print $2; exit}')
+[ "${secret_ref%%/*}" = "$ing_namespace" ] ||
+	fail "the Ingress trusts $secret_ref, a Secret in another namespace: the controller denies cross-namespace Secrets and the location would answer 503"
+grep -q "create secret generic $proxy_ca " bootstrap-secrets.sh ||
+	fail "bootstrap-secrets.sh does not create $proxy_ca, the Secret the Ingress trusts: the annotation would render, apply, and authenticate nothing"
+# And the name it verifies has to be one the gateway's certificate carries: the
+# certificate's SANs come from the line that issues it, so the two move or not
+# at all.
+grep -q 'issue_certificate gateway$' bootstrap-secrets.sh ||
+	fail "bootstrap-secrets.sh no longer issues the gateway certificate: proxy-ssl-name would name a SAN nothing presents"
+
+# --- that check is proven, not assumed ---------------------------------------
+# Two mutations, because there are two ways this hop goes unauthenticated: the
+# toggle reads `off`, which is the default the annotation exists to override,
+# and the anchor is a bare name the controller refuses. Both are edits to the
+# Ingress document, which is the input the predicates above read.
+mutated_off=$(printf '%s\n' "$ing" | sed 's/proxy-ssl-verify: "on"/proxy-ssl-verify: "off"/')
+off_defects=$(upstream_verify_defects "$mutated_off" | tr '\n' ' ')
+case "$off_defects" in
+*'proxy-ssl-verify is "off"'*) ;;
+*)
+	fail "turning proxy-ssl-verify off did not trip the verification check (it reported '$off_defects'), so that check reads nothing"
+	;;
+esac
+
+mutated_anchor=$(printf '%s\n' "$ing" | sed 's|proxy-ssl-secret: firewatch/|proxy-ssl-secret: |')
+anchor_ref=$(proxy_ssl_secret "$mutated_anchor")
+case "$anchor_ref" in
+*/*)
+	fail "a bare Secret name did not trip the namespace/name check (it read '$anchor_ref'), so that check reads nothing"
+	;;
+esac
 
 # --- the two new flows are open on both halves -------------------------------
 # default-deny closes every pod, and a policy that opens only egress leaves the
