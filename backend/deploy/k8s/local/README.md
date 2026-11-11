@@ -1,4 +1,10 @@
-# Local cluster: the metrics API the base's HPAs read
+# Local cluster: the addons the base depends on
+
+Two things `base/` assumes and does not install are built here, one section each:
+the aggregated metrics API the HPAs read, below, and the ingress controller plus
+the edge certificate the Ingress serves, under `## The edge`. Both are local
+recipes: nothing under `base/` or `overlays/` mentions either, and a cluster that
+already runs a controller and serves `metrics.k8s.io` ignores this directory.
 
 `deploy/k8s/base/autoscaling.yaml` scales on measured CPU utilisation, and that measurement is not the API server's. It comes from the aggregated `metrics.k8s.io` API, which exists only when something answers it — `metrics-server`, or a hosted equivalent. Without that API an HPA cannot compute a ratio: it reports `ScalingActive=False`, `reason=FailedGetResourceMetric`, message `failed to get cpu utilization: unable to fetch metrics from resource metrics API`, and it never leaves `minReplicas`. A cluster in that state renders the base, admits every pod, passes the render contract, and still cannot show a single scale-out, so the scaling of `V1-F-06` is not observable there. `metrics-server.sh` in this directory installs the API so that observation is possible, and this file records how to repeat it.
 
@@ -103,3 +109,106 @@ ScalingLimited True  TooManyReplicas
 The return trip is evidence too, because step 5 is what makes the observation temporary: at `00:45:42Z`, six minutes and fifteen seconds after the scale-up, the same object logged `Normal SuccessfulRescale New size: 2; reason: All metrics below target`, and `kubectl get deploy gateway` read `2/2` again. That gap is the base's `scaleDown.stabilizationWindowSeconds: 300` counted from the moment the recommendation fell below the pool's size — the load was still running for the first minute of it — plus the controller's own 15-second cycle. Neither window was touched: only the target was, and it read `70` again at the end.
 
 One caveat about reading the events of a young HPA. The same object still carries `FailedGetResourceMetric` warnings from its first two minutes, whose messages are `did not receive metrics for targeted pods (pods might be unready)` and `no metrics returned from resource metrics API`. Those are warm-up, not a missing addon: the APIService answered those calls and simply had no sample for pods that had just started. A cluster with no metrics API at all answers with `unable to fetch metrics from resource metrics API` instead, which is a different sentence and a different fault. The two are not interchangeable evidence.
+
+## The edge: the controller and the certificate the Ingress needs
+
+`base/ingress.yaml` is one Ingress object: it routes `firewatch.example.invalid` to the `gateway` Service and declares the two things that make the hop behind it TLS — `backend-protocol: HTTPS` for the encryption and `proxy-ssl-verify` / `proxy-ssl-name` / `proxy-ssl-secret` for the authentication. Neither dependency is in the base: a controller has to exist for the class the Ingress names, and the certificate Secret has to exist for its `tls` block. `ingress.sh` supplies both on a local cluster.
+
+### Install
+
+```sh
+sh backend/deploy/k8s/local/ingress.sh
+```
+
+It applies ingress-nginx **controller-v1.15.1**, from that release's own kind-flavoured static manifest (`deploy/static/provider/kind/deploy.yaml`), pinned in the script and never `latest`: an unpinned addon gives the handshake a different subject on every rebuild. It then waits for the two admission Jobs and the controller rollout, fails unless `IngressClass nginx` exists, and creates the Secret `base/ingress.yaml` names — `firewatch-tls` — for the host that file declares. Host and Secret name are read from the manifest rather than repeated in the script, so a change there is a change here.
+
+The kind flavour is why the recipe is this one: its controller pod binds `hostPort` 80 and 443 and selects on the node label `ingress-ready=true`. Those are the node ports the cluster maps to the host (`8080` to `80`, `8443` to `443`), which is what makes the edge reachable from the operator's machine instead of only from inside. A cluster created without that label is not something the script fixes quietly: it fails naming the label, because otherwise the controller sits `Pending` and nothing but an unanswered host port would say why.
+
+The edge key pair is generated on this machine at run time and never committed, because a private key in the repository is a key every clone shares. It is self-signed: the host is under the reserved `.invalid` TLD (RFC 2606), no CA will certify it, and `curl --resolve` points the name at the cluster without a DNS entry anywhere. The key is written only inside a `mktemp -d` directory that is removed on exit, and the script prints the Secret's name and the host it covers, never the material. Re-running is safe in the same sense as `bootstrap-secrets.sh`: an existing Secret is left untouched, so rotating the edge certificate means deleting the Secret and running the script again. It also asserts that whatever certificate the Secret holds covers the host the Ingress routes — an operator-supplied certificate for a different name renders, applies, and then fails in the browser.
+
+Two Git Bash details apply here as in `bootstrap-secrets.sh`, and the script handles both instead of documenting them: a native `openssl` cannot open the POSIX path `mktemp` prints, so paths handed to it go through `cygpath -m` when it is there, and MSYS path translation would mangle the `-subj "/CN=..."` argument, so the `openssl` call runs with `MSYS_NO_PATHCONV=1`.
+
+### Reproduce the handshake
+
+The Ingress is applied with the rest of the render, not by this script — the controller has to exist first, so this is the order:
+
+```sh
+sh backend/deploy/k8s/local/ingress.sh
+kubectl -n firewatch apply -f backend/deploy/k8s/base/ingress.yaml
+
+# the edge, with TLS details
+curl -vk --resolve firewatch.example.invalid:8443:127.0.0.1 \
+  https://firewatch.example.invalid:8443/v1/jobs
+echo | openssl s_client -connect 127.0.0.1:8443 \
+  -servername firewatch.example.invalid 2>/dev/null |
+  openssl x509 -noout -subject -issuer -ext subjectAltName
+```
+
+A `401` is the passing outcome, and the body says whose it is:
+
+```text
+HTTP/1.1 401 Unauthorized
+Content-Type: application/json
+{"code":"unauthorized","request_id":"f9d1c4cc-dc91-4b24-a115-51f0916670e8"}
+```
+
+Nothing answered that before the gateway's auth middleware ran, so the request crossed both hops; a failed edge, a refused upstream or a plaintext proxy would each have produced something else (no response at the edge, a `502` from NGINX, a reset). The controller's access log names the upstream that answered, and that is the second half of the same claim:
+
+```text
+172.24.0.1 - - [11/Nov/2026:01:21:19 +0000] "GET /v1/jobs HTTP/1.1" 401 76 "-" "curl/8.7.1" 100 0.003 [firewatch-gateway-8080] [] 10.244.0.12:8080 76 0.003 401 e275dcf1eaff681fb739f01862b382b2
+```
+
+### What each hop does, and what the first observation was missing
+
+The edge terminates TLS with the `firewatch-tls` Secret: `openssl s_client` reports `subject=CN=firewatch.example.invalid`, `issuer=CN=firewatch.example.invalid`, `X509v3 Subject Alternative Name: DNS:firewatch.example.invalid`, `TLSv1.3`, and `Verify return code: 18 (self-signed certificate)`, which is the expected result for a self-signed certificate nothing has been told to trust.
+
+The hop NGINX makes to the gateway is the one S3 left unobserved. Before these annotations the rendered configuration had `proxy_pass https://upstream_balancer` and nothing else about that hop except `proxy_ssl_session_reuse on`: encrypted, and accepting whatever certificate answered on the Service address. With them it reads:
+
+```text
+# PEM sha: 2cef5f1b1d144ecd5ffeac28cfa1639477fe01cd
+proxy_ssl_trusted_certificate           /etc/ingress-controller/ssl/ca-firewatch-gateway-upstream-ca.pem;
+proxy_ssl_verify                        on;
+proxy_ssl_verify_depth                  1;
+proxy_ssl_name                          gateway;
+proxy_ssl_server_name                   off;
+```
+
+`proxy_ssl_server_name off` is the template's default and not a defect: `proxy_ssl_name` is what verification compares against the certificate's SANs, and no SNI is needed for a Service address that serves one certificate.
+
+### The Secret key shape `proxy-ssl-secret` reads, as observed
+
+The annotation's documentation describes a Secret with `tls.crt`, `tls.key` and `ca.crt`, and a first reading of S4 expected the internal CA in `tls.crt` with any non-empty `tls.key`. The controller does not work that way, and this was measured by pointing the annotation at candidate Secrets instead of trusting the description. Cluster `kind-firewatch-verify`, controller v1.15.1:
+
+- A Secret with `tls.crt` = the CA and `tls.key` = an unrelated generated key is **rejected**:
+
+  ```text
+  W... backend_ssl.go:47] Error obtaining X.509 certificate: unexpected error creating SSL Cert: certificate and private key does not have a matching public key: tls: private key does not match public key
+  E... annotations.go:216] "error reading Ingress annotation" err="error obtaining certificate: local SSL certificate firewatch/edge-probe-tls was not found" name="ProxySSL" ingress="firewatch/firewatch"
+  E... Warning reason: 'AnnotationParsingFailed' Error parsing annotations: error obtaining certificate: local SSL certificate firewatch/edge-probe-tls was not found
+  ```
+
+  The whole `ProxySSL` block is then dropped from the render, so the hop silently goes back to unverified — a misconfigured anchor fails open, not closed. With `tls.crt` set to the CA and a *matching* `tls.key` it would instead be presented as a client certificate, which this hop does not use and the gateway does not ask for.
+
+- A Secret with **`ca.crt` only** is accepted, and the controller writes that file at `/etc/ingress-controller/ssl/ca-<namespace>-<name>.pem` and renders `proxy_ssl_trusted_certificate` from it (the fingerprint of the written file equals the Secret's `ca.crt`). `tls.crt` and `tls.key` are optional and are read as the client pair, not as the anchor.
+
+- A **bare Secret name** in the annotation is not accepted at all: the annotation fails to parse — `AnnotationParsingFailed Error parsing annotations: location denied, reason: invalid format (namespace/name) found in 'gateway-upstream-ca'` — no `proxy_ssl_trusted_certificate` is rendered, and the location answers `503` instead of reaching the gateway. `namespace/name` is the only form that works, which is why the annotation in `base/ingress.yaml` spells the namespace out even though the Ingress lives in it.
+
+So the shape is one key, `ca.crt`, and `bootstrap-secrets.sh` creates the Secret that way. It repackages the CA into a dedicated `gateway-upstream-ca` instead of pointing the annotation at `firewatch-ca`. Recorded honestly: this controller version would also accept `firewatch-ca` as-is — it was tried, and the rendered line was `proxy_ssl_trusted_certificate /etc/ingress-controller/ssl/ca-firewatch-firewatch-ca.pem` — so the copy is a pinning decision, not a workaround for a shape the controller refuses. It keeps the edge's trust anchor separate from the CA every workload mounts, so a later change to `firewatch-ca` (a rotation bundle, a second CA) needs a deliberate decision about the edge rather than silently widening what the Ingress accepts. The cost is in `bootstrap-secrets.sh`'s own rotation rule: replacing the internal CA means deleting and re-creating this Secret too, or verification fails closed when the gateway's certificate changes.
+
+### Enforcement, seen failing
+
+A configured `proxy-ssl-verify: 'on'` that has never rejected anything is not evidence. The anchor was pointed at a CA that did not sign the gateway's certificate (a scratch Secret created for the experiment, deleted afterwards), the annotation patched, and the same request repeated:
+
+```text
+http_code=502
+2026/11/11 01:21:47 [error] 2087#2087: *30902 upstream SSL certificate verify error: (21:unable to verify the first certificate) while SSL handshaking to upstream, client: 172.24.0.1, server: firewatch.example.invalid, request: "GET /v1/jobs HTTP/1.1", upstream: "https://10.244.0.12:8080/v1/jobs", host: "firewatch.example.invalid:8443"
+```
+
+Then the Ingress was re-applied from `base/ingress.yaml`, the scratch Secret deleted, and the same request answered `401` again with `{"code":"unauthorized","request_id":"de6a4226-d593-4573-b265-3b21e3a5abb8"}`, the annotation read back as `firewatch/gateway-upstream-ca`, and the rendered line back at `ca-firewatch-gateway-upstream-ca.pem`. The 502 in the middle is the difference between encryption and authentication: with the wrong anchor the handshake completes and verification refuses it, which is precisely the state the earlier configuration could not reach.
+
+### What these observations do not cover
+
+- Only the pair `gateway` to ingress is exercised, on `/v1/jobs`: the one path an unauthenticated request reaches the gateway's own auth middleware through. No authenticated request, no other path and no browser client was tested.
+- Nothing here measures availability or failover: one node, one controller replica, one gateway pool. The controller's own high-availability configuration is not part of this recipe.
+- The gateway presents no client certificate on this hop, because its listener requires none (no `ClientAuth` in the service's TLS configuration). If that changes, the Secret needs the matching `tls.crt` / `tls.key` pair the controller reads, and the shape note above is where the next person should start.
+- The controller's admission webhook means an Ingress applied while the webhook is unavailable is rejected; that is the addon's behaviour, not something these manifests control.

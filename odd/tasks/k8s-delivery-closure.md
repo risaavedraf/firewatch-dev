@@ -19,9 +19,9 @@
 
 | ID | Tarea | Spec | Rama | Estado |
 | --- | --- | --- | --- | --- |
-| T1 | Overlay de entrega con digests: las imágenes del `base` quedan sustituibles sin editar el `base`, y el contrato de render lo comprueba | S1, S5 | `feat/k8s-delivery-overlay` | pendiente |
-| T2 | metrics-server en el clúster local y evidencia observada de HPA, con receta reproducible | S2, S5 | `feat/k8s-metrics-hpa` | pendiente |
-| T3 | Controlador de ingress, Secret de borde y `proxy-ssl-verify` encendido, con handshake borde→gateway medido | S3, S4, S5 | `feat/k8s-edge-tls` | pendiente |
+| T1 | Overlay de entrega con digests: las imágenes del `base` quedan sustituibles sin editar el `base`, y el contrato de render lo comprueba | S1, S5 | `feat/k8s-delivery-overlay` | Hecho en `1f1978a` — PR #68. Trece pods en `Running` y ambos Jobs en `Complete` sirviendo los cinco digests reales |
+| T2 | metrics-server en el clúster local y evidencia observada de HPA, con receta reproducible | S2, S5 | `feat/k8s-metrics-hpa` | Hecho — PR #69. Escalado de `gateway` de 2 a 6 réplicas con evento `SuccessfulRescale` y vuelta a 2 al restaurar el objetivo |
+| T3 | Controlador de ingress, Secret de borde y `proxy-ssl-verify` encendido, con handshake borde→gateway medido | S3, S4, S5 | `feat/k8s-edge-tls` | Hecho — PR #70. `401` del gateway a través del borde, `proxy_ssl_verify on` en el render, y `502` con ancla equivocada antes de restaurar |
 
 **Dependencia de base.** Las tres ramas son una cadena: T2 nace de T1 y T3 de T2. Comparten `odd/tasks/k8s-delivery-closure.md` y, T2 y T3, el README de despliegue; ramificar las tres desde `main` garantiza conflicto en esos dos archivos. La cadena conserva un documento y un README con historia lineal y cada PR muestra solo su tramo.
 
@@ -60,3 +60,25 @@ kind v1.35, contexto `kind-firewatch-verify`, bootstrap real (15 Secretos y 5 Co
 **Alcance honesto.** Solo se ejercitó `gateway`; los otros tres leen la misma métrica por la misma API y quedan en `TooFewReplicas`, pero su escalado no se observó por separado. Y con el objetivo declarado de 70%, un lazo de `curl` por un `port-forward` no alcanza para seis réplicas: esto prueba la tubería de métricas y el mecanismo de escalado, no que 70% sea alcanzable con tráfico real. `V1-F-06` queda con observación de escalado; la prueba de carga sigue siendo trabajo aparte.
 
 **Una trampa del overlay que conviene tener escrita.** `kubectl apply -k backend/deploy/k8s/overlays/delivery` sobre el árbol commiteado re-apunta los cinco Deployments a `REPLACE_WITH_REGISTRY_HOST`, que ningún nodo puede descargar. El overlay se aplica después de `pin-images.sh`, nunca antes; para tocar solo los HPA, el camino es `-f base/autoscaling.yaml`.
+
+**L6 (2026-11-10) — T3 cerrado, y dos premisas de L21 que el clúster corrigió.**
+
+L21 afirmaba dos cosas sobre el borde que la medición desmiente. Primera: que `firewatch-ca` no sirve tal cual porque solo trae `ca.crt`. Con `controller-v1.15.1` sí sirve: referenciarlo directo renderiza `ca-firewatch-firewatch-ca.pem` y la verificación pasa. Segunda, y más importante: que `proxy-ssl-secret` exige `tls.crt` con la CA y un `tls.key` no vacía. Esa forma se rechaza (`certificate and private key does not have a matching public key`) y, al fallar la anotación, **el bloque `ProxySSL` completo desaparece del render**: la configuración falla abierto, no cerrado, y el tramo queda cifrado pero sin verificar sin que nada lo diga. La forma que el controlador acepta es `ca.crt` sola.
+
+**La decisión.** `bootstrap-secrets.sh` emite `gateway-upstream-ca` con `ca.crt` únicamente, en lugar de referenciar `firewatch-ca`. El ancla queda explícita, nombrada por el Ingress y verificable desde el contrato; el costo está escrito al lado: rotar la CA obliga a recrear ese Secret, y hasta entonces la verificación falla cerrado.
+
+**Lo observado.** Petición desde el host, resolviendo el nombre al puerto mapeado, con el certificado de borde autofirmado (`CN=firewatch.example.invalid`, `SAN DNS:firewatch.example.invalid`, TLSv1.3): `http=401`, que es la respuesta JSON del gateway y no una página de NGINX, así que el tramo llega. En el controlador, línea 354 del render: `proxy_ssl_verify on`, `proxy_ssl_name gateway`, `proxy_ssl_trusted_certificate /etc/ingress-controller/ssl/ca-firewatch-gateway-upstream-ca.pem`. Con un ancla equivocada: `502` y `upstream SSL certificate verify error: (21:unable to verify the first certificate)`; restaurado el manifiesto y borrado el Secret de prueba, la petición volvió a `401`. Un ancla con nombre sin namespace da `503` con `AnnotationParsingFailed`, no un tramo sin verificar.
+
+**Nota de método, porque me pasó a mí.** Mi primer `grep "proxy_ssl_verify on"` sobre el render dio `0` y por un momento pareció que la anotación no tenía efecto. El render alinea la directiva con espacios de columna: el valor estaba ahí. Medir con un patrón que admita alineación, o se lee un cero como un fallo que no existe.
+
+**Fuera de lo observado.** Solo `/v1/jobs`, sin autenticar, un nodo, un controlador y un pool de gateway. No hay afirmación de disponibilidad, failover ni de petición autenticada de extremo a extremo.
+
+**L7 (2026-11-10) — cierre del frente: las tres tareas quedan hechas y una sigue fuera.**
+
+T1, T2 y T3 cierran con evidencia observada en el clúster, no con renders: el overlay sirve los cinco digests y los pods arrancan sobre ellos (PR #68), el HPA escala de 2 a 6 con un `SuccessfulRescale` medido (PR #69), y una petición cruza el borde hasta el gateway por TLS verificado, con el `502` de ancla equivocada como prueba de que la verificación se aplica (PR #70). La rama de CI sale aparte, en #67, con sus ocho workflows en verde.
+
+**Lo que este frente no cierra, y no por falta de trabajo.** El pendiente 5 de L21 —aplicación al entorno objetivo— sigue abierto: todo lo observado es un clúster local. El realm de Keycloak se sigue aprovisionando fuera de banda. Y las cuatro ramas esperan decisión humana de merge: la cadena es #68 → #69 → #70, y #67 va suelta contra `main`.
+
+**Dos premisas de L21 que quedaron corregidas para quien retome.** `firewatch-ca` sí sirve como ancla tal cual, y la forma `tls.crt` + `tls.key` que L21 suponía obligatoria la rechaza el controlador —peor, al rechazarla desaparece el bloque `ProxySSL` completo y el tramo queda sin verificar en silencio—. L6 lo deja medido; no lo vuelvas a deducir de la documentación.
+
+**Un residuo que conviene saber.** El controlador conserva `ca-firewatch-edge-wrong-ca.pem` y `ca-firewatch-edge-probe-ca.pem` en su directorio de certificados, de los experimentos de ancla: los Secret de prueba se borraron y la anotación viva apunta a `firewatch/gateway-upstream-ca`, pero los archivos quedan hasta el siguiente recargue o hasta que se borre el clúster, que es desechable.
