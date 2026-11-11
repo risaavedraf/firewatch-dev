@@ -1,5 +1,5 @@
 #!/usr/bin/env sh
-# Render contract for the Kubernetes base.
+# Render contract for the Kubernetes base and the delivery overlay.
 #
 # What this checks and what it does not: it renders the base with kustomize and
 # asserts the properties the bootstrap Jobs depend on — migration order, the DSN
@@ -13,6 +13,12 @@
 # admission, scheduling, CNI enforcement or any actual handshake: that starts
 # with T9, on a cluster. Everything here is a property of the manifests, so it
 # fails when a manifest drifts and stays silent when a cluster would.
+#
+# It also renders overlays/delivery and asserts that every application image
+# there is pinned by digest while the base still carries its placeholder tag:
+# S1 of odd/tasks/k8s-delivery-closure.md is that sentence, and it is the clause
+# that kept T7 open. Both renders are needed, so kubectl is required even when
+# RENDER_FROM supplies the base render.
 #
 #   sh backend/deploy/k8s/tests/render-contract.sh
 #
@@ -36,20 +42,22 @@ fail() {
 	exit 1
 }
 
+# The client is resolved before the render because the delivery section below
+# renders the overlay too, and no RENDER_FROM can stand in for that render.
+K=${KUBECTL:-kubectl}
+if ! command -v "$K" >/dev/null 2>&1; then
+	if [ -x "/c/Program Files/Docker/Docker/resources/bin/kubectl.exe" ]; then
+		K="/c/Program Files/Docker/Docker/resources/bin/kubectl.exe"
+	else
+		echo "FAIL: no kubectl. Set KUBECTL to its path." >&2
+		exit 1
+	fi
+fi
+
 if [ -n "${RENDER_FROM:-}" ]; then
 	# A caller-supplied render. `cat -` reads stdin, which is the `-` case.
 	render=$(cat "$RENDER_FROM") || fail "cannot read RENDER_FROM=$RENDER_FROM"
 else
-	K=${KUBECTL:-kubectl}
-	if ! command -v "$K" >/dev/null 2>&1; then
-		if [ -x "/c/Program Files/Docker/Docker/resources/bin/kubectl.exe" ]; then
-			K="/c/Program Files/Docker/Docker/resources/bin/kubectl.exe"
-		else
-			echo "FAIL: no kubectl. Set KUBECTL to its path." >&2
-			exit 1
-		fi
-	fi
-
 	render=$("$K" kustomize base) || fail "kustomize render"
 fi
 
@@ -123,6 +131,40 @@ tls_pod() {
 	fi
 	printf '%s\n' "$2" | grep -q '^ *- mountPath: /etc/tls$' ||
 		fail "$1 does not mount its certificate directory at /etc/tls: the paths its variables name are relative to it"
+}
+
+# The application images a render carries, one per line, read from stdin. It
+# selects by repository rather than by tag, so a placeholder tag and a pinned
+# digest both come through and the two checks below can tell them apart. The
+# registry host may carry a port, which is why the tag is stripped after the
+# digest and not the other way round.
+app_images() {
+	awk '
+		/^ *image: / {
+			repo = $2
+			sub(/@.*/, "", repo)
+			sub(/:[^\/]*$/, "", repo)
+			if (repo ~ /(^|\/)firewatch\/(gateway|jobs|risk|prevention|inference)$/)
+				print $2
+		}
+	'
+}
+
+# The application images still carrying the base placeholder tag.
+placeholder_images() {
+	app_images | grep -F ':replace-before-deploy' || true
+}
+
+# The application images that are not pinned by digest.
+unpinned_images() {
+	app_images | grep -vE '^[^ ]+@sha256:[0-9a-f]{64}$' || true
+}
+
+# How many objects a render contains, counted by the one top-level key every
+# document has. A digest pin adds no object and removes none, so an overlay that
+# changes the count is doing something this contract does not describe.
+object_count() {
+	awk '/^kind: / { n++ } END { print n + 0 }'
 }
 
 # --- the two Jobs exist, by the names the documentation uses ------------------
@@ -384,10 +426,137 @@ for policy in risk-to-inference inference-entry oidc-egress identity-entry-and-d
 		fail "NetworkPolicy $policy is missing from the render: one half of the model or the identity flow is closed"
 done
 
+# --- the delivery overlay pins every application image by digest -------------
+# S1 of odd/tasks/k8s-delivery-closure.md is this sentence and nothing more: an
+# overlay pins the images, and the base needs no manual substitution. A digest
+# belongs in the overlay because it names one built artifact rather than a
+# service: pinned in the base, that file would be valid for a single registry and
+# a single build, and every environment would edit the same tracked file to point
+# at its own copy of the same commit.
+delivery=$("$K" kustomize overlays/delivery) ||
+	fail "kustomize render of overlays/delivery: the delivery overlay does not render"
+
+stale=$(printf '%s\n' "$delivery" | placeholder_images | tr '\n' ' ')
+[ -z "$stale" ] ||
+	fail "the delivery render still carries the base placeholder tag: $stale"
+
+# The other end of the same claim: a `newTag` renders an image some registry may
+# serve from a mutable tag tomorrow, and only a digest makes a rollout the same
+# bytes the review approved.
+untagged=$(printf '%s\n' "$delivery" | unpinned_images | tr '\n' ' ')
+[ -z "$untagged" ] ||
+	fail "an application image in the delivery render is not pinned by digest: $untagged"
+
+# The five services are named here rather than derived from the list, because a
+# service that leaves the base and the overlay together would leave the two
+# checks above with nothing to read.
+for svc in gateway jobs risk prevention inference; do
+	printf '%s\n' "$delivery" | app_images | grep -q "/firewatch/$svc@" ||
+		fail "the delivery render carries no $svc image pinned by digest: the overlay does not pin every service the cluster runs"
+done
+
+# The base is the other half of S1: it keeps the placeholder so it stays a
+# template, and the digests live in the overlay. A digest pinned here would
+# satisfy the checks above and destroy the property they exist for.
+base_render=$("$K" kustomize base) || fail "kustomize render of base"
+for svc in gateway jobs risk prevention inference; do
+	printf '%s\n' "$base_render" |
+		grep -q "image: firewatch/$svc:replace-before-deploy" ||
+		fail "the base no longer renders firewatch/$svc:replace-before-deploy: the placeholder is what keeps it a template, and a digest here would name one registry for every environment"
+done
+
+# An overlay pins images; it does not add or drop objects. The base is rendered
+# again above rather than reused: RENDER_FROM may have replaced the first render
+# with a caller's copy, and an object count compared against mutated input proves
+# nothing.
+base_objects=$(printf '%s\n' "$base_render" | object_count)
+delivery_objects=$(printf '%s\n' "$delivery" | object_count)
+[ "$delivery_objects" = "$base_objects" ] ||
+	fail "the delivery render has $delivery_objects objects and the base $base_objects: an image pin must not add or drop one"
+
+# --- those two failures are proven, not assumed ------------------------------
+# An assertion nobody has seen fail is a guess, and the checks above would pass
+# just as happily if they read nothing. So the defects they exist to catch are
+# injected into a scratch copy of the overlay and the same two predicates are
+# asked again. This is the intent of the RENDER_FROM note at the top, for a
+# section whose input has to be re-rendered: the mutation here is a manifest
+# mistake, not a text edit on its output. Each defect is caught by one check and
+# misses the other on purpose — a tag leaves no placeholder to find, and a
+# removed entry leaves the object count intact.
+scratch=$(mktemp -d) || fail "mktemp -d: cannot create the scratch tree"
+trap 'rm -rf "$scratch"' EXIT
+
+# kubectl is a native Windows binary under Git Bash, where mktemp answers with a
+# POSIX path it cannot open (README, "Running the bootstrap on Windows").
+kube_path() {
+	if command -v cygpath >/dev/null 2>&1; then
+		cygpath -m "$1"
+	else
+		printf '%s\n' "$1"
+	fi
+}
+
+# One copy per mutation, with the base at the depth the overlay names:
+# overlays/delivery resolves ../../base.
+scratch_copy() {
+	mkdir -p "$scratch/$1/overlays/delivery" || fail "scratch tree"
+	cp -R base "$scratch/$1/base" || fail "scratch base copy"
+	cp overlays/delivery/kustomization.yaml "$scratch/$1/overlays/delivery/" ||
+		fail "scratch overlay copy"
+}
+
+# Defect one: the gateway entry pins a tag instead of a digest. `newTag` is what
+# an operator reaches for when pasting a release tag, and the folded value below
+# the replaced key has to go with it or the copy would not parse.
+scratch_copy tagged
+awk '
+	/^  - name: firewatch\/gateway$/ { entry = 1; print; next }
+	entry == 1 && /^    digest: / { print "    newTag: latest"; entry = 2; next }
+	entry == 2 && /^      / { entry = 0; next }
+	{ print }
+' overlays/delivery/kustomization.yaml \
+	>"$scratch/tagged/overlays/delivery/kustomization.yaml" ||
+	fail "could not write the tagged-image mutation"
+
+tagged_render=$("$K" kustomize "$(kube_path "$scratch/tagged/overlays/delivery")") ||
+	fail "the tagged-image mutation does not render, so it proves nothing"
+tagged_stale=$(printf '%s\n' "$tagged_render" | placeholder_images | tr '\n' ' ')
+[ -z "$tagged_stale" ] ||
+	fail "the tagged-image mutation also produced a placeholder ('$tagged_stale'), so it no longer isolates the digest check"
+tagged_untagged=$(printf '%s\n' "$tagged_render" | unpinned_images | tr '\n' ' ')
+printf '%s\n' "$tagged_untagged" | grep -q 'firewatch/gateway:latest' ||
+	fail "the digest check did not notice an overlay entry turned back into a tag: it reported '$tagged_untagged', want firewatch/gateway:latest"
+
+# Defect two: one service leaves the overlay's `images` list. Nothing is removed
+# from the render, so the object count is unchanged and only the placeholder says
+# so.
+scratch_copy dropped
+awk '
+	/^  - name: firewatch\/inference$/ { drop = 1; next }
+	drop && /^  - name: / { drop = 0 }
+	drop { next }
+	{ print }
+' overlays/delivery/kustomization.yaml \
+	>"$scratch/dropped/overlays/delivery/kustomization.yaml" ||
+	fail "could not write the dropped-entry mutation"
+
+dropped_render=$("$K" kustomize "$(kube_path "$scratch/dropped/overlays/delivery")") ||
+	fail "the dropped-entry mutation does not render, so it proves nothing"
+dropped_objects=$(printf '%s\n' "$dropped_render" | object_count)
+[ "$dropped_objects" = "$base_objects" ] ||
+	fail "the dropped-entry mutation changed the object count ($dropped_objects, base $base_objects), so it no longer isolates the placeholder check"
+dropped_stale=$(printf '%s\n' "$dropped_render" | placeholder_images | tr '\n' ' ')
+case $dropped_stale in
+*"firewatch/inference:replace-before-deploy"*) ;;
+*)
+	fail "the placeholder check did not notice a service removed from the overlay's images list: it reported '$dropped_stale'"
+	;;
+esac
+
 # --- no credential lives in a manifest ---------------------------------------
 if grep -nEi 'pass(word)?[:=] *[a-z0-9]{6,}|BEGIN ([A-Z]+ )?PRIVATE KEY' \
 	base/jobs-migrate.yaml base/broker-provision.yaml >/dev/null 2>&1; then
 	fail "a literal credential appears in a manifest"
 fi
 
-echo "PASS: render contract holds for the bootstrap Jobs and the application workloads"
+echo "PASS: render contract holds for the bootstrap Jobs, the application workloads and the delivery overlay"
