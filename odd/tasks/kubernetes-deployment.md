@@ -22,7 +22,7 @@ Requisito externo nuevo: la entrega se monta en Kubernetes. Sustituye el sustrat
 | T4 | RabbitMQ como StatefulSet con persistencia y gestión acotada | S3 | inline | Hecho en `3c7b0b0` |
 | T5 | Jobs de migración en el orden correcto (risk → prevention → jobs) | S3 | inline | Hecho en `dd9a542` — un Job con initContainers secuenciales; contrato ejecutable en `backend/deploy/k8s/tests/render-contract.sh` |
 | T6 | Job que aprovisiona broker e identidades con el script existente | S3 | inline | Hecho en `dd9a542` — el script del repositorio montado desde ConfigMap; la API de administración pasó a TLS 15671 |
-| **T7** | **Deployments de la aplicación contra los secretos reales, sin `replace-before-deploy`** — bloque abierto, partido en nueve unidades T7.1–T7.9; la dependencia de cada una va en su propia celda | S1 | inline | T7.1–T7.9 hechas y validadas en kind (L20); queda la sustitución de los tags `replace-before-deploy` por digests en un overlay (README paso 1) |
+| **T7** | **Deployments de la aplicación contra los secretos reales, sin `replace-before-deploy`** — bloque abierto, partido en nueve unidades T7.1–T7.9; la dependencia de cada una va en su propia celda | S1 | inline | T7.1–T7.9 hechas y validadas en kind (L20); cerrada: `deploy/k8s/overlays/delivery` fija los cinco digests (PR #68; ver `odd/tasks/k8s-delivery-closure.md`) |
 | T7.1 | **T7.1 — Gateway: TLS de entrada, upstreams HTTPS y CA de confianza.** Superficie disjunta: en paralelo con T7.2–T7.5 | S1 | inline | Hecho en `300fa29` |
 | T7.2 | **T7.2 — jobs: TLS de entrada, AMQP con CA propia y JWKS con CA.** Superficie disjunta: en paralelo con T7.1 y T7.3–T7.5 | S1 | inline | Hecho en `c42f254` |
 | T7.3 | **T7.3 — risk: TLS de entrada, AMQP con CA propia, JWKS y cliente de inferencia con CA.** Superficie disjunta: en paralelo con T7.1, T7.2, T7.4 y T7.5 | S1 | inline | Hecho en `4e4cd7b` |
@@ -337,3 +337,16 @@ provisioning: PUT /exchanges/firewatch/firewatch.jobs.events: request failed
 **Fuera de este frente.** Las acciones de CI siguen apuntando a versiones de Node 20 (`actions/checkout` en los cuatro workflows, `setup-python`, `setup-node`, `setup-go`), y `ubuntu-latest` migra a Ubuntu 26 en octubre de 2026. Es un cambio de entrega, va en su propia rama con su corrida de CI.
 
 **Una advertencia para quien retome.** No lea el verde de un render como despliegue funcionando: el defecto de Keycloak de L20 pasó manifiesto válido, render limpio, contrato en verde y admisión `restricted` sin problema, y solo murió al arrancar el contenedor. Todo lo que se afirme de este frente necesita el mismo tipo de evidencia que L20.
+
+**L22 (2026-11-11) — los pendientes 1 a 4 de L21 están cerrados, con evidencia y fusionados.**
+
+El detalle completo, lo observado y lo que no se observó están en `odd/tasks/k8s-delivery-closure.md`. En corto:
+
+1. El overlay `deploy/k8s/overlays/delivery` fija los cinco digests y el `base` sigue siendo plantilla; trece pods arrancaron sobre esos digests (PR #68).
+2. El tramo borde→gateway se ejercitó con `controller-v1.15.1`: una petición llega al gateway y devuelve su propio `401`, y un ancla equivocada produce `502` antes de restaurar (PR #70).
+3. `metrics-server` entra por una receta pinneada y el HPA escaló de 2 a 6 con evento medido (PR #69).
+4. `proxy-ssl-verify` necesita `ca.crt` sola, no `tls.crt` con un `tls.key` cualquiera como suponía L21; peor aún, una anotación inválida **borra el bloque `ProxySSL` entero**, así que el tramo queda cifrado y sin verificar en silencio.
+
+**Sin cambios respecto de L21:** el pendiente 5 (entorno objetivo) sigue abierto, el realm se sigue aprovisionando fuera de banda, y `T9`/`T10` siguen en pie.
+
+**Fusiones:** #67 `4457d38`, #68 `0edf263`, #69 `2687ec0`, #70 `638c55e`.

@@ -82,3 +82,11 @@ T1, T2 y T3 cierran con evidencia observada en el clúster, no con renders: el o
 **Dos premisas de L21 que quedaron corregidas para quien retome.** `firewatch-ca` sí sirve como ancla tal cual, y la forma `tls.crt` + `tls.key` que L21 suponía obligatoria la rechaza el controlador —peor, al rechazarla desaparece el bloque `ProxySSL` completo y el tramo queda sin verificar en silencio—. L6 lo deja medido; no lo vuelvas a deducir de la documentación.
 
 **Un residuo que conviene saber.** El controlador conserva `ca-firewatch-edge-wrong-ca.pem` y `ca-firewatch-edge-probe-ca.pem` en su directorio de certificados, de los experimentos de ancla: los Secret de prueba se borraron y la anotación viva apunta a `firewatch/gateway-upstream-ca`, pero los archivos quedan hasta el siguiente recargue o hasta que se borre el clúster, que es desechable.
+
+**L8 (2026-11-11) — fusionado, y qué efecto tiene sobre `v1-produccion.md`.**
+
+Las cuatro ramas entraron a `main` en este orden: #67 `4457d38` (CI), #68 `0edf263` (overlay), #69 `2687ec0` (metrics-server y HPA) y #70 `638c55e` (borde TLS). La cadena se fusionó retargeteando cada PR a `main` después del anterior, así que cada diff publicado fue el de su propia unidad.
+
+**Efecto sobre `odd/tasks/v1-produccion.md`.** `V1-F-06` avanza en la única cláusula que este frente podía tocar: «el escalado del HPA observado en clúster» queda observado, con `gateway` pasando de 2 a 6 réplicas y su evento `SuccessfulRescale`. Las otras dos cláusulas de esa tarea siguen abiertas y no se tocan: el reporte pasa/falla de k6 con `p(95)<500`, `max<2000` y `http_req_failed<0.01`, y el RTO medido en ≤ 15 min. `V1-H-06` y `V1-H-11` no se mueven: las dos piden el entorno autorizado, y lo observado aquí es un clúster local.
+
+**Lo que este frente sigue sin cerrar.** El pendiente 5 de L21 (aplicación al entorno objetivo), el realm de Keycloak aprovisionado fuera de banda, `T9` en su cláusula de entorno y `T10` entero.
