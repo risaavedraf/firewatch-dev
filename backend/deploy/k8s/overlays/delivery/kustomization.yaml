@@ -1,0 +1,50 @@
+# Delivery overlay: the five application images pinned by digest.
+#
+# Nothing here overrides a manifest. The base renders `firewatch/<service>` with
+# the `replace-before-deploy` placeholder tag, which is what lets a fresh clone
+# render before it knows which registry the cluster pulls from, and keeps the
+# base a template instead of one environment's release. This overlay adds the
+# one thing a template cannot carry: the content digest those replicas run.
+#
+# A digest belongs here and not in the base. It names one built artifact rather
+# than a service, so writing it into the base would make that file valid for
+# exactly one build, and every environment would edit the same tracked file to
+# point at its own copy of the same commit. `pin-images.sh` in this directory
+# rewrites the `newName` and `digest` below from an image list, so pinning a
+# release is mechanical and reviewable instead of a hand-edited tag.
+#
+# REPLACE_WITH_REGISTRY_HOST is the single placeholder left. The digests are
+# content digests and do not depend on the host that serves them, so the host is
+# the one value this file cannot derive from the tree; the operator supplies it
+# through the image list. Nothing else in the repository names a registry.
+#
+# Each digest is a folded scalar (`>-`) holding one line. `digest: sha256:...`
+# on one line is 83 columns at this indentation, and the tree keeps to 80
+# (odd/tasks/reconcile-docs-odd-code.md, L11, made the same move for a PromQL
+# expression). The folded scalar renders the same string; do not unwrap it.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: firewatch
+resources:
+  - ../../base
+images:
+  - name: firewatch/gateway
+    newName: REPLACE_WITH_REGISTRY_HOST/firewatch/gateway
+    digest: >-
+      sha256:01d650caaf98f61a3be7a21b82f7c62e49fad993d007917733bb68229a0f262a
+  - name: firewatch/jobs
+    newName: REPLACE_WITH_REGISTRY_HOST/firewatch/jobs
+    digest: >-
+      sha256:4c835d0564f0ba7fd681adebda3112ec2a72089da06ad3fe70aaa5e971ca0c62
+  - name: firewatch/risk
+    newName: REPLACE_WITH_REGISTRY_HOST/firewatch/risk
+    digest: >-
+      sha256:b6da9367f4ee9a6bda31fec17a90565ea69c3593cc49ef18600fc86aac3f605f
+  - name: firewatch/prevention
+    newName: REPLACE_WITH_REGISTRY_HOST/firewatch/prevention
+    digest: >-
+      sha256:56b2433672e2e6fb21e9495b1a7feefb98518fb07de507bf2020c45cb98dfaef
+  - name: firewatch/inference
+    newName: REPLACE_WITH_REGISTRY_HOST/firewatch/inference
+    digest: >-
+      sha256:ece9431256c855506749eb924bd4dad9950c3d84523b11ef02cc60a7367b60d9
