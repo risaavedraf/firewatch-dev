@@ -38,3 +38,15 @@
 **L3 (2026-11-10) — T1 implementado; frontera de la rebanada.** `1f1978a` entrega el overlay, `pin-images.sh`, el contrato ampliado y el README: 460 líneas contadas, sobre el umbral de 400. No se parte: las cuatro piezas son una sola afirmación —el overlay pinea y el base sigue siendo plantilla— y el contrato falla si falta cualquiera de las dos mitades, así que un tramo suelto dejaría un verde que no se puede leer sin el siguiente. El documento y su plan viajan en el commit anterior, `2308bca`.
 
 Los digests del overlay son los del índice OCI de las imágenes que el clúster de evidencia descarga, y no dependen del host que las sirve. Por eso el único valor que el árbol no puede derivar es el host, y queda como `REPLACE_WITH_REGISTRY_HOST` hasta que `pin-images.sh` lo reescribe desde una lista de imágenes.
+
+**L4 (2026-11-10) — T1 validado en el clúster, no en el render.**
+
+kind v1.35, contexto `kind-firewatch-verify`, bootstrap real (15 Secretos y 5 ConfigMaps), un registro local con las cinco imágenes. `pin-images.sh` reescribió host y digests desde una lista, y `kubectl apply -k backend/deploy/k8s/overlays/delivery` desplegó el resultado. Antes del apply se probó la descarga de los cinco digests con `crictl pull` sobre el nodo, para que un digest inválido fallara ahí y no dentro de un pod.
+
+**Lo observado.** Trece pods en `1/1 Running` y ambos Jobs en `Complete`, con `SuccessCriteriaMet=True` y `Complete=True` (`reason=CompletionsReached`). Los seis Deployments en su réplica deseada: gateway 2/2, jobs 2/2, risk 2/2, prevention 2/2, inference 2/2, keycloak 1/1. Cero imágenes con `replace-before-deploy`: los cinco sirven `kind-registry:5000/firewatch/<servicio>@sha256:<digest>`. El overlay quedó idéntico a `HEAD` al terminar la corrida (`git diff --quiet` limpio), así que el pin real vive en la lista de imágenes que pasa el operador.
+
+**Dos hallazgos que la corrida dejó, y que no se disimulan.** (1) `kubectl wait --for=condition=Ready pod --all` no sirve como criterio de aceptación en un namespace con Jobs: el pod de un Job terminado queda `Ready=False` para siempre y el comando sale 1 con el despliegue sano. La lectura correcta es por workload. (2) En un clúster frío los Jobs arrancan antes de que postgres y rabbitmq respondan: `broker-provision` falló una vez con `curl: (7) Failed to connect to rabbitmq port 15671` y `migrate-v14` tres veces con el initContainer `migrate-risk` en `exitCode=1`. Los dos Jobs terminaron `Complete` por reintento, pero ningún manifiesto garantiza ese orden.
+
+**Lo que sigue abierto de S1.** El `base` ya no necesita sustitución manual; el overlay necesita una sola, el host del registro, y es mecánica y revisable. Eso es lo que S1 pedía y lo que queda dicho: no se declara sustitución cero, se declara una sustitución en un solo lugar.
+
+**HPA, para T2.** Las cuatro leen métricas reales (`cpu: 1%/70%` y `4%/70%`), con `Available=True` en el APIService `v1beta1.metrics.k8s.io`. Ninguna llegó a escalar: las cuatro están en `ScalingLimited=True` con `reason=TooFewReplicas`, que es `V1-F-06` todavía sin observación de escalado.
