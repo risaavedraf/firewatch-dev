@@ -1,12 +1,15 @@
 <!--
 FireWatch pull request.
 
-Every PR links an issue that already carries `status:approved`. Check exactly ONE
-box under "PR Type" and apply the matching `type:*` label. Never mark a checklist
-item that no evidence supports: leave it unchecked and say so in "Test Plan".
+Authoring follows the skill flow this repository adopted (skills: branch-pr /
+gentle-ai-branch-pr). Read `odd/PR-CONVENTIONS.md` before opening a PR: it records
+the issue-first policy this template enforces, and why it was adopted.
 
-The conventions this template enforces, and why they were adopted, are recorded
-in `odd/PR-CONVENTIONS.md`.
+The body requires six sections: Linked Issue, PR Type, Summary, Changes, Test Plan,
+Contributor Checklist. Every PR links an issue that already carries
+`status:approved`. Check exactly ONE box under "PR Type" and apply the matching
+`type:*` label. Never mark a checklist item that no evidence supports: leave it
+unchecked and say so in "Test Plan".
 -->
 
 ## Linked Issue
@@ -30,9 +33,14 @@ The issue must carry `status:approved` before this PR is opened.
 
 ## Summary
 
-<!-- One to three bullet points: what changes, and why it needed to. -->
+<!--
+One to three bullet points: what changes and why it had to. Name the behaviour that
+differs after this PR, not the files you touched; the diff already shows the files.
+-->
 
 ## Changes
+
+<!-- One row per changed file or logical group of files. State the change, not the diff. -->
 
 | File | Change |
 | --- | --- |
@@ -41,9 +49,11 @@ The issue must carry `status:approved` before this PR is opened.
 ## Test Plan
 
 <!--
-The exact commands and their observed outcomes, including the exit code where one
-exists. Mark an inapplicable check as inapplicable instead of leaving it blank or
-inventing a run.
+The exact commands you ran and their observed outcomes, including the exit code
+where one exists. The authoritative commands are the ones in the affected service's
+workflow under `.github/workflows/`; quote what you actually ran, not what the
+workflow would have run. Mark an inapplicable check as inapplicable instead of
+leaving it blank or inventing a run.
 -->
 
 ## Contributor Checklist

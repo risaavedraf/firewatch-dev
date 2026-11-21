@@ -1,70 +1,90 @@
-name: Reporte de falla
-description: Reporta una falla en FireWatch con lo necesario para reproducirla.
-title: "[Falla]: "
+# FireWatch bug issue form.
+#
+# The issue-authoring flow (skill: issue-creation) treats this form as the single
+# format authority: it collects the answers of these controls and materializes them
+# as "### <label>" sections. `markdown` blocks are guidance only and are dropped
+# from the materialized body, so every rule that must survive lives in a control
+# (dropdown, textarea, checkboxes) and never in prose.
+#
+# Conventions: odd/PR-CONVENTIONS.md
+name: Bug report
+description: Report a FireWatch defect with enough evidence to reproduce it.
+title: "[Bug]: "
 labels:
   - "type:bug"
 body:
   - type: markdown
     attributes:
       value: |
-        ## Antes de abrir este issue
+        Search open and closed issues before writing. If this defect is already
+        reported, comment there instead of opening a duplicate.
 
-        - **Busca un issue existente.** Revisa los issues abiertos y cerrados antes de escribir. Si la falla ya está reportada, comenta en ese issue en lugar de abrir uno nuevo.
-        - **La aprobación se revisa, no se declara.** Un mantenedor revisa el reporte y aplica `status:approved` cuando queda claro y acotado. Este issue nace sin esa etiqueta.
-        - **El PR llega después.** Según `odd/PR-CONVENTIONS.md`, el PR que implemente este issue debe enlazarlo y el issue debe llevar `status:approved` antes de abrir el PR.
-        - **Esta plantilla no automatiza nada.** No busca duplicados, no aplica etiquetas de estado ni impide crear el issue; solo deja el flujo escrito.
+        Do not publish credentials, personal data, or internal paths.
 
-        Describe la falla con lo mínimo que permita reproducirla. No publiques credenciales, datos personales ni rutas internas.
+        A maintainer applies `status:approved` after review; this issue does not
+        carry it on creation. The implementing PR comes later and must link this
+        issue.
   - type: dropdown
     id: area
     attributes:
-      label: Área afectada
-      description: ¿Qué parte de FireWatch muestra la falla?
+      label: Affected area
+      description: Which part of FireWatch shows the defect?
       options:
         - Frontend
         - API
-        - Datos o modelo
-        - Despliegue
-        - Documentación
-        - Otro
+        - Data or model
+        - Deployment
+        - Documentation
+        - Other
     validations:
       required: true
   - type: textarea
-    id: descripcion
+    id: description
     attributes:
-      label: Descripción de la falla
-      description: ¿Qué ocurrió? Incluye la zona, el lote o la pantalla si aplica.
+      label: What happened
+      description: Describe the defect. Name the zone, batch, or screen when it applies.
     validations:
       required: true
+  - type: textarea
+    id: observed
+    attributes:
+      label: Observed behavior
+      description: What you actually saw. Paste the visible error message or text when there is one.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+      description: What should have happened instead. If you do not know yet, say "unknown" in one line.
+    validations:
+      required: false
   - type: textarea
     id: repro
     attributes:
-      label: Pasos para reproducir
-      description: Enumera los pasos, del primero al último, y lo que se ve en cada uno. Si la falla no es constante, dilo.
+      label: Reproduction steps
+      description: The steps in order, and what appears at each one. If the defect is not consistent yet, say so.
       placeholder: |
         1. ...
         2. ...
         3. ...
     validations:
-      required: true
+      required: false
   - type: textarea
-    id: esperado
+    id: evidence
     attributes:
-      label: Comportamiento esperado
-      description: ¿Qué debería haber ocurrido? Si esperabas un dato que no aparece, nómbralo.
-    validations:
-      required: true
-  - type: textarea
-    id: real
-    attributes:
-      label: Comportamiento observado
-      description: ¿Qué ocurrió en su lugar? Copia el mensaje de error o el texto visible si lo hay.
-    validations:
-      required: true
-  - type: textarea
-    id: contexto
-    attributes:
-      label: Contexto adicional
-      description: "Opcional: versión, navegador, endpoint, variable o cualquier dato que ayude a ubicar la falla."
+      label: Evidence
+      description: "Optional: logs, a screenshot, a request to the endpoint, or the version where you saw it."
     validations:
       required: false
+  - type: checkboxes
+    id: preflight
+    attributes:
+      label: Before opening this report
+      options:
+        - label: I searched open and closed issues and this defect is not already reported.
+          required: true
+        - label: I did not include credentials, personal data, or internal paths.
+          required: true
+        - label: I understand a maintainer applies `status:approved` after review; this issue ships without it.
+          required: true

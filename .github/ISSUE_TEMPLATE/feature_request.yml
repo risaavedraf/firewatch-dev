@@ -1,60 +1,91 @@
-name: Solicitud de funcionalidad
-description: Propón una funcionalidad o mejora para FireWatch y el problema que resuelve.
-title: "[Funcionalidad]: "
+# FireWatch feature request issue form.
+#
+# The issue-authoring flow (skill: issue-creation) treats this form as the single
+# format authority: it collects the answers of these controls and materializes them
+# as "### <label>" sections. `markdown` blocks are guidance only and are dropped
+# from the materialized body, so every rule that must survive lives in a control
+# (dropdown, textarea, checkboxes) and never in prose.
+#
+# Conventions: odd/PR-CONVENTIONS.md
+name: Feature request
+description: Propose a FireWatch capability or improvement and the problem it solves.
+title: "[Feature]: "
 labels:
   - "type:feature"
 body:
   - type: markdown
     attributes:
       value: |
-        ## Antes de abrir este issue
+        Search open and closed issues before writing. If this proposal is already
+        discussed, comment there instead of opening a duplicate.
 
-        - **Busca un issue existente.** Revisa los issues abiertos y cerrados antes de escribir. Si la propuesta ya está discutida, comenta en ese issue en lugar de abrir uno nuevo.
-        - **Primero el problema, después la propuesta.** Explica qué falta o qué resulta incómodo antes de describir la solución; así la revisión puede evaluar el caso y no solo la implementación.
-        - **La aprobación se revisa, no se declara.** Un mantenedor revisa la propuesta y aplica `status:approved` cuando queda clara y acotada. Este issue nace sin esa etiqueta.
-        - **El PR llega después.** Según `odd/PR-CONVENTIONS.md`, el PR que implemente este issue debe enlazarlo y el issue debe llevar `status:approved` antes de abrir el PR.
-        - **Esta plantilla no automatiza nada.** No busca duplicados, no aplica etiquetas de estado ni impide crear el issue; solo deja el flujo escrito.
+        Problem first, proposal second: a reviewer approves the case, not only the
+        implementation.
 
-        No publiques credenciales, datos personales ni rutas internas.
+        Do not publish credentials, personal data, or internal paths.
+
+        A maintainer applies `status:approved` after review; this issue does not
+        carry it on creation. The implementing PR comes later and must link this
+        issue.
   - type: dropdown
     id: area
     attributes:
-      label: Área relacionada
-      description: ¿Dónde debería vivir la mejora?
+      label: Related area
+      description: Where should the improvement live?
       options:
         - Frontend
         - API
-        - Datos o modelo
-        - Despliegue
-        - Documentación
-        - Otro
+        - Data or model
+        - Deployment
+        - Documentation
+        - Other
     validations:
       required: true
   - type: textarea
-    id: problema
+    id: problem
     attributes:
-      label: Problema u oportunidad
-      description: ¿Qué falta o qué resulta incómodo hoy? Describe la situación y a quién afecta.
+      label: Problem or opportunity
+      description: What is missing or painful today, and who does it affect? Describe the situation, not the fix.
     validations:
       required: true
   - type: textarea
-    id: propuesta
+    id: proposal
     attributes:
-      label: Propuesta
-      description: ¿Qué debería hacer FireWatch? Si hay más de una forma, describe la que prefieres.
+      label: Proposal
+      description: What should FireWatch do? If there is more than one option, describe the one you prefer.
     validations:
       required: true
   - type: textarea
-    id: alternativas
+    id: acceptance
     attributes:
-      label: Alternativas consideradas
-      description: ¿Qué otras opciones evaluaste y por qué las descartaste? Si no evaluaste ninguna, dilo.
-    validations:
-      required: true
-  - type: textarea
-    id: contexto
-    attributes:
-      label: Contexto adicional
-      description: "Opcional: enlaces, ejemplos de uso o cualquier detalle que ayude a evaluar la propuesta."
+      label: Acceptance criteria
+      description: >-
+        The observable outcomes that make this done. A maintainer scopes
+        `status:approved` from these; say so if none yet.
     validations:
       required: false
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Which other options did you evaluate, and why did you discard them? Say "none evaluated" if none.
+    validations:
+      required: false
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context
+      description: "Optional: links, usage examples, or any detail that helps evaluate the proposal."
+    validations:
+      required: false
+  - type: checkboxes
+    id: preflight
+    attributes:
+      label: Before opening this proposal
+      options:
+        - label: I searched open and closed issues and this proposal is not already discussed.
+          required: true
+        - label: I did not include credentials, personal data, or internal paths.
+          required: true
+        - label: I understand a maintainer applies `status:approved` after review; this issue ships without it.
+          required: true

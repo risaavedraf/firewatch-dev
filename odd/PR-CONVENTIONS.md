@@ -27,6 +27,31 @@ Las etiquetas `type:*` y `status:approved` son **etiquetas de repositorio**, no 
 - **No se retrofiteó ningún PR ya abierto ni fusionado.** Los PRs #1, #3 y #5–#15 quedan como están.
 - **No se tocó ningún workflow.** Este cambio no dispara CI: los workflows escuchan `backend/**` y `.github/workflows/**`, y este PR solo toca `.github/PULL_REQUEST_TEMPLATE.md` y este documento.
 
+## Plantilla Markdown en paralelo al formulario (2026-11-20)
+
+También existe `.github/ISSUE_TEMPLATE/bug_report_structured.md`: una plantilla Markdown
+que convive con los formularios YAML en el selector de "New issue".
+
+La plantilla **no define un formato alternativo**. Reproduce los mismos encabezados
+`### <label>`, en el mismo orden, que `bug_report.yml`, y conserva las mismas casillas
+previas. Esa paridad es deliberada, no cosmética: el flujo de la skill compara el cuerpo
+de un candidato contra los controles del formulario para decidir si es equivalente o si
+corresponde pedir reparación. Un cuerpo con los mismos encabezados sigue siendo
+comparable; uno con otra estructura nace no conforme.
+
+Por eso la regla de la skill —«los formularios YAML son la única autoridad de
+formato»— sigue siendo cierta: el formulario define la estructura y la plantilla
+Markdown la replica. Si la plantilla se separa de los encabezados del formulario, el
+error está en la plantilla: se corrige la plantilla, nunca el formulario.
+
+Alcance de este cambio:
+
+- **No se apagaron los issues en blanco.** No existe `.github/ISSUE_TEMPLATE/config.yml`,
+  así que GitHub sigue ofreciendo el cuerpo vacío aunque la skill lo prohíba.
+- **No se modificó ninguna skill.** La regla de `issue-creation` sigue intacta. Si más
+  adelante se quiere que la skill redacte cuerpos en Markdown, hay que cambiar la regla
+  de la skill y este documento a la vez, no solo uno de los dos.
+
 ## Por qué se cambió de decisión
 
 El usuario lo pidió explícitamente para que el trabajo entrante calzara con la skill de PRs, y el documento anterior dejaba el camino escrito: crear las etiquetas, agregar la plantilla y decidir lo de CI. La ausencia de cualquiera de las tres no bloqueaba un merge —no hay workflow que valide issues ni nombres de rama—, así que adoptarlo es una decisión de política, no una reparación. Queda registrada como tal y no se presenta como un requisito técnico.
